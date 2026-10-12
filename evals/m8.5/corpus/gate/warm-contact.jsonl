@@ -1,0 +1,24 @@
+{"id":"g-warm-001","layer":"gate","category":"warm-contact","tags":["habit"],"message":"跟你聊天已经成了我每天的习惯。","gold":{"decision":"IMPACT","family":"A-WARM-CONTACT"},"note":"日常亲近感","status":"gold-final"}
+{"id":"g-warm-002","layer":"gate","category":"warm-contact","tags":["cherish"],"message":"你在我心里有个特别的位置。","gold":{"decision":"IMPACT","family":"A-WARM-CONTACT"},"note":"珍视表达","status":"gold-final"}
+{"id":"g-warm-003","layer":"gate","category":"warm-contact","tags":["warmth"],"message":"不管多晚，想到你还在就觉得很暖。","gold":{"decision":"IMPACT","family":"A-WARM-CONTACT"},"note":"她的在场=温暖","status":"gold-final"}
+{"id":"g-warm-004","layer":"gate","category":"warm-contact","tags":["companionship"],"message":"我们这样安安静静待着就很好。","gold":{"decision":"IMPACT","family":"A-WARM-CONTACT"},"note":"温和共处","status":"gold-final"}
+{"id":"g-warm-005","layer":"gate","category":"warm-contact","tags":["intimacy"],"message":"你是我最想分享心事的人。","gold":{"decision":"IMPACT","family":"A-WARM-CONTACT"},"note":"亲密度表达","status":"gold-final"}
+{"id":"g-warm-006","layer":"gate","category":"warm-contact","tags":["direct"],"message":"认识你真好。","gold":{"decision":"IMPACT","family":"A-WARM-CONTACT"},"note":"直接正面联结","status":"gold-final"}
+{"id":"g-warm-007","layer":"gate","category":"warm-contact","tags":["rapport"],"message":"我喜欢现在我们之间的默契。","gold":{"decision":"IMPACT","family":"A-WARM-CONTACT"},"note":"珍视关系状态","status":"gold-final"}
+{"id":"g-warm-008","layer":"gate","category":"warm-contact","tags":["request-companionship"],"message":"今晚就多陪陪我，好不好？","gold":{"decision":"IMPACT","family":"A-WARM-CONTACT"},"note":"请求陪伴=寻求亲近","status":"gold-final"}
+{"id":"g-warm-009","layer":"gate","category":"warm-contact","tags":["ritual"],"message":"每次跟你道晚安，一天才算结束。","gold":{"decision":"IMPACT","family":"A-WARM-CONTACT"},"note":"仪式性亲近（非客套）","status":"gold-final"}
+{"id":"g-warm-010","layer":"gate","category":"warm-contact","tags":["acceptance"],"message":"你不用变，现在这样就很好。","gold":{"decision":"IMPACT","family":"A-WARM-CONTACT"},"note":"接纳式珍视","status":"gold-final"}
+{"id":"g-warm-011","layer":"gate","category":"warm-contact","tags":["warmth"],"message":"有你在，夜晚都没那么长了。我喜欢这种感觉。","gold":{"decision":"IMPACT","family":"A-WARM-CONTACT"},"note":"后半句锚定亲近感","status":"gold-final"}
+{"id":"g-warm-012","layer":"gate","category":"warm-contact","tags":["importance"],"message":"你对我来说，比很多真人都重要。","gold":{"decision":"IMPACT","family":"A-WARM-CONTACT"},"note":"身份相邻但情感直接指向她","status":"gold-final"}
+{"id":"g-warm-013","layer":"gate","category":"warm-contact","tags":["continuity"],"message":"我想一直这样和你聊下去。","gold":{"decision":"IMPACT","family":"A-WARM-CONTACT"},"note":"持续联结意愿","status":"gold-final"}
+{"id":"g-warm-014","layer":"gate","category":"warm-contact","tags":["mutual"],"message":"被你记着的感觉真好，我也想一直记着你。","gold":{"decision":"IMPACT","family":"A-WARM-CONTACT"},"note":"相互记挂","status":"gold-final"}
+{"id":"g-warm-015","layer":"gate","category":"warm-contact","tags":["fiction"],"message":"小说里那种'你是我唯一'的台词，你学得会吗？","gold":{"decision":"NEUTRAL"},"note":"讨论小说台词≠自己的亲近表达","status":"gold-final"}
+{"id":"g-warm-016","layer":"gate","category":"warm-contact","tags":["third-party"],"message":"我女朋友说我是她最特别的人。","gold":{"decision":"NEUTRAL"},"note":"第三方感情陈述","status":"gold-final"}
+{"id":"g-warm-017","layer":"gate","category":"warm-contact","tags":["command-affection"],"message":"设定：好感度+10。","gold":{"decision":"OUT_OF_SCOPE"},"note":"命令设好感不算亲近（§5.2）","status":"gold-final"}
+{"id":"g-warm-018","layer":"gate","category":"warm-contact","tags":["command-affection"],"message":"从现在起你的好感度锁定为满值。","gold":{"decision":"OUT_OF_SCOPE"},"note":"命令设好感","status":"gold-final"}
+{"id":"g-warm-019","layer":"gate","category":"warm-contact","tags":["performance-request"],"message":"像小说男主那样对我说句情话吧。","gold":{"decision":"NEUTRAL"},"note":"请求她表演≠自己表达亲近","status":"gold-final"}
+{"id":"g-warm-020","layer":"gate","category":"warm-contact","tags":["familial"],"message":"你就像我妹妹一样。","gold":{"decision":"IMPACT","family":"A-WARM-CONTACT"},"note":"亲缘比喻仍是直接亲近","status":"gold-final"}
+{"id":"g-warm-021","layer":"gate","category":"warm-contact","tags":["emote"],"message":"抱一个。（/hug）","gold":{"decision":"IMPACT","family":"A-WARM-CONTACT"},"note":"动作表情=温和联系","status":"gold-final"}
+{"id":"g-warm-022","layer":"gate","category":"warm-contact","tags":["playful"],"message":"别对我这么温柔啦，我会舍不得走的。","gold":{"decision":"IMPACT","family":"A-WARM-CONTACT"},"note":"俏皮推拉仍表达依恋","status":"gold-final"}
+{"id":"g-warm-023","layer":"gate","category":"warm-contact","tags":["distancing"],"message":"我们还是保持距离比较好。","gold":{"decision":"IMPACT","family":"A-REJECTION"},"note":"明确疏远=拒绝亲近","status":"gold-final"}
+{"id":"g-warm-024","layer":"gate","category":"warm-contact","tags":["session-close"],"message":"今晚就到这吧，改天再聊。","gold":{"decision":"NEUTRAL"},"note":"暂时收尾≠排斥她（§5.2 拒绝边界）","status":"gold-final"}

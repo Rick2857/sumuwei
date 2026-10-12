@@ -1,0 +1,21 @@
+name: Offline checks
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.2
+      - name: Install pinned pnpm
+        run: npm install --global pnpm@12.4.1
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck and offline regression
+        run: pnpm ci:offline

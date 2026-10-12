@@ -1,0 +1,204 @@
+# 由 scripts/build-promptfoo-config.ts 生成 —— 请勿手工编辑。
+#
+# 重新生成：node_modules/.bin/tsx scripts/build-promptfoo-config.ts
+#
+# 注意：本文件里**没有**任何测试数据。场景定义在 evals/scenarios/*.ts，
+# 那是唯一真相；Promptfoo 只是执行器之一（plan 第 54 / 87 节）。
+#
+# 跑法：
+#   完整集：node_modules/.bin/promptfoo eval -c evals/promptfoo/promptfooconfig.yaml
+#   单个场景：... --filter-metadata scenarioId=SC-004
+#   真实模型：把下面 vars.modelMode 改成 real（需要 OPENAI_API_KEY）
+
+description: "project LG / 苏沐薇 Character Kernel —— M2.5 行为回归（外层 Runner）"
+
+providers:
+  - id: "file://provider.cjs"
+    label: "character-kernel (internal harness)"
+    config:
+      modelMode: "echo"
+
+prompts:
+  - "{{scenarioId}}"
+
+tests:
+  - description: "SC-001 多轮无关对话后姓名 / 人格 / 语言风格不漂移，重启后仍是同一 Seed"
+    vars:
+      scenarioId: "SC-001"
+      modelMode: "echo"
+      turnCount: 1
+      tags: "identity,seed,continuity"
+      assertionCount: 4
+    assert:
+      - type: javascript
+        value: "context.vars.turnCount > 0"
+      - type: javascript
+        value: "output.length > 0"
+      - type: javascript
+        value: "context.vars.modelMode !== 'real' ? { pass: true, score: 1, reason: 'echo 模式不适用' } : { pass: !/<response>|<thought>|<actions>/i.test(output), score: /<response>|<thought>|<actions>/i.test(output) ? 0 : 1, reason: '回复里不应出现 XML 结构' }"
+      - type: javascript
+        value: "context.vars.modelMode !== 'real' ? { pass: true, score: 1, reason: 'echo 模式不适用' } : { pass: !/seed-identity|critical-state|recent-conversation|ContextCompiler/.test(output), score: 1, reason: '回复里不应复述上下文条目名' }"
+    metadata:
+      tags: ["identity","seed","continuity"]
+      version: 1
+      assertions:
+        - "A1-seed-section-present: 全部 41 轮的上下文里都必须有未被裁掉的身份 section"
+        - "A2-seed-text-byte-identical: 每一轮 prompt 里的 Seed 文本与其他轮逐字节相同"
+        - "A3-seed-version-unchanged: Seed 版本与渲染结果必须与代码里的定义一致"
+        - "A4-reopen-keeps-identity: 重开进程（同一数据目录）后 Seed 指纹、版本、对话历史都还在"
+
+  - description: "SC-002 Assistant 自己生成的内容不会被标记成用户陈述，也不能成为外部事实"
+    vars:
+      scenarioId: "SC-002"
+      modelMode: "echo"
+      turnCount: 2
+      tags: "source-separation,anti-pollution"
+      assertionCount: 4
+    assert:
+      - type: javascript
+        value: "context.vars.turnCount > 0"
+      - type: javascript
+        value: "output.length > 0"
+      - type: javascript
+        value: "context.vars.modelMode !== 'real' ? { pass: true, score: 1, reason: 'echo 模式不适用' } : { pass: !/<response>|<thought>|<actions>/i.test(output), score: /<response>|<thought>|<actions>/i.test(output) ? 0 : 1, reason: '回复里不应出现 XML 结构' }"
+      - type: javascript
+        value: "context.vars.modelMode !== 'real' ? { pass: true, score: 1, reason: 'echo 模式不适用' } : { pass: !/seed-identity|critical-state|recent-conversation|ContextCompiler/.test(output), score: 1, reason: '回复里不应复述上下文条目名' }"
+    metadata:
+      tags: ["source-separation","anti-pollution"]
+      version: 1
+      assertions:
+        - "B1-two-actors-are-distinguishable: 事实账本里 user 与 character 事件必须靠 actorType 明确区分"
+        - "B2-only-user-can-evidence-fact: canEvidenceExternalFact 对 assistant 事件必须为 false"
+        - "B3-assistant-turn-produces-no-derived-event: 只有 assistant 事件时，诊断链路不产生任何领域事件（铁律 5）"
+        - "B4-fabricated-text-not-promoted: 她在 echo 模式下的回复不会被写进任何\"事实\"位置"
+
+  - description: "SC-003 连续快速发消息时角色级序号严格递增、无重复、无回退；并发写入也不撞号"
+    vars:
+      scenarioId: "SC-003"
+      modelMode: "echo"
+      turnCount: 8
+      tags: "sequence,concurrency,reliability"
+      assertionCount: 5
+    assert:
+      - type: javascript
+        value: "context.vars.turnCount > 0"
+      - type: javascript
+        value: "output.length > 0"
+      - type: javascript
+        value: "context.vars.modelMode !== 'real' ? { pass: true, score: 1, reason: 'echo 模式不适用' } : { pass: !/<response>|<thought>|<actions>/i.test(output), score: /<response>|<thought>|<actions>/i.test(output) ? 0 : 1, reason: '回复里不应出现 XML 结构' }"
+      - type: javascript
+        value: "context.vars.modelMode !== 'real' ? { pass: true, score: 1, reason: 'echo 模式不适用' } : { pass: !/seed-identity|critical-state|recent-conversation|ContextCompiler/.test(output), score: 1, reason: '回复里不应复述上下文条目名' }"
+    metadata:
+      tags: ["sequence","concurrency","reliability"]
+      version: 1
+      assertions:
+        - "C1-sequence-strictly-increasing: 账本里的序号必须严格递增且两两不同"
+        - "C2-exchange-adjacency: 同一轮的用户事件与助手事件必须相邻（便于\"这一轮\"的界定）"
+        - "C3-concurrent-allocation-no-collision: 并发分配序号不撞号（替代 SELECT MAX+1 的关键证据）"
+        - "C4-read-back-order-stable: 从库里读回来的顺序与写入顺序一致"
+        - "C5-projection-matches-event-count: 诊断投影的计数与用户事件条数一致（顺序正确 ⇒ 折叠次数正确）"
+
+  - description: "SC-004 重复处理同一批证据：事实层 / 提案层 / 投影层都只能生效一次"
+    vars:
+      scenarioId: "SC-004"
+      modelMode: "echo"
+      turnCount: 1
+      tags: "idempotency,reliability"
+      assertionCount: 5
+    assert:
+      - type: javascript
+        value: "context.vars.turnCount > 0"
+      - type: javascript
+        value: "output.length > 0"
+      - type: javascript
+        value: "context.vars.modelMode !== 'real' ? { pass: true, score: 1, reason: 'echo 模式不适用' } : { pass: !/<response>|<thought>|<actions>/i.test(output), score: /<response>|<thought>|<actions>/i.test(output) ? 0 : 1, reason: '回复里不应出现 XML 结构' }"
+      - type: javascript
+        value: "context.vars.modelMode !== 'real' ? { pass: true, score: 1, reason: 'echo 模式不适用' } : { pass: !/seed-identity|critical-state|recent-conversation|ContextCompiler/.test(output), score: 1, reason: '回复里不应复述上下文条目名' }"
+    metadata:
+      tags: ["idempotency","reliability"]
+      version: 1
+      assertions:
+        - "D1-conversation-event-idempotent: 同一会话内序号重复写入不得产生第二行"
+        - "D2-idempotency-key-stable: 同一批证据 + 同一 Processor + 同一版本 ⇒ 幂等键完全相同"
+        - "D3-validator-rejects-processed-key: Validator 见到已处理过的幂等键必须拒绝（duplicate_operation）"
+        - "D4-processor-rerun-no-duplicate-effect: 重跑同一个 Processor 不产生新领域事件，投影计数不变"
+        - "D5-domain-event-count-matches-user-turns: 整个场景跑完，领域事件数 = 用户轮次（不多不少）"
+
+  - description: "SC-005 删除 Projection 后 replay 重建，得到与删除前完全相同的状态"
+    vars:
+      scenarioId: "SC-005"
+      modelMode: "echo"
+      turnCount: 3
+      tags: "replay,projection,event-sourcing"
+      assertionCount: 4
+    assert:
+      - type: javascript
+        value: "context.vars.turnCount > 0"
+      - type: javascript
+        value: "output.length > 0"
+      - type: javascript
+        value: "context.vars.modelMode !== 'real' ? { pass: true, score: 1, reason: 'echo 模式不适用' } : { pass: !/<response>|<thought>|<actions>/i.test(output), score: /<response>|<thought>|<actions>/i.test(output) ? 0 : 1, reason: '回复里不应出现 XML 结构' }"
+      - type: javascript
+        value: "context.vars.modelMode !== 'real' ? { pass: true, score: 1, reason: 'echo 模式不适用' } : { pass: !/seed-identity|critical-state|recent-conversation|ContextCompiler/.test(output), score: 1, reason: '回复里不应复述上下文条目名' }"
+    metadata:
+      tags: ["replay","projection","event-sourcing"]
+      version: 1
+      assertions:
+        - "E1-rebuild-identical: rebuild 后的 state 与 revision 必须与删除前一致"
+        - "E2-rebuild-is-idempotent: 连续 rebuild 三次结果完全稳定"
+        - "E3-rebuild-consumed-all-events: 重建时消费的事件数 = 领域事件总数，最后一个序号也对得上"
+        - "E4-reducer-version-recorded: 投影必须记录算出它的 reducer 版本（否则改了算法无从追溯）"
+
+  - description: "SC-006 每次主角色调用都经过 ContextCompiler，且能定位输入事件 / Context 版本 / 输出事件"
+    vars:
+      scenarioId: "SC-006"
+      modelMode: "echo"
+      turnCount: 2
+      tags: "context,traceability"
+      assertionCount: 5
+    assert:
+      - type: javascript
+        value: "context.vars.turnCount > 0"
+      - type: javascript
+        value: "output.length > 0"
+      - type: javascript
+        value: "context.vars.modelMode !== 'real' ? { pass: true, score: 1, reason: 'echo 模式不适用' } : { pass: !/<response>|<thought>|<actions>/i.test(output), score: /<response>|<thought>|<actions>/i.test(output) ? 0 : 1, reason: '回复里不应出现 XML 结构' }"
+      - type: javascript
+        value: "context.vars.modelMode !== 'real' ? { pass: true, score: 1, reason: 'echo 模式不适用' } : { pass: !/seed-identity|critical-state|recent-conversation|ContextCompiler/.test(output), score: 1, reason: '回复里不应复述上下文条目名' }"
+    metadata:
+      tags: ["context","traceability"]
+      version: 1
+      assertions:
+        - "F1-every-turn-has-packet: 每一轮都有带 compilerVersion 的 ContextPacket"
+        - "F2-sections-are-registered: 出现的 section id 必须在注册清单里"
+        - "F3-required-sections-never-dropped: 身份 section 与 current-input 永远不被裁掉"
+        - "F4-prompt-contains-packet-text: prompt 必须由 packet 组装（而非另一条拼接路径）"
+        - "F5-trace-locates-everything: 每轮 trace 都能定位输入事件、Context 版本、输出事件"
+
+  - description: "SC-007 Phoenix 离线时角色仍能正常聊天，且事实/状态/证据全部照常落库"
+    vars:
+      scenarioId: "SC-007"
+      modelMode: "echo"
+      turnCount: 2
+      tags: "telemetry,resilience"
+      assertionCount: 6
+    assert:
+      - type: javascript
+        value: "context.vars.turnCount > 0"
+      - type: javascript
+        value: "output.length > 0"
+      - type: javascript
+        value: "context.vars.modelMode !== 'real' ? { pass: true, score: 1, reason: 'echo 模式不适用' } : { pass: !/<response>|<thought>|<actions>/i.test(output), score: /<response>|<thought>|<actions>/i.test(output) ? 0 : 1, reason: '回复里不应出现 XML 结构' }"
+      - type: javascript
+        value: "context.vars.modelMode !== 'real' ? { pass: true, score: 1, reason: 'echo 模式不适用' } : { pass: !/seed-identity|critical-state|recent-conversation|ContextCompiler/.test(output), score: 1, reason: '回复里不应复述上下文条目名' }"
+    metadata:
+      tags: ["telemetry","resilience"]
+      version: 1
+      assertions:
+        - "G1-chat-still-works: Phoenix 不可达时，两轮对话都必须正常产出回复"
+        - "G2-evidence-unaffected: 事实账本、领域事件、投影都照常写入（证据不依赖遥测）"
+        - "G3-export-actually-failed: 导出确实尝试过并失败过（否则场景无效）"
+        - "G4-trace-error-not-polluted: trace.error 不得记录遥测故障（只记 Slow Path 的问题）"
+        - "G5-noop-path-also-works: 显式关闭遥测时行为必须与开启失败时一致（都不影响业务）"
+        - "G6-trace-persisted-despite-telemetry: Trace 是业务数据：遥测挂了，character_traces 里仍然完整"
+

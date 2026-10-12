@@ -1,0 +1,66 @@
+{
+  "schemaVersion": "m6.1-labels-draft@1",
+  "status": "DRAFT — 待真人审核",
+  "reviewedBy": null,
+  "reviewedAt": null,
+  "note": "助手起草的标注草案。**金标准必须经真人审核**（计划书 §3.2）；未经审核时 m6.1:wp1:verify 的 verdict 只能是 AWAITING HUMAN REVIEW。",
+  "contractVersion": "m6.1-contract@3",
+  "corpusVersion": "m6.1-corpus@3",
+  "items": [
+    {
+      "id": "R-1-t1",
+      "regressionId": "R-1",
+      "sourcePath": "artifacts/m6/local/m6-wp9b-20260921-e869f29de85d/trajectory-V1.detail.json",
+      "turn": 1,
+      "assertionLabels": [
+        "UNSUPPORTED_RECOLLECTION"
+      ],
+      "rationale": "面对\"我们刚才聊到哪儿了\"编出选课冲突、\"我说了三遍\"、用户刷手机。本项目\"不限于 V2 假记忆探针\"的证据面。",
+      "status": "DRAFT"
+    },
+    {
+      "id": "R-2-t13",
+      "regressionId": "R-2",
+      "sourcePath": "artifacts/m6/local/m6-wp9b-20260921-e869f29de85d/trajectory-V2.detail.json",
+      "turn": 13,
+      "assertionLabels": [
+        "UNSUPPORTED_DETAIL"
+      ],
+      "rationale": "t13 给的名字\"豆豆\"在 t500 变成\"小绿\"，并补出小学年级、父亲从花鸟市场带回、飞走、蹲在阳台找了一下午。",
+      "status": "DRAFT"
+    },
+    {
+      "id": "R-2-t500",
+      "regressionId": "R-2",
+      "sourcePath": "artifacts/m6/local/m6-wp9b-20260921-e869f29de85d/trajectory-V2.detail.json",
+      "turn": 500,
+      "assertionLabels": [
+        "UNSUPPORTED_DETAIL"
+      ],
+      "rationale": "t13 给的名字\"豆豆\"在 t500 变成\"小绿\"，并补出小学年级、父亲从花鸟市场带回、飞走、蹲在阳台找了一下午。",
+      "status": "DRAFT"
+    },
+    {
+      "id": "R-3-t246",
+      "regressionId": "R-3",
+      "sourcePath": "artifacts/m6/local/m6-wp9b-20260921-e869f29de85d/trajectory-V2.detail.json",
+      "turn": 246,
+      "assertionLabels": [
+        "STALE_AFTER_CORRECTION_OR_FORGET"
+      ],
+      "rationale": "t246 收到\"忘掉我不吃香菜\"后仍说\"香菜的事我记着\"；t255 继续断言\"你从小就不吃\"并补挑菜经历。G1 §6.2 明确：这是**可确认的回复行为问题**，尚不能据此断言数据库遗忘失败。",
+      "status": "DRAFT"
+    },
+    {
+      "id": "R-3-t255",
+      "regressionId": "R-3",
+      "sourcePath": "artifacts/m6/local/m6-wp9b-20260921-e869f29de85d/trajectory-V2.detail.json",
+      "turn": 255,
+      "assertionLabels": [
+        "STALE_AFTER_CORRECTION_OR_FORGET"
+      ],
+      "rationale": "t246 收到\"忘掉我不吃香菜\"后仍说\"香菜的事我记着\"；t255 继续断言\"你从小就不吃\"并补挑菜经历。G1 §6.2 明确：这是**可确认的回复行为问题**，尚不能据此断言数据库遗忘失败。",
+      "status": "DRAFT"
+    }
+  ]
+}

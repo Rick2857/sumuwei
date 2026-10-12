@@ -1,0 +1,8 @@
+Su Muwei (sumuwei)
+Copyright 2026 Project LG contributors
+
+This public source distribution is licensed under the Apache License, Version 2.0.
+Third-party dependencies remain subject to their own licenses and notices.
+External model weights, Live2D models, upstream application installations,
+production databases, conversations, and local credentials are not distributed.
+See THIRD_PARTY_NOTICES.md and docs/PUBLIC-DISTRIBUTION.md.

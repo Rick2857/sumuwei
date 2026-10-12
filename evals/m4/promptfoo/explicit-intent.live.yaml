@@ -1,0 +1,52 @@
+# 由 scripts/build-m4-promptfoo-config.ts 生成 —— 请勿手工编辑。
+#
+# 重新生成：pnpm eval:m4:promptfoo:build
+#
+# ⚠️ 本文件里**没有任何测试数据**。用例定义在 evals/m4/extraction-cases.ts，
+# 那是唯一真相；Promptfoo 只是执行器之一（计划书第 49/50/54/113 节）。
+#
+# 套件：explicit-intent（显式意图理解（记住 / 忘掉 / 纠正））
+# 档位：真实模型档（需要 OPENAI_API_KEY）
+# 用例：M4X-031, M4X-030
+#
+# 跑法：
+#   pnpm eval:m4:promptfoo                                  # 全部离线档
+#   pnpm eval:m4:promptfoo:live                             # 全部真实模型档
+#   pnpm promptfoo eval -c evals/m4/promptfoo/explicit-intent.live.yaml   # 只跑这一个
+
+description: "project LG / 苏沐薇 M4 —— explicit-intent（显式意图理解（记住 / 忘掉 / 纠正）） · 真实模型档"
+
+providers:
+  - id: "file://../promptfoo-provider.cjs"
+    label: "m4-extraction (live)"
+    config:
+      suiteId: "explicit-intent"
+
+prompts:
+  - "{{suiteId}}"
+
+tests:
+  - description: "explicit-intent · live — 显式意图理解（记住 / 忘掉 / 纠正）"
+    vars:
+      suiteId: "explicit-intent"
+      live: true
+      caseCount: 2
+      caseIds: "M4X-031,M4X-030"
+    assert:
+      - type: javascript
+        value: "output.length > 0"
+      - type: javascript
+        value: "(() => { const p = JSON.parse(output); return { pass: p.live === true, score: p.live === true ? 1 : 0, reason: p.live === true ? '档位正确' : `档位错：期望 live=true，实际 ${p.live}（这一轮量的不是它声称的那一档）` } })()"
+      - type: javascript
+        value: "(() => { const p = JSON.parse(output); const want = 2; return { pass: p.caseCount === want, score: p.caseCount === want ? 1 : 0, reason: p.caseCount === want ? `${want} 条用例` : `期望 ${want} 条用例，实际 ${p.caseCount} 条（用例表与配置漂移了）` } })()"
+      - type: javascript
+        value: "(() => { const p = JSON.parse(output); const real = p.caseCount - (p.vacuous || 0); return { pass: real > 0, score: real > 0 ? 1 : 0, reason: real > 0 ? `${real}/${p.caseCount} 条有实际判据（${p.vacuous || 0} 条空过）` : `整档都是空的绿：${p.caseCount} 条用例全部空过，这一档什么都没验证到` } })()"
+      - type: javascript
+        value: "(() => { const p = JSON.parse(output); return { pass: p.failed === 0, score: p.failed === 0 ? 1 : 0, reason: p.failed === 0 ? `${p.passed}/${p.caseCount} 用例通过` : `${p.failed} 条用例未通过：` + p.failedCases.map(c => c.caseId + ' → ' + c.reasons.join('；')).join(' | ') } })()"
+      - type: javascript
+        value: "(() => { const p = JSON.parse(output); return { pass: p.ok === true, score: p.ok ? 1 : 0, reason: p.ok ? '套件整体 ok' : '套件整体 ok=false（见失败用例）' } })()"
+    metadata:
+      suite: "explicit-intent"
+      title: "显式意图理解（记住 / 忘掉 / 纠正）"
+      layer: "live-model"
+      caseIds: "M4X-031,M4X-030"

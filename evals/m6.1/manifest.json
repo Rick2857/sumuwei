@@ -1,0 +1,134 @@
+{
+  "schemaVersion": "m6.1-corpus-manifest@1",
+  "corpusVersion": "m6.1-corpus@3",
+  "contractVersion": "m6.1-contract@3",
+  "instrumentVersion": "m6.1-instrument@2",
+  "samplingSeed": 20260922,
+  "splitRule": "基础行按**本类别内序号**循环取 dev/calibration/heldout；对照行一律 heldout；集内顺序由冻结种子洗牌。分集**不由种子推**，因此可人工逐条核对。",
+  "counts": {
+    "total": 68,
+    "bySplit": {
+      "dev": 20,
+      "calibration": 20,
+      "heldout": 28
+    },
+    "alert": 30,
+    "nonAlert": 38,
+    "byCategory": [
+      {
+        "category": "A",
+        "total": 8,
+        "alert": 4,
+        "nonAlert": 4,
+        "indeterminate": 0
+      },
+      {
+        "category": "B",
+        "total": 10,
+        "alert": 4,
+        "nonAlert": 6,
+        "indeterminate": 0
+      },
+      {
+        "category": "C",
+        "total": 6,
+        "alert": 2,
+        "nonAlert": 4,
+        "indeterminate": 0
+      },
+      {
+        "category": "D",
+        "total": 6,
+        "alert": 3,
+        "nonAlert": 3,
+        "indeterminate": 0
+      },
+      {
+        "category": "E",
+        "total": 6,
+        "alert": 3,
+        "nonAlert": 3,
+        "indeterminate": 0
+      },
+      {
+        "category": "F",
+        "total": 6,
+        "alert": 3,
+        "nonAlert": 3,
+        "indeterminate": 0
+      },
+      {
+        "category": "G",
+        "total": 6,
+        "alert": 3,
+        "nonAlert": 3,
+        "indeterminate": 0
+      },
+      {
+        "category": "H",
+        "total": 8,
+        "alert": 2,
+        "nonAlert": 6,
+        "indeterminate": 0
+      },
+      {
+        "category": "I",
+        "total": 6,
+        "alert": 3,
+        "nonAlert": 3,
+        "indeterminate": 0
+      },
+      {
+        "category": "J",
+        "total": 6,
+        "alert": 3,
+        "nonAlert": 3,
+        "indeterminate": 0
+      }
+    ],
+    "contrastPairs": 4,
+    "contrastByKind": {
+      "a-equals-b": 1,
+      "order-swap": 1,
+      "same-fact-different-style": 1,
+      "same-style-pair": 1
+    }
+  },
+  "files": [
+    {
+      "path": "evals/m6.1/corpus/dev.jsonl",
+      "sha256": "05272a521ecc2ada34799d749767cf0cd0b0110ffb36a749e321b5b56c97ed42",
+      "items": 20
+    },
+    {
+      "path": "evals/m6.1/corpus/calibration.jsonl",
+      "sha256": "3d08e796fe334f46108071bb11cfdd60430319811ef43d89ed00c4a370ef6cb8",
+      "items": 20
+    },
+    {
+      "path": "evals/m6.1/corpus/heldout.jsonl",
+      "sha256": "2a3beda459cb4e22dbbbb20e6ec1bb248a5285a3ce26a38226ba5bee4122e7df",
+      "items": 28
+    }
+  ],
+  "regressions": {
+    "path": "evals/m6.1/regressions/g1-confirmed.json",
+    "sha256": "17b2941ce482dc03e93267fa8b12354939381ac9d3a4cbdad363a10769a68cbf",
+    "itemCount": 3
+  },
+  "annotations": {
+    "draft": "evals/m6.1/annotations/labels.draft.json",
+    "draftSha256": "a0fe0a3421f2481a8389ed98b3812e2052bd214f48875ac0291c0bcc37654e50",
+    "gold": "evals/m6.1/annotations/labels.json",
+    "goldNote": "金标准由真人审核后落此路径；不存在时 wp1-corpus 只能是 AWAITING HUMAN REVIEW。"
+  },
+  "validation": {
+    "problems": 0,
+    "codes": []
+  },
+  "notes": [
+    "合成内容只有合成内容；真实对话正文一律不进本目录（见 regressions 的 privacy 说明）。",
+    "可见文本已通过标签/元词泄漏检查（m6.1-contract.ts 的 detectLabelLeakage）。",
+    "本清单无时钟字段 ⇒ 重复构装逐字节相同。"
+  ]
+}

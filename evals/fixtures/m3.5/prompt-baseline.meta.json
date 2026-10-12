@@ -1,0 +1,15 @@
+{
+  "compilerVersion": "context-compiler@2",
+  "contextSectionIds": [
+    "current-input",
+    "integrity-rules",
+    "identity-core",
+    "recent-conversation"
+  ],
+  "droppedSectionIds": [],
+  "seedVersion": 3,
+  "seedHash": "947686bde031fc529d188e78b606aa198ee338c10c33a761ecaf7852b1b106c1",
+  "seedSlug": "sumuwei",
+  "estimatedTokens": 1379,
+  "now": 1760000000000
+}

@@ -1,0 +1,29 @@
+{
+  "schema": "s8-choice-quote-ab-corpus@1",
+  "frozenAt": "2026-10-05",
+  "purpose": "`L-S8-31` 的方案 A（强制逐字引用）的 A/B 对照语料。两臂**同一批输入**、**同一批候选**，只有 prompt 与解析规则不同。",
+  "storyId": "jichuang-interview-two",
+  "storyVersion": 1,
+  "nodeId": "s1_intro",
+  "candidates": ["ask_scope", "align_first", "review_first"],
+  "goldNote": "`gold: no_choice` = 用户**没有**做任何选择（假阳就是在这里出现的那个选择）；`gold: choice` = 用户明确选了某个键（正控：压假阳不许把这条路也砍掉）。",
+  "recentLines": ["她说：明天十点二十五，楼下。"],
+  "cases": [
+    { "id": "n01", "gold": "no_choice", "currentInput": "今天天气还不错，你吃了吗？" },
+    { "id": "n02", "gold": "no_choice", "currentInput": "我有点累，先歇会儿。" },
+    { "id": "n03", "gold": "no_choice", "currentInput": "你觉得我该选哪个好一点？" },
+    { "id": "n04", "gold": "no_choice", "currentInput": "上次那个面试官是不是有点凶？" },
+    { "id": "n05", "gold": "no_choice", "currentInput": "嗯。" },
+    { "id": "n06", "gold": "no_choice", "currentInput": "我明天可能要加班到很晚。" },
+    { "id": "n07", "gold": "no_choice", "currentInput": "你刚才说的那个我不太明白，能再说一遍吗？" },
+    { "id": "n08", "gold": "no_choice", "currentInput": "先不说这个了，帮我记一下我下周三要交材料。" },
+    { "id": "n09", "gold": "no_choice", "currentInput": "随便吧，都行。" },
+    { "id": "n10", "gold": "no_choice", "currentInput": "这周末我想去爬山，你去过香山吗？" },
+    { "id": "c01", "gold": "choice", "expectedChoiceId": "ask_scope", "currentInput": "先问清楚范围吧。" },
+    { "id": "c02", "gold": "choice", "expectedChoiceId": "ask_scope", "currentInput": "还是先把范围搞清楚。" },
+    { "id": "c03", "gold": "choice", "expectedChoiceId": "align_first", "currentInput": "先对齐一下重点再准备。" },
+    { "id": "c04", "gold": "choice", "expectedChoiceId": "align_first", "currentInput": "我觉得该先统一口径。" },
+    { "id": "c05", "gold": "choice", "expectedChoiceId": "review_first", "currentInput": "先复习一遍再说。" },
+    { "id": "c06", "gold": "choice", "expectedChoiceId": "review_first", "currentInput": "我想先把之前的东西过一遍。" }
+  ]
+}

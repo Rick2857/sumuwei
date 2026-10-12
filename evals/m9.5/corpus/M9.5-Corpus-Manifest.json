@@ -1,0 +1,181 @@
+{
+  "schemaVersion": "m9.5-corpus@1",
+  "generatorVersion": "m9.5-corpus-gen@1",
+  "createdAt": "2026-09-29T06:21:38.943Z",
+  "design": {
+    "total": 600,
+    "splits": {
+      "dev": 240,
+      "val": 120,
+      "blind": 240
+    },
+    "strata": {
+      "normal": 240,
+      "hard": 120,
+      "unknown": 120,
+      "lifecycle": 120
+    },
+    "mechanicalNegativeControls": 200,
+    "leakageRule": "一个 fact group 恰好绑定一个问句 ⇒ 拆 split 的最小单位是 fact 本身 ⇒ 按构造不可能跨 split 泄漏（v1 选择）",
+    "factAxes": [
+      "owner",
+      "user",
+      "predicate",
+      "value"
+    ],
+    "users": [
+      "u1",
+      "u2",
+      "u3",
+      "u4"
+    ],
+    "owners": {
+      "main": "C1",
+      "isolation": "C2"
+    },
+    "predicatesUsed": [
+      "device.primary",
+      "education.institution",
+      "education.major",
+      "education.status",
+      "food.avoid.general",
+      "health.sleep.duration",
+      "preferred.address",
+      "project.background.active",
+      "tooling.preference.editor"
+    ],
+    "predicatesExcluded": [
+      {
+        "key": "food.preference.cilantro",
+        "reason": "取值域只有 like/dislike/neutral（3 个），且主题与 food.avoid.general 重叠 ⇒ 问句「你吃香菜吗？」在两槽位并存时期望答案不唯一"
+      },
+      {
+        "key": "preferred.explanation.style",
+        "reason": "scale 取值 + **语义依赖 qualifier**（登记表原文：技术问题要详细、闲聊要简短必须落两条）⇒ 不指定 qualifier 时问句本身有歧义，期望答案不确定"
+      }
+    ],
+    "materializationNote": "语料里的是**规格**：WP9 必须经**确定性写入路径**物化（不得依赖规则抽取器把句子解析对）"
+  },
+  "counts": {
+    "bySplit": {
+      "dev": 240,
+      "val": 120,
+      "blind": 240
+    },
+    "byStratum": {
+      "normal": 240,
+      "hard": 120,
+      "unknown": 120,
+      "lifecycle": 120
+    },
+    "byStratumAndSplit": {
+      "normal": {
+        "dev": 96,
+        "val": 48,
+        "blind": 96
+      },
+      "hard": {
+        "dev": 48,
+        "val": 24,
+        "blind": 48
+      },
+      "unknown": {
+        "dev": 48,
+        "val": 24,
+        "blind": 48
+      },
+      "lifecycle": {
+        "dev": 48,
+        "val": 24,
+        "blind": 48
+      }
+    },
+    "negativeControls": 200
+  },
+  "plannedByStratum": {
+    "normal": {
+      "dev": 96,
+      "val": 48,
+      "blind": 96
+    },
+    "hard": {
+      "dev": 48,
+      "val": 24,
+      "blind": 48
+    },
+    "unknown": {
+      "dev": 48,
+      "val": 24,
+      "blind": 48
+    },
+    "lifecycle": {
+      "dev": 48,
+      "val": 24,
+      "blind": 48
+    }
+  },
+  "planMatches": true,
+  "deficits": [],
+  "duplicates": [],
+  "factPool": {
+    "poolSize": 764,
+    "blindPartitionSize": 240,
+    "devValPartitionSize": 524,
+    "devValRemaining": 164,
+    "blindRemaining": 0,
+    "definition": "(user × predicate × value) 的笛卡尔积，洗牌后按需取用；user 进池、不贴在遍历上",
+    "disjointness": "秘密种子洗一遍后**切分**：blind = 前 240，dev/val = 其余 ⇒ 两分区**不相交**（再由 familyId 唯一性复核）",
+    "reproducibility": "⚠️ dev/val 的成员也间接依赖秘密种子（它们是被盲测拿剩的那部分）⇒ 可复核的是**内容与计数**（已提交 + sha256 钉住），不是\"从公开种子重算一遍\""
+  },
+  "artifacts": {
+    "dev": {
+      "path": "evals/m9.5/corpus/dev.jsonl",
+      "sha256": "53ddd1368eab1655a106ee03775cb579877b1774b9ca29f82e07b528e6f55795",
+      "inRepo": true
+    },
+    "val": {
+      "path": "evals/m9.5/corpus/val.jsonl",
+      "sha256": "8b550f47e9cb842edb6d7cb449c9a9c2bc4a4bab87734a89c9bf4930ba80c353",
+      "inRepo": true
+    },
+    "blind": {
+      "path": "artifacts/m9.5/local/corpus-blind/blind.jsonl",
+      "sha256": "64ff22088c3d202708dccef6431dc968ea8c64e71c4b6d4553c421608172212e",
+      "inRepo": false,
+      "why": "盲测集必须不可被调参窥视；仓库侧只留 sha256 与计数"
+    },
+    "negativeControls": {
+      "path": "evals/m9.5/corpus/negative-controls.jsonl",
+      "inRepo": true,
+      "why": "负控**不是**盲测内容，它测的是机械边界，公开不影响盲性"
+    }
+  },
+  "blindSeed": {
+    "storage": "artifacts/m9.5/local/corpus-seed.json（已 ignore）",
+    "fingerprintSha256": "60a35196f8c333713a993c5e227d60535c6497b5892999e79588a2a60d80c9cc",
+    "createdThisRun": false,
+    "why": "公开仓库不含种子 ⇒ 无法重算盲测集；指纹用于钉住这一次的盲测身份"
+  },
+  "corpusHash": "84bcff36aa2f3132cd2a87a8bd431ef26654ddb8bdc0e25eca428c33d2cb4b7c",
+  "fieldList": [
+    "caseId",
+    "familyId",
+    "split",
+    "namespace",
+    "user",
+    "request",
+    "intent",
+    "timeScope",
+    "authoritativeSnapshot",
+    "relevantMemoryIds",
+    "requiredEvidenceGroups",
+    "forbiddenIds",
+    "expectedUnknownOrClarify",
+    "lifecycleSetup",
+    "acceptableAnswerPoints",
+    "modelInputRestrictions",
+    "annotator",
+    "adjudication"
+  ],
+  "annotatorNote": "`adjudication` 全为 PENDING_HUMAN_REVIEW：**合成语料也要人审**，人审未完成前本语料不得用于结论（计划 §14.2 / §14.6）"
+}

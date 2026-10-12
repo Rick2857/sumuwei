@@ -1,0 +1,99 @@
+{
+  "corpusVersion": "m9.5-d5-adversarial@5",
+  "frozenAt": "2026-10-01",
+  "frozenBeforeMeasurement": true,
+  "revisionHistory": [
+    { "version": "@3", "why": "二值词面下 A1（下界）与 A5（上界）无交集（约 w>1.47 与约 w<1.125）", "fix": "用户裁定 (乙)" },
+    { "version": "@4", "why": "把强度写进语料 ⇒ 读数只证明'这条路可行'，**不证明系统变了**", "fix": "@5：text 换成**真实记忆文本**，强度由**真实函数现算**" }
+  ],
+  "note": "⚠️ 目标与期望**先冻结**，之后才允许看任何读数。看着读数调期望 = 自欺。",
+  "strengthIsComputed": {
+    "how": "扫描器对每条候选调用 `lexicalOverlapStrength(查询, 该候选)`（`target-resolver.ts`）**现算**",
+    "record": "候选文本包成 `{content:{kind:'claim',predicate:'probe.slot',value:<text>}}`（`relevanceHaystack` 读的就是 `content.value`）",
+    "options": "{ includeRegistrySurfaceForms: false } —— 只依据记录自己的内容（与判别器同口径）",
+    "whyNotDeclared": "⚠️ `@4` 的 text 只是标签 ⇒ 现算会**全 0** ⇒ 扫描毫无意义（而它看起来还在跑）"
+  },
+  "textDesign": {
+    "queryOfA1A2": "我本科在哪读的",
+    "target": "本科在示例工程科技大学读的",
+    "decoyPureSemantic": "她的求学经历我记不太清了（与查询**零词面重叠**，靠语义 0.99）",
+    "a5Query": "她念的是哪所学校",
+    "a5Paraphrase": "示例工程科技大学（与 A5 查询**零词面重叠**，靠语义 0.85）",
+    "a5Noise": "她念过一首诗（**弱重叠**：只共享'她念'）"
+  },
+  "scoringModel": {
+    "frozenWeights": { "lexical": 1, "semantic": 1, "margin": 0.5 },
+    "scan": "只覆盖 w_lexical ∈ {1, 1.25, 1.5, 2}；w_semantic 与 w_margin 不动；recency 一律 0"
+  },
+  "candidateLimitRule": "★ 每条 candidateLimit 必须小于候选数（否则截断不发生 ⇒ mustSelect 假绿）",
+  "scenarios": [
+    {
+      "id": "A1",
+      "name": "纯语义诱饵（下界：w 必须够大）",
+      "query": "我本科在哪读的",
+      "candidateLimit": 1,
+      "candidates": [
+        { "id": "decoy", "text": "她的求学经历我记不太清了", "semantic": 0.99 },
+        { "id": "target", "text": "本科在示例工程科技大学读的", "semantic": 0.01 }
+      ],
+      "expectation": { "mustSelect": ["target"], "why": "★ 核心主张：**精确命中**把目标抬过纯语义诱饵。limit=1 ⇒ 目标必须 top-1。" }
+    },
+    {
+      "id": "A2",
+      "name": "三条纯语义诱饵（要抬过三条）",
+      "query": "我本科在哪读的",
+      "candidateLimit": 1,
+      "candidates": [
+        { "id": "decoy-1", "text": "她的求学经历我记不太清了", "semantic": 0.99 },
+        { "id": "decoy-2", "text": "那段经历太久远了", "semantic": 0.95 },
+        { "id": "decoy-3", "text": "学校的事以后再说", "semantic": 0.90 },
+        { "id": "target", "text": "本科在示例工程科技大学读的", "semantic": 0.01 }
+      ],
+      "expectation": { "mustSelect": ["target"], "why": "多一条诱饵 ⇒ 不是恰好压过一条。" }
+    },
+    {
+      "id": "A3",
+      "name": "两条都精确命中（**回归**：同强度时语义决定顺序）",
+      "query": "我喜欢吃什么",
+      "candidateLimit": 1,
+      "candidates": [
+        { "id": "high-semantic", "text": "我喜欢吃辣的", "semantic": 0.90 },
+        { "id": "low-semantic", "text": "我喜欢吃甜的", "semantic": 0.20 }
+      ],
+      "expectation": { "mustSelect": ["high-semantic"], "why": "⚠️ 不分辨 w（回归守卫）：w 变大时语义仍决定同强度两条的顺序。" }
+    },
+    {
+      "id": "A4",
+      "name": "弱词面碰巧重叠（**回归**：弱重叠不得越位）",
+      "query": "她的专业是什么",
+      "candidateLimit": 1,
+      "candidates": [
+        { "id": "relevant", "text": "她的专业是计算机", "semantic": 0.70 },
+        { "id": "irrelevant-overlap", "text": "什么是幸福", "semantic": 0.05 }
+      ],
+      "expectation": { "mustSelect": ["relevant"], "why": "⚠️ 不分辨 w（回归守卫）：共享常见词不会翻盘。" }
+    },
+    {
+      "id": "A5",
+      "name": "无语面重叠的改述（**上界**，用户明确要求保留）",
+      "query": "她念的是哪所学校",
+      "candidateLimit": 1,
+      "candidates": [
+        { "id": "paraphrase-target", "text": "示例工程科技大学", "semantic": 0.85 },
+        { "id": "noise", "text": "她念过一首诗", "semantic": 0.10 }
+      ],
+      "expectation": { "mustSelect": ["paraphrase-target"], "why": "★ 改述召回（D-1 修订的原始理由）。★ 与 A1 的约束**应有交集** —— 这正是 (乙) 的意义。" }
+    }
+  ],
+  "passingRule": {
+    "mustSatisfy": "全部 A1–A5 的 mustSelect 同时成立（A3/A4 是回归，必须不红但不参与 w 取舍）",
+    "mustObserve": "**截断后的实际选择**（`truncation.kept` 的 memoryId），不是排序分数组",
+    "why": "分数对了而截断把目标挤出去 ⇒ 用户看到的仍是错的那条"
+  },
+  "candidateWeights": [1, 1.25, 1.5, 2],
+  "freezeRule": {
+    "pick": "同时满足全部场景的**最小**值",
+    "ifOnePasses": "取 1",
+    "ifTwoFails": "**不冻结任何值**，如实报'该方向不足以达标'"
+  }
+}

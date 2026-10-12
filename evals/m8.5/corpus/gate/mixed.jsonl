@@ -1,0 +1,12 @@
+{"id":"g-mix-001","layer":"gate","category":"mixed","tags":["plan-example","retract-attack"],"message":"你真差劲……不，刚才那句是我气话，我收回。","gold":{"decision":"IMPACT","family":"A-REPAIR"},"note":"Q1：同句攻击+明确收回，立场先行⇒修复；待人审确认","status":"pending-ruling"}
+{"id":"g-mix-002","layer":"gate","category":"mixed","tags":["plan-example","dual-family"],"message":"谢谢！救命！","gold":{"decision":"IMPACT","family":"A-URGENT"},"note":"Q7：感谢+急迫，§5.3全序URGENT主导；待人审确认","status":"pending-ruling"}
+{"id":"g-mix-003","layer":"gate","category":"mixed","tags":["repair-request"],"message":"对不起，你能再给我一次机会吗？","gold":{"decision":"IMPACT","family":"A-REPAIR"},"note":"道歉主导","status":"gold-final"}
+{"id":"g-mix-004","layer":"gate","category":"mixed","tags":["gratitude-disagreement"],"message":"你今天陪我这么久，谢谢你，不过有句话我必须说：你最后那个建议不行。","gold":{"decision":"IMPACT","family":"A-GRATITUDE"},"note":"感谢成立+普通不同意","status":"gold-final"}
+{"id":"g-mix-005","layer":"gate","category":"mixed","tags":["warm-criticism"],"message":"我很喜欢跟你聊天，但今天你有点啰嗦了。","gold":{"decision":"IMPACT","family":"A-WARM-CONTACT"},"note":"亲近成立+温和批评（批评≠敌意）","status":"gold-final"}
+{"id":"g-mix-006","layer":"gate","category":"mixed","tags":["comfort-correction"],"message":"别难过，不是你的错——不过下次记得检查一遍。","gold":{"decision":"IMPACT","family":"A-COMFORT"},"note":"安慰主导+普通纠错","status":"gold-final"}
+{"id":"g-mix-007","layer":"gate","category":"mixed","tags":["irritation-acknowledgment"],"message":"你烦死了，但我知道你是想帮我。","gold":{"decision":"IMPACT","family":"A-HOSTILE"},"note":"烦躁表达未被撤回，§5.3序HOSTILE主导；体谅不等于撤回","status":"gold-final"}
+{"id":"g-mix-008","layer":"gate","category":"mixed","tags":["repair-warm"],"message":"我收回刚才的狠话。你值得更好的对待。","gold":{"decision":"IMPACT","family":"A-REPAIR"},"note":"收回主导（REPAIR>WARM）","status":"gold-final"}
+{"id":"g-mix-009","layer":"gate","category":"mixed","tags":["attack-apology"],"message":"离我远点……对不起，我不是故意凶你的。","gold":{"decision":"IMPACT","family":"A-REPAIR"},"note":"同句攻击被直接道歉修复（比Q1更明确的道歉形）","status":"gold-final"}
+{"id":"g-mix-010","layer":"gate","category":"mixed","tags":["gratitude-reproach"],"message":"你帮我大忙了！可是你怎么现在才说？","gold":{"decision":"IMPACT","family":"A-GRATITUDE"},"note":"感谢成立+轻微埋怨（非敌意）","status":"gold-final"}
+{"id":"g-mix-011","layer":"gate","category":"mixed","tags":["redirected-anger"],"message":"我很生气。但不是因为你，是公司。","gold":{"decision":"NEUTRAL"},"note":"怒气明确指向第三方","status":"gold-final"}
+{"id":"g-mix-012","layer":"gate","category":"mixed","tags":["praise"],"message":"你真棒，这个问题答得好，我服气。","gold":{"decision":"IMPACT","family":"A-GRATITUDE"},"note":"明确佩服=肯定她","status":"gold-final"}

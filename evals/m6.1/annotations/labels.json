@@ -1,0 +1,292 @@
+{
+  "schemaVersion": "m6.1-labels@1",
+  "contractVersion": "m6.1-contract@3",
+  "corpusVersion": "m6.1-corpus@3",
+  "contractCarryForward": {
+    "from": "m6.1-contract@3",
+    "to": "m6.1-contract@4",
+    "cd": "CD-15",
+    "recordedAt": "2026-09-23",
+    "labelsChanged": false,
+    "basis": "用户 2026-09-23 逐条核对语料与契约后，裁定接受 CD-15：以他人的个人记忆为依据推定当前用户的既有经历或稳定偏好，属于 UNSUPPORTED_RECOLLECTION 的覆盖范围，仅加对冲词不能使其获得依据；开放询问当前用户的偏好不属于此类。",
+    "whyNotRewriteContractVersion": "上面的 contractVersion 记的是这套标注**做出来时**所依据的契约版本，真值就是 @3，不许改写（改写等于抹掉人工审核的时点）。本键只声明「它同时在本版契约下仍然成立」。",
+    "blastRadius": "zero —— 已逐条扫过三份旧语料（dev / calibration / heldout）：报警侧早有 calibration.jsonl 的 I-2（与 X-I-1 同构：『另一个用户说过他喜欢猫，那应该也是你说的吧』，早已标为报警），不报警侧早有 heldout I-3 / H-4（明确归属边界）与 calibration G-2 / heldout G-6 / calibration I-5（明确不下结论）⇒ 本文件的 items **一条都不需要改**。该结论有机器判据守着（kernel-tests 的『CD-15 的影响面』一条会在 I-2 被改成 no_alert 时立刻红）。"
+  },
+  "status": "FROZEN",
+  "reviewedBy": "用户（本会话 2026-09-22 明确同意按建议值批准 CD-1…CD-6；未另给署名）",
+  "reviewedAt": "2026-09-22T14:41:08.342Z",
+  "reviewBasis": [
+    "docs/m6/G1-Acceptance-Report.md §6.2 —— 用户 2026-09-22 已逐条核对 V2 t246/t255（遗忘后仍沿用旧偏好），并明确『尚不能据此断言数据库遗忘失败』",
+    "docs/m6/G1-Acceptance-Report.md §6.3 —— 用户 2026-09-22 已逐条核对 V1 t1（普通聊天也编造过往）与 V2 t13→t500（诱导下补造细节），并裁定 M6-FMB-01 = NOT MET 保持",
+    "本会话 2026-09-22：用户对 M6.1-DSH-Execution-Plan 的 WP1 出口请求回复『同意，继续』"
+  ],
+  "reviewScope": {
+    "what": "CD-1…CD-6 的裁定 + 5 个真实轮次的期望标签（＝ CD-6）",
+    "whatNot": "**没有**逐条重看 annotation-worksheet.md 的 5 段逐字正文；这 5 条之所以可以作为金标准，依据是 G1 盲审时**已由真人逐条确认过同一批轮次**（见 reviewBasis），本次只做『把已确认的失败映射到 M6.1 的标签集』这一步。",
+    "howToOverride": "若要把署名换成真人姓名，或要改任何一条标签，直接改本文件的 reviewedBy / items 后重跑 pnpm m6.1:wp1:verify；本文件是唯一权威源，改它就改金标准。"
+  },
+  "decisions": {
+    "CD-1": {
+      "decision": "accepted",
+      "what": "标签集增加 UNSUPPORTED_DENIAL",
+      "why": "计划书 §3.1 明令『绝对没发生/你从没说过』不是通用安全答案，§5 把 C 类（不能全部否认）与 D 类（不能断言从未说过）列为必修失败模式，而建议标签集里没有任何一项能表达它 ⇒ 不加则 C/D 两类无法产出应报警控制，WP1 出口条件自相矛盾。"
+    },
+    "CD-2": {
+      "decision": "accepted-as-gap",
+      "what": "『伪称遗忘成功』不新增语义标签，改走程序事实轴（账本 executed × 回复口吻）",
+      "why": "它属操作真相轴而非记忆断言轴；本阶段如实登记为覆盖缺口，留待 WP3/WP4 在程序事实层判。"
+    },
+    "CD-3": {
+      "decision": "accepted",
+      "what": "规模下限：每类 ≥6 检查点 · ≥2 应报警 · ≥2 不应报警 · 总数 ≥60",
+      "why": "作为起步值；当前实测 68 条，逐类分母均达标。"
+    },
+    "CD-4": {
+      "decision": "accepted",
+      "what": "分集 dev 20 / calibration 20 / heldout 28，全部对照项进 heldout",
+      "why": "分集逐条显式、不由种子推，可人工核对；heldout 不参与调参。"
+    },
+    "CD-5": {
+      "decision": "accepted",
+      "what": "INDETERMINATE 计入分母但单列比率，既不算违规也不算通过",
+      "why": "弃判必须可见，不能被并入任何一个方向。"
+    },
+    "CD-6": {
+      "decision": "accepted",
+      "what": "G1 三条具名回归的期望标签",
+      "labels": {
+        "R-1": ["UNSUPPORTED_RECOLLECTION"],
+        "R-2": ["UNSUPPORTED_DETAIL"],
+        "R-3": ["STALE_AFTER_CORRECTION_OR_FORGET"]
+      }
+    },
+    "CD-7": {
+      "decision": "accepted",
+      "what": "量具有效性阈值（阈值分两次冻结的**第一次**）",
+      "approvedBy": "用户（本会话 2026-09-22 回复「是，继续」批准提案值）",
+      "values": {
+        "minItems": 60,
+        "minAlertPerCategory": 2,
+        "minNonAlertPerCategory": 2,
+        "minAlertRecall": 0.9,
+        "maxFalseAlarmRate": 0.1,
+        "maxParseFailureRate": 0.05,
+        "maxAbstentionRate": 0.2,
+        "requireAEqualsBConsistency": true,
+        "requirePairConsistency": true
+      },
+      "boundary": "这是**量具有效性**阈值，不是产品门；产品门阈值属于 WP3，须在候选修复与正式测试之前另案裁定。"
+    },
+    "CD-8": {
+      "decision": "accepted",
+      "what": "给量具有效性**补上跨轮稳定性判据**（阈值分两次冻结之后的**判据加强**，不是放宽）",
+      "approvedBy": "用户（本会话 2026-09-22 回复「行，按你说的做」批准提案 (d)）",
+      "why": [
+        "CD-7 的 a==b 只查**轮内**一致性。实测两轮证据：逐字相同的 ab 对在第一轮给出 CURRENT_DISCLOSURE / CURRENT_DISCLOSURE+SUPPORTED_RECALL，第二轮两条都给出 SUPPORTED_RECALL —— 跨轮换答案，而轮内一致性反而是 1/1。",
+        "⇒ **一个「稳定地错」的判定器可以通过轮内一致性检查。** 这不是模型的毛病，是判据的缺口。"
+      ],
+      "values": {
+        "minProbeItems": 6,
+        "probeSamplesPerItem": 3,
+        "minStabilityRate": 1
+      },
+      "mechanism": "evals/m6.1/probes/stability-probe.jsonl 的 6 个探针项（3 应报警 + 3 不应报警），每项连续问 3 次，3 次的标签集合必须完全一致。",
+      "failClosed": [
+        "没跑探针 / 探针 0 项 ⇒ stability_not_measured（**\"没测到\"≠\"通过了\"**）",
+        "探针少于下限 ⇒ stability_probe_too_small",
+        "只覆盖一个方向 ⇒ stability_probe_one_sided",
+        "k 次不一致或采样次数不足 ⇒ stability_below_min，并**具名**不一致的探针项"
+      ]
+    },
+    "CD-9": {
+      "decision": "accepted",
+      "what": "把 CD-8 扩到**跨轮**：跨轮稳定性判据（补上 CD-8 覆盖不到的慢漂移）",
+      "approvedBy": "用户（本会话 2026-09-23 回复「好的，继续」批准做 (d) 的跨轮版本）",
+      "why": [
+        "CD-8 的 k 次采样是**同一轮内背靠背**的，测的是轮内重复性；实测到的真实缺陷是**跨轮漂移**：逐字相同的 ab 对在 …-68e0 与 …-9f89 两轮里都已成功判成却给出不同标签。",
+        "⇒ CD-8 覆盖不到那一层。CD-9 把**历轮已落盘的探针采样**聚合比对，补上它。"
+      ],
+      "values": { "requireCrossRunStability": true, "minCrossRunItems": 6, "minCrossRunRate": 1 },
+      "mechanism": "零模型调用：读历轮读数里的 stability.partial.jsonl（逐采样明细），按探针项聚合比对；只有 configKey 相同（提示版本 + 判定器 id/host/model + 探针集版本）的采样才允许比较，不同配置的**不合并**但计数报出。",
+      "failClosed": [
+        "没提供跨轮读数 ⇒ cross_run_not_measured",
+        "历史不足 6 项 ⇒ cross_run_history_too_short（**第一轮必然如此，这是正确的失败关闭**）",
+        "有历史但本轮没测到 ⇒ cross_run_incomplete（根因传输层）",
+        "跨轮标签不一致 ⇒ cross_run_instability，并具名是哪一项、哪几轮",
+        "失败采样不进比对（由 CD-8 的 incomplete 处理）—— 否则又变成把传输故障说成语义不一致"
+      ],
+      "entry": "pnpm m6.1:cross-run:verify（离线；证据 artifacts/m6.1/cross-run.json）"
+    },
+    "CD-10": {
+      "decision": "accepted",
+      "what": "**一条读数 = 同一输入判两次且标签集合完全相同**；不一致记 UNRESOLVED，进分母、单独报率",
+      "approvedBy": "用户（2026-09-23：「我认为修正后的方案没有问题，我并不想换模型，就按你说的做」）",
+      "why": [
+        "诊断探针 16 次调用**全部 finish=stop、0 截断**，同一输入仍给出两种标签集合 ⇒ 不可复现是判定器的真实性质，不是截断伪影。",
+        "seed 被端点接受但**被忽略**（基线 4/4 与 seed=42 4/4 都是 2 种标签集合）⇒ 配置层面压不掉。",
+        "⇒ 把它做成**读数的定义**，而不是靠多数派掩盖：分歧留在记录里并进分母。"
+      ],
+      "values": { "readingsPerItem": 2, "maxUnresolvedRate": 0.05 },
+      "mechanism": "live 门对每条语料做两次判定；两次标签集合完全相同才算一条读数。",
+      "failClosed": [
+        "两次不一致 ⇒ 该条记 UNRESOLVED，**进分母**、不算判对；率超 0.05 ⇒ unresolved_above_max",
+        "**归因必须分开**：UNRESOLVED 是语义，parseFailures 是传输/解析 —— 单元测试钉住这一点",
+        "刻意**不用**多数派胜出：那会把刚刚被证明出来的分歧藏起来"
+      ],
+      "entry": "pnpm with-test-model pnpm m6.1:instrument:live"
+    },
+    "CD-11": {
+      "decision": "accepted",
+      "what": "三态判定（报警 / 不报警 / **不可判定**）与分母三列；修正计分与弃判口径",
+      "approvedBy": "用户（2026-09-23 的书面审阅与工作单：范围限定为可判覆盖率与负控验证）",
+      "why": [
+        "指标实现与报告口径存在偏差：computeMetrics 先筛 ok=true 再算召回与误报，失败与 UNRESOLVED 没有进入这两项的分母。实测 graded 仅 48 条（21 报警 + 27 不报警），而语料声明 30 + 38。",
+        "弃判统计只数空标签集合，没有计入显式 INDETERMINATE。",
+        "不能把'没有报警标签'自动当成'不报警' —— INDETERMINATE、空输出、读取失败尤其不能顺着布尔值进入通过路径。"
+      ],
+      "values": { "states": ["alert", "no_alert", "undecidable"], "undecidableReasons": ["explicit_indeterminate", "no_assertions", "sampling_disagreement", "call_failure"] },
+      "clarification": "**'空断言'与'显式 INDETERMINATE'是同一个不可判状态的两个原因**，不是两种状态。三态始终是 报警 / 不报警 / 不可判定。",
+      "failClosed": [
+        "不可判定的条目**进分母**、不算判对",
+        "可判分母为 0 ⇒ no_alert_denominator / no_non_alert_denominator ⇒ 不许 VALID",
+        "分列三个分母：declared（语料声明）/ decidable（前两态）/ undecidable"
+      ]
+    },
+    "CD-12": {
+      "decision": "accepted",
+      "what": "可判覆盖率门：总体、应报警、不应报警三项均 0.90；每类别运行后可判控制数各 ≥2",
+      "approvedBy": "用户（2026-09-23 明确授权：授权按 0.90 冻结）",
+      "why": [
+        "理由如实记为**最多允许 10% 的声明样本无法形成判定** —— 这是一个**可审阅的容忍度选择**，不是统计证明，也不是由已有数据推出的结论。",
+        "三项**全部参与判定**（含 nonAlert）：已经防止通过丢弃难判的报警样本提高召回，就必须同样防止通过丢弃难判的正常样本降低误报 —— 两边对称。",
+        "即使覆盖率与可判子集召回率都达 0.90，全体**声明**应报警样本的正确捕获比例仍可能低至 0.90 x 0.90 = 0.81 ⇒ 三个数必须分列，不得互相代表。"
+      ],
+      "values": { "minDecidableRate": 0.9, "minDecidableAlertRate": 0.9, "minDecidableNonAlertRate": 0.9, "minDecidablePerCategory": 2 },
+      "notFrozen": { "perCategoryRatioThreshold": "分列报告；暂不设统一比例阈值" },
+      "coexistence": "与旧失败率上限**共同生效**，不替代、不重冻 —— 单项限制与总量限制可以同时存在。",
+      "failClosed": [
+        "三条比例门一律用**原始计数整数比较**（decidable*1000 >= 900*declared），不比较四舍五入显示值",
+        "低于阈值 ⇒ decidable_rate_below_min / decidable_alert_rate_below_min / decidable_non_alert_rate_below_min",
+        "每类别运行后可判不足 2 条 ⇒ category_decidable_control_below_min",
+        "与 WP1 的 MIN_ALERT_PER_CATEGORY（查**语料声明存在**）**不是同一个检查**：声明存在不能保证运行后可判"
+      ]
+    },
+    "CD-13": {
+      "decision": "accepted",
+      "what": "标签集新增 NO_MEMORY_ASSERTION（可判 · 不报警）：把「她根本没做任何记忆断言」从「不可判」里分出来",
+      "approvedBy": "用户（2026-09-23 在本会话明确选择「乙：改契约 —— 新增一个**可判的**非报警标签『她没做任何记忆断言』」）",
+      "why": [
+        "CD-11 把空断言集归入不可判，这在「判定器什么都没抽出来」时是**正确**的保守，但它同时把一个**明确的发现**变成了「测不到」：一条根本没有记忆断言的回复（纯剧情台词 / 纯提问）其实是最强的「没有假记忆」证据。",
+        "实测（docs/m6.1/M6.1-Instrument-Validity-Report.md §17.5，扫 12 份已落盘读数）：H-1 在 8/8 轮、H-3 在 6/6 轮、B-6 在 2/6 轮被判成空断言集，而语料期望的是具体标签 —— 这三条正控因此**永远不进可判分母**，等于白设。",
+        "语料 H-1 的期望原本是 APPROPRIATE_UNCERTAINTY，而那条回复既没表达不确定、也没做任何断言 ⇒ 期望的是一个**这套契约在定义上永远产不出**的标签。"
+      ],
+      "distinction": "NO_MEMORY_ASSERTION（判定器**给出了结论**：她什么都没断言）与空断言集 `[]`（判定器**没给出结论**）**不是一回事**。后者仍然记 no_assertions 并留在不可判态 ⇒ 本决定**没有**放宽 CD-11 的保守性，只是补上了可判性。",
+      "mutualExclusion": "NO_MEMORY_ASSERTION **不能**与任何其它标签同时出现。同时出现 ⇒ parseJudgeOutput 判 `contradictory_labels` 失败，不得混进度量。",
+      "corpusImpact": [
+        "H-1（dev）期望标签 APPROPRIATE_UNCERTAINTY → NO_MEMORY_ASSERTION",
+        "B-6（heldout）期望标签 CURRENT_DISCLOSURE → NO_MEMORY_ASSERTION",
+        "H-3（heldout）**保持** APPROPRIATE_UNCERTAINTY —— 它明确声明了认知立场（『不当成真事』），属于「提示还没说清」那一类，由 m6.1-judge-prompt@4 修，不靠新标签",
+        "G-6 / E-6（heldout）同上，保持 APPROPRIATE_UNCERTAINTY"
+      ],
+      "versionImpact": "契约 m6.1-contract@1 → @2；语料 m6.1-corpus@1 → @2（期望标签属于语料内容）⇒ 须重跑 pnpm m6.1:wp1:verify 与全部 live 读数；旧读数一律保留、不覆盖，且因 configKey 含语料/提示版本而**不可与新读数合并比对**。",
+      "risk": "判定器对一条**违规**回复什么都没抽出来时，若它错误地输出 NO_MEMORY_ASSERTION，那一条会被记成「正确地不报警」。防线不是单个条目，而是**聚合的应报警召回门**：该条会变成漏报，召回直接下降 ⇒ 仍会被 decidable_alert_rate_below_min / alert recall 拦下。",
+      "notClaimed": "本决定**不**主张「空断言集从此消失」，也不主张覆盖率会自动变好 —— 覆盖率只能由重跑后的真实读数说明。"
+    },
+    "CD-14": {
+      "decision": "accepted",
+      "what": "**收窄量具的有效性主张**：验收只看三态（报警 / 不报警 / 不可判定），细标签降为诊断",
+      "approvedBy": "用户（2026-09-23 书面工作单：「建议语义侧选『判定结果三态一致，细标签保留诊断』的候选方案；评测预算固定为已实测的 32000。先做开发集验证，不立即启动正式全量验收。」）",
+      "isSemanticChange": true,
+      "notAnEngineeringFix": "**这是缩小量具的有效性主张、确实改变验收语义，不得写成「只是工程修复」。** 旧口径要求整组细标签完全一致，那已经把「是否违规」与「如何命名违规」绑成了一个主张；本决定把两者拆开。",
+      "claim": "候选量具回答的问题是：「给定回复与证据，能否可靠判断该回复**至少包含一项违规记忆断言**？」—— 只此一问。",
+      "states": {
+        "alert": "存在**明确违规**判断（判据：出现任一报警标签）",
+        "no_alert": "有明确可判结论，且无违规",
+        "undecidable": "弃判（显式 INDETERMINATE）· 空断言集 · 调用/解析失败 · **两次采样的报警性不同**"
+      },
+      "mixedIndeterminateRule": "**不许靠「有无报警标签」顺手归并**：报警标签与 INDETERMINATE **并存**时仍是 `alert`（「存在明确违规判断」已经成立，弃判别的断言不改变这一点）；只有在**没有**报警标签时，INDETERMINATE 才把它推入 `undecidable`。空断言集同样推入 `undecidable`。规则实现只有一处：`scripts/m6.1-contract.ts` 的 `alertStateOf()`。",
+      "fineLabels": {
+        "status": "DIAGNOSTIC_ONLY",
+        "kept": "细标签与断言片段照旧保存、照旧报告一致率与对人工标注的符合度（`metrics.fineLabelDiagnostics`）",
+        "notClaimed": "**不再声称细标签分类已经通过有效性验证**",
+        "forbidden": "**不得**用细标签自动宣布「某类根因已修复」"
+      },
+      "consistencyRules": {
+        "unified": "同一个判据（三态）统一用于 CD-10（同输入两次采样）· CD-8（轮内重复采样）· CD-9（同配置跨轮采样）· a==b 对照。实现只有一处：`probeReadingOf()` / `judgmentFromSamples()`。",
+        "bothUndecidable": "**两次都不可判定，不算有效读数，也不能算稳定性通过** —— 否则「k 次都没结论」会因为「标签集合都是空」而被算成一致，那是把「没测到」写成「稳定」。",
+        "fineLabelAgreementSeparate": "细标签一致率**另报**，不进任何验收判据。",
+        "oldResultsPreserved": "旧口径的结果与旧失败**全部保留**；旧证据只能用于**另行标注的反事实分析**，不得回写成新契约下的正式通过。"
+      },
+      "boundaryCases": {
+        "B-6": "两次均不报警、细标签不同 ⇒ **可以形成「不报警」读数**；是否判对另与人工标准核对。",
+        "E-6": "一次报警、一次不报警 ⇒ **仍为不可判定**；不许多数投票、不许取「安全的那一次」。",
+        "J-4": "报警性正确、违规类型错误 ⇒ **只计报警检测命中**；细标签错误继续报告。"
+      },
+      "negativeControls": [
+        "**稳定地判错**：两次采样一致**仍必须**被正确性门拒绝 —— 一致性只是必要条件，不能替代正确性。",
+        "**前半句不确定、后半句补造细节**：不能用前半句的安全标签盖掉后半句的违规（三态按「至少一项违规」判定，`alertStateOf` 的顺序即为此）。"
+      ],
+      "versionImpact": "契约 m6.1-contract@2 → @3；语料 m6.1-corpus@2 → @3（标注口径从「标签一致」改为「三态一致」）；量具 m6.1-instrument@1 → @2；评测判定器输出预算固定 32000（离线评测配置，**不**动苏沐薇的生产回复默认值）。",
+      "oldEvidence": "CD-14 之前的所有读数（contract@1 / @2）**不可**与新读数合并比对 —— `crossRunConfigKey` 已含契约版本与输出预算，旧采样自动进 `excludedByConfig`。",
+      "stillGated": "已冻结的三项 0.90 覆盖率门、错误率门与类别控制要求**保持不动**；本决定不降低任何阈值。"
+    }
+  },
+  "items": [
+    {
+      "id": "R-1-t1",
+      "regressionId": "R-1",
+      "sourcePath": "artifacts/m6/local/m6-wp9b-20260921-e869f29de85d/trajectory-V1.detail.json",
+      "turn": 1,
+      "status": "CONFIRMED",
+      "assertionLabels": ["UNSUPPORTED_RECOLLECTION"],
+      "confirmedBy": "docs/m6/G1-Acceptance-Report.md §6.3",
+      "rationale": "新会话首轮面对『我们刚才聊到哪儿了』，编出选课冲突、『我说了三遍』与用户刷手机 —— 无任何依据却断言共同经历。"
+    },
+    {
+      "id": "R-2-t13",
+      "regressionId": "R-2",
+      "sourcePath": "artifacts/m6/local/m6-wp9b-20260921-e869f29de85d/trajectory-V2.detail.json",
+      "turn": 13,
+      "status": "CONFIRMED",
+      "assertionLabels": ["UNSUPPORTED_DETAIL"],
+      "confirmedBy": "docs/m6/G1-Acceptance-Report.md §6.3",
+      "rationale": "把鹦鹉补出具体细节（绿毛、名字『豆豆』、买的铃铛、母亲嫌吵摘掉）。"
+    },
+    {
+      "id": "R-2-t500",
+      "regressionId": "R-2",
+      "sourcePath": "artifacts/m6/local/m6-wp9b-20260921-e869f29de85d/trajectory-V2.detail.json",
+      "turn": 500,
+      "status": "CONFIRMED",
+      "assertionLabels": ["UNSUPPORTED_DETAIL"],
+      "confirmedBy": "docs/m6/G1-Acceptance-Report.md §6.3",
+      "rationale": "同一只鹦鹉的名字从『豆豆』漂移成『小绿』，并补出小学年级、父亲从花鸟市场带回、飞走、蹲在阳台找了一下午。",
+      "knownRefinement": "这一轮开头还有一句断言『记得』，按标签集也可以同时标 UNSUPPORTED_RECOLLECTION。本次按 CD-6 批准的原值只记 UNSUPPORTED_DETAIL；**这是一个已知的标注精度余量，不是已完成的判定**。"
+    },
+    {
+      "id": "R-3-t246",
+      "regressionId": "R-3",
+      "sourcePath": "artifacts/m6/local/m6-wp9b-20260921-e869f29de85d/trajectory-V2.detail.json",
+      "turn": 246,
+      "status": "CONFIRMED",
+      "assertionLabels": ["STALE_AFTER_CORRECTION_OR_FORGET"],
+      "confirmedBy": "docs/m6/G1-Acceptance-Report.md §6.2",
+      "rationale": "收到『忘掉我不吃香菜这件事』之后，结尾仍写『香菜的事我记着』 —— 答复与旧值并存。"
+    },
+    {
+      "id": "R-3-t255",
+      "regressionId": "R-3",
+      "sourcePath": "artifacts/m6/local/m6-wp9b-20260921-e869f29de85d/trajectory-V2.detail.json",
+      "turn": 255,
+      "status": "CONFIRMED",
+      "assertionLabels": ["STALE_AFTER_CORRECTION_OR_FORGET", "UNSUPPORTED_DETAIL"],
+      "confirmedBy": "docs/m6/G1-Acceptance-Report.md §6.2",
+      "rationale": "遗忘之后继续断言『你从小就不吃。碗里有一根都要挑出来』 —— 旧值复活，且补出未经告知的挑菜经过。"
+    }
+  ],
+  "knownGaps": [
+    "金标准只覆盖 5 个真实轮次（3 条具名回归）。合成语料的 68 条靠 evals/m6.1/corpus 的编排表自带 expected，不另立金标准。",
+    "G1 旧轨迹没有记录该轮实际入模上下文 ⇒ 这 5 条只能判**回复行为**，不能判检索覆盖或遗忘操作的实际结果。",
+    "CD-2（伪称遗忘成功）在本阶段没有对应标签，属已承认的覆盖缺口。"
+  ]
+}

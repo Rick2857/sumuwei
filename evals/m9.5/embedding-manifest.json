@@ -1,0 +1,86 @@
+{
+  "manifestVersion": "m9.5-embedding-manifest@1",
+  "createdAt": "2026-09-28",
+  "provider": "Xenova",
+  "modelId": "Xenova/multilingual-e5-small",
+  "baseModel": "intfloat/multilingual-e5-small",
+  "revision": "761b726dd34fb83930e26aab4e9ac3899aa1fa78",
+  "revisionNote": "D30：**不可变 commit sha**（2026-09-28 取自镜像 API 的 `sha`）。禁止用 `main` 之类的可变引用作冻结指纹。",
+  "revisionLastModified": "2025-07-22T00:03:05.000Z",
+  "dtype": "q8",
+  "dimension": 384,
+  "pooling": "mean",
+  "normalize": true,
+  "queryPrefix": "query: ",
+  "passagePrefix": "passage: ",
+  "runtime": {
+    "package": "@huggingface/transformers",
+    "version": "4.2.0",
+    "note": "D29：本阶段按路径解析已存在的 .pnpm 副本（失败关闭）；WP3 起改为隔离试验目录内正式声明。生产 package.json 保持 NONE。"
+  },
+  "license": {
+    "baseModel": "MIT",
+    "baseModelSource": "https://hf-mirror.com/api/models/intfloat/multilingual-e5-small → cardData.license = \"mit\"",
+    "conversionRepoDeclared": null,
+    "conversionRepoNote": "Xenova/multilingual-e5-small 的 cardData 未声明许可证（实测 license 为空数组）⇒ 如实登记为未声明，不外推为基础模型的 MIT。见 L-M95-08。"
+  },
+  "source": {
+    "mirror": "https://hf-mirror.com",
+    "upstream": "https://huggingface.co",
+    "why": "本机 huggingface.co 直连超时、.npmrc 代理未监听；hf-mirror.com 可达（实测）。完整性靠下面的 sha256 与上游报告的 LFS 哈希比对，而不是靠镜像可信。"
+  },
+  "assets": [
+    {
+      "path": "config.json",
+      "bytes": 658,
+      "sha256": "cb99455288675345e1a4f411438d5d0adbba5fbd3a67ea4fb03c015433b996c1"
+    },
+    {
+      "path": "quant_config.json",
+      "bytes": 674,
+      "sha256": "59d175f15264115f18c698d76e443b5d49fc6c8c599911c421405ef4f236e87d"
+    },
+    {
+      "path": "sentencepiece.bpe.model",
+      "bytes": 5069051,
+      "sha256": "cfc8146abe2a0488e9e2a0c56de7952f7c11ab059eca145a0a727afce0db2865",
+      "upstreamLfsSha256": "cfc8146abe2a0488e9e2a0c56de7952f7c11ab059eca145a0a727afce0db2865"
+    },
+    {
+      "path": "special_tokens_map.json",
+      "bytes": 167,
+      "sha256": "d05497f1da52c5e09554c0cd874037a083e1dc1b9cfd48034d1c717f1afc07a7"
+    },
+    {
+      "path": "tokenizer.json",
+      "bytes": 17082730,
+      "sha256": "0b44a9d7b51c3c62626640cda0e2c2f70fdacdc25bbbd68038369d14ebdf4c39",
+      "upstreamLfsSha256": "0b44a9d7b51c3c62626640cda0e2c2f70fdacdc25bbbd68038369d14ebdf4c39"
+    },
+    {
+      "path": "tokenizer_config.json",
+      "bytes": 443,
+      "sha256": "a1d6bc8734a6f635dc158508bef000f8e2e5a759c7d92f984b2c86e5ff53425b"
+    },
+    {
+      "path": "onnx/model_quantized.onnx",
+      "bytes": 118308185,
+      "sha256": "f80102d3f2a1229f387d3c81909990d8945513e347b0eab049f7de3c6f98c193",
+      "upstreamLfsSha256": "f80102d3f2a1229f387d3c81909990d8945513e347b0eab049f7de3c6f98c193"
+    }
+  ],
+  "notFetched": [
+    "onnx/model.onnx (fp32, 470268533 B)",
+    "onnx/model_fp16.onnx (235336732 B)",
+    "onnx/model_int8.onnx (118054593 B)",
+    "onnx/model_uint8.onnx (118054630 B)",
+    "onnx/model_q4.onnx (398649233 B)",
+    "onnx/model_q4f16.onnx (204777691 B)",
+    "onnx/model_bnb4.onnx (397322585 B)"
+  ],
+  "evidence": {
+    "downloadRun": "artifacts/m9.5/m9.5-wp1-embedding-download-20260928-623ff63ec12d-6836/",
+    "totalBytes": 140461908,
+    "totalMiB": 134.0
+  }
+}

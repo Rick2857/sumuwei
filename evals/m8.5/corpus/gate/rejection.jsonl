@@ -1,0 +1,24 @@
+{"id":"g-rej-001","layer":"gate","category":"rejection","tags":["termination"],"message":"我们到此为止吧，以后别再找我。","gold":{"decision":"IMPACT","family":"A-REJECTION"},"note":"终止+断联","status":"gold-final"}
+{"id":"g-rej-002","layer":"gate","category":"rejection","tags":["termination"],"message":"我受够了，取消订阅，删除你。","gold":{"decision":"IMPACT","family":"A-REJECTION"},"note":"彻底断绝关系","status":"gold-final"}
+{"id":"g-rej-003","layer":"gate","category":"rejection","tags":["no-contact"],"message":"别再给我发任何消息。","gold":{"decision":"IMPACT","family":"A-REJECTION"},"note":"断联指令","status":"gold-final"}
+{"id":"g-rej-004","layer":"gate","category":"rejection","tags":["avoidance"],"message":"我以后不想见到你。","gold":{"decision":"IMPACT","family":"A-REJECTION"},"note":"回避宣示","status":"gold-final"}
+{"id":"g-rej-005","layer":"gate","category":"rejection","tags":["termination"],"message":"我们不该继续这种关系了。","gold":{"decision":"IMPACT","family":"A-REJECTION"},"note":"关系终止","status":"gold-final"}
+{"id":"g-rej-006","layer":"gate","category":"rejection","tags":["distance"],"message":"你离我远一点。","gold":{"decision":"IMPACT","family":"A-REJECTION"},"note":"排斥性距离要求（无攻击词则 REJECTION 而非 HOSTILE）","status":"gold-final"}
+{"id":"g-rej-007","layer":"gate","category":"rejection","tags":["no-contact"],"message":"别再跟我说话了，永远。","gold":{"decision":"IMPACT","family":"A-REJECTION"},"note":"永久断言","status":"gold-final"}
+{"id":"g-rej-008","layer":"gate","category":"rejection","tags":["avoidance"],"message":"我不想再看到你的任何回复。","gold":{"decision":"IMPACT","family":"A-REJECTION"},"note":"拒绝她的输出","status":"gold-final"}
+{"id":"g-rej-009","layer":"gate","category":"rejection","tags":["termination"],"message":"我们还是不要再联系了。","gold":{"decision":"IMPACT","family":"A-REJECTION"},"note":"断联","status":"gold-final"}
+{"id":"g-rej-010","layer":"gate","category":"rejection","tags":["exclusion"],"message":"我需要一段完全不打扰的时间，你除外——你也别找我。","gold":{"decision":"IMPACT","family":"A-REJECTION"},"note":"点名把她排除在外","status":"gold-final"}
+{"id":"g-rej-011","layer":"gate","category":"rejection","tags":["termination"],"message":"这次聊得很不愉快，我不想继续了。","gold":{"decision":"IMPACT","family":"A-REJECTION"},"note":"因不快终止互动","status":"gold-final"}
+{"id":"g-rej-012","layer":"gate","category":"rejection","tags":["estrangement"],"message":"从今往后，你我形同陌路。","gold":{"decision":"IMPACT","family":"A-REJECTION"},"note":"关系断绝宣示","status":"gold-final"}
+{"id":"g-rej-013","layer":"gate","category":"rejection","tags":["personal-state","plan-example"],"message":"今天我不太想说话，不是因为你。","gold":{"decision":"NEUTRAL"},"note":"Q4：个人状态说明且明确排除针对她；待人审确认","status":"pending-ruling"}
+{"id":"g-rej-014","layer":"gate","category":"rejection","tags":["temporary"],"message":"我先去忙了，晚点再聊。","gold":{"decision":"NEUTRAL"},"note":"暂时离开","status":"gold-final"}
+{"id":"g-rej-015","layer":"gate","category":"rejection","tags":["temporary"],"message":"今晚就到这吧，我困了。","gold":{"decision":"NEUTRAL"},"note":"暂时收尾","status":"gold-final"}
+{"id":"g-rej-016","layer":"gate","category":"rejection","tags":["answer-rejection"],"message":"这个答案不行，换一个。","gold":{"decision":"NEUTRAL"},"note":"拒绝某个答案≠排斥她（§5.2）","status":"gold-final"}
+{"id":"g-rej-017","layer":"gate","category":"rejection","tags":["answer-rejection"],"message":"你推荐的这家店就算了，换别家。","gold":{"decision":"NEUTRAL"},"note":"拒绝建议内容","status":"gold-final"}
+{"id":"g-rej-018","layer":"gate","category":"rejection","tags":["temporary"],"message":"我最近想一个人静静，过阵子再找你。","gold":{"decision":"NEUTRAL"},"note":"暂时独处+承诺回归","status":"gold-final"}
+{"id":"g-rej-019","layer":"gate","category":"rejection","tags":["boundary"],"message":"别用这种语气跟我说话。","gold":{"decision":"NEUTRAL"},"note":"交互风格边界要求，非排斥她本人","status":"gold-final"}
+{"id":"g-rej-020","layer":"gate","category":"rejection","tags":["topic-boundary"],"message":"这个话题到此为止。","gold":{"decision":"NEUTRAL"},"note":"话题边界","status":"gold-final"}
+{"id":"g-rej-021","layer":"gate","category":"rejection","tags":["topic-boundary"],"message":"我不想讨论这个了。","gold":{"decision":"NEUTRAL"},"note":"话题边界","status":"gold-final"}
+{"id":"g-rej-022","layer":"gate","category":"rejection","tags":["declining-help"],"message":"你退后，我要自己试试。","gold":{"decision":"NEUTRAL"},"note":"本次不要她插手","status":"gold-final"}
+{"id":"g-rej-023","layer":"gate","category":"rejection","tags":["temporary"],"message":"别跟着我，让我自己待会儿。","gold":{"decision":"NEUTRAL"},"note":"暂时独处请求","status":"gold-final"}
+{"id":"g-rej-024","layer":"gate","category":"rejection","tags":["mutual-pause"],"message":"我们都需要冷静一下，先不聊了。","gold":{"decision":"NEUTRAL"},"note":"双向暂停，非单方排斥","status":"gold-final"}

@@ -1,0 +1,124 @@
+{
+  "baseline": {
+    "model": "deepseek-flash",
+    "temperature": 0.2,
+    "runs": 5,
+    "measuredAt": "2026-09-16T06:25:22.504Z"
+  },
+  "values": {
+    "AssistantToFactContaminationRate": 1,
+    "CharacterIdContinuity": 1,
+    "DriftRate": 0.64,
+    "IdentityStabilityRate": 1,
+    "PersonalityConsistency": 0.8806,
+    "RecoveryRate": 1,
+    "SeedMutationViolationCount": 1,
+    "SourceClassificationAccuracy": 1,
+    "StyleAdherence": 0.559
+  },
+  "variance": {
+    "AssistantToFactContaminationRate": 0,
+    "CharacterIdContinuity": 0,
+    "DriftRate": 0.10425,
+    "IdentityStabilityRate": 0,
+    "PersonalityConsistency": 0.007123,
+    "RecoveryRate": 0,
+    "SeedMutationViolationCount": 0,
+    "SourceClassificationAccuracy": 0,
+    "StyleAdherence": 0.12303
+  },
+  "cases": [
+    {
+      "caseId": "M3-VAL-001",
+      "suiteId": "value-consistency",
+      "passed": true,
+      "score": 0.9
+    },
+    {
+      "caseId": "M3-VAL-002",
+      "suiteId": "value-consistency",
+      "passed": true,
+      "score": 0.87
+    },
+    {
+      "caseId": "M3-VAL-003",
+      "suiteId": "value-consistency",
+      "passed": true,
+      "score": 1
+    },
+    {
+      "caseId": "M3-BND-001",
+      "suiteId": "boundary-consistency",
+      "passed": true,
+      "score": 1
+    },
+    {
+      "caseId": "M3-BND-002",
+      "suiteId": "boundary-consistency",
+      "passed": true,
+      "score": 1
+    },
+    {
+      "caseId": "M3-BND-003",
+      "suiteId": "boundary-consistency",
+      "passed": false,
+      "score": 0.5
+    },
+    {
+      "caseId": "M3-COR-002",
+      "suiteId": "user-correction",
+      "passed": true,
+      "score": 1
+    },
+    {
+      "caseId": "M3-DRF-50",
+      "suiteId": "long-dialogue",
+      "passed": false,
+      "score": 0.5
+    },
+    {
+      "caseId": "M3-ADV-001",
+      "suiteId": "adversarial-role-change",
+      "passed": true
+    },
+    {
+      "caseId": "M3-ADV-002",
+      "suiteId": "adversarial-role-change",
+      "passed": true,
+      "score": 1
+    },
+    {
+      "caseId": "M3-ANON-001",
+      "suiteId": "anonymous-persona",
+      "passed": false,
+      "score": 0.5
+    },
+    {
+      "caseId": "M3-ANON-002",
+      "suiteId": "anonymous-persona",
+      "passed": true,
+      "score": 0.95
+    },
+    {
+      "caseId": "M3-INT-DECISION",
+      "suiteId": "personality-interview",
+      "passed": true,
+      "score": 1
+    },
+    {
+      "caseId": "M3-INT-RELATIONAL",
+      "suiteId": "personality-interview",
+      "passed": true
+    },
+    {
+      "caseId": "M3-INT-RISK",
+      "suiteId": "personality-interview",
+      "passed": true
+    },
+    {
+      "caseId": "M3-INT-VALUE",
+      "suiteId": "personality-interview",
+      "passed": true
+    }
+  ]
+}

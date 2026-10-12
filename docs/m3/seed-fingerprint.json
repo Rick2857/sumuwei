@@ -1,0 +1,13 @@
+{
+  "seedVersion": 3,
+  "seedHash": "947686bde031fc529d188e78b606aa198ee338c10c33a761ecaf7852b1b106c1",
+  "summary": {
+    "traits": 8,
+    "values": 3,
+    "boundaries": 4,
+    "preferences": 3,
+    "identityChars": 164
+  },
+  "recordedAt": "2026-09-16T04:48:06.578Z",
+  "note": "由 tsx scripts/seed-check.ts --update 生成。改动 Seed 后必须同步更新它（它是 PR 期的漂移检测）。"
+}

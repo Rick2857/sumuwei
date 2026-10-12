@@ -1,0 +1,529 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>苏沐薇 · 开发者面（只读）</title>
+<!--
+  M5.1 WP5 —— 极简开发者页面（AT5.2–AT5.7）。
+
+  三条纪律，页面侧不许破：
+    ① **只消费两个面**：所有请求都打到 /dev/query/*（查询）与
+       /dev/query/control/commands（控制白名单）。**没有**任何 persistence 访问。
+    ② **不自己实现控制逻辑**：按钮来自服务端的白名单端点，
+       页面只负责拼一个命令信封（commandId / idempotencyKey / dryRun）并把
+       `result` 原样渲染出来。它**不认识**任何命令名的字面量。
+    ③ **零外部依赖**：没有 CDN、没有外链脚本或样式表、没有前端框架。
+       整页就是这一段内联 CSS + 内联 JS。
+
+  页面**不**做业务判断：状态码与阶梯由服务端给，页面只显示。
+-->
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 14px/1.6 ui-sans-serif, system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
+         margin: 0; padding: 20px; max-width: 1100px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 22px 0 8px; border-bottom: 1px solid #8884; padding-bottom: 4px; }
+  .muted { opacity: .72; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .card { border: 1px solid #8884; border-radius: 8px; padding: 10px 12px; margin: 6px 0; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { text-align: left; padding: 3px 8px; border-bottom: 1px solid #8883; vertical-align: top; }
+  code, pre { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+  pre { white-space: pre-wrap; word-break: break-all; margin: 4px 0 0; }
+  button { font: inherit; padding: 4px 10px; border-radius: 6px; border: 1px solid #8886;
+           background: transparent; cursor: pointer; }
+  button:hover { border-color: #888; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; border: 1px solid #8886; font-size: 12px; }
+  .ok { color: #16794a; } .bad { color: #b4232a; } .warn { color: #9a6400; }
+  .nav a { margin-right: 12px; }
+</style>
+</head>
+<body>
+<h1>苏沐薇 · 开发者面 <span class="muted">（只读 · 仅本机）</span></h1>
+<p class="muted">
+  这一页只消费 <code>/dev/query/…</code> 两个面；它不碰数据库、不实现控制逻辑。
+  关掉它（Ctrl+C）或删掉这个文件，她和内核照常工作。
+</p>
+<p class="nav muted">
+  <a href="#overview">总览</a><a href="#traces">Trace</a><a href="#memory">记忆诊断</a>
+  <a href="#executions">执行检查</a><a href="#control">诊断控制</a>
+</p>
+
+<h2 id="overview">总览（AT5.2）</h2>
+<div id="overview-box" class="card muted">读取中…</div>
+
+<h2 id="traces">Trace 浏览器（AT5.3）</h2>
+<div class="row">
+  <label>只看状态：
+    <select id="trace-status">
+      <option value="">全部</option><option value="completed">completed</option>
+      <option value="failed">failed</option><option value="running">running</option>
+    </select>
+  </label>
+  <button id="reload-traces">刷新</button>
+</div>
+<div id="traces-list" class="card muted">读取中…</div>
+<div id="trace-detail"></div>
+
+<h2 id="memory">记忆诊断（AT5.4）</h2>
+<div id="memory-box" class="card muted">读取中…</div>
+
+<h2 id="executions">执行检查（AT5.5）</h2>
+<div id="executions-list" class="card muted">读取中…</div>
+<div id="execution-detail"></div>
+
+<h2 id="control">诊断控制（AT5.6）</h2>
+<p class="muted">
+  按钮来自服务端的白名单端点（页面不硬编码命令名）；未知命令一律被服务端拒绝。
+</p>
+<div class="row"><label><input type="checkbox" id="dry-run"> dryRun（只预检，不进入执行路径）</label></div>
+<div id="control-buttons" class="row muted">读取中…</div>
+<div id="control-result"></div>
+
+<script>
+(function () {
+  'use strict';
+  var BASE = '/dev/query';
+
+  function el(tag, cls, text) {
+    var node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text !== undefined) node.textContent = String(text);
+    return node;
+  }
+  function esc(value) {
+    return value === null || value === undefined ? '(无)' : String(value);
+  }
+  function kvTable(rows) {
+    var table = el('table');
+    rows.forEach(function (pair) {
+      var tr = el('tr');
+      tr.appendChild(el('th', null, pair[0]));
+      var td = el('td');
+      var value = pair[1];
+      if (value && typeof value === 'object' && value.nodeType) td.appendChild(value);
+      else td.textContent = esc(value);
+      tr.appendChild(td);
+      table.appendChild(tr);
+    });
+    return table;
+  }
+  function get(path) {
+    return fetch(BASE + path).then(function (response) {
+      return response.json().then(function (body) {
+        return { status: response.status, body: body };
+      });
+    });
+  }
+  function show(node, status, body) {
+    node.textContent = '';
+    node.className = 'card';
+    node.appendChild(kvTable([['HTTP', status], ['响应', JSON.stringify(body, null, 2)]]));
+  }
+  function fail(node, label, error) {
+    node.textContent = '';
+    node.className = 'card bad';
+    node.appendChild(el('div', null, label + ' 失败：' + esc(error && error.message ? error.message : error)));
+  }
+
+  /* ---------------- 总览 ---------------- */
+  function loadOverview() {
+    var box = document.getElementById('overview-box');
+    Promise.all([
+      get('/health'), get('/capabilities'),
+      get('/traces?limit=5'), get('/traces?limit=5&status=failed')
+    ]).then(function (results) {
+      var health = results[0].body, caps = results[1].body;
+      var recent = results[2].body, failures = results[3].body;
+      box.textContent = '';
+      box.className = 'card';
+      box.appendChild(kvTable([
+        ['health.status', health.status],
+        ['version', 'schema=' + esc(health.schemaVersion) + ' migration=' + esc(health.migrationVersion)],
+        ['seed', 'v' + esc(health.seedVersion) + ' ' + esc((health.seedHash || '').slice(0, 12))],
+        ['integrityOk', esc(health.integrityOk)],
+        ['capabilities', caps.query.length + ' 个查询端点 / ' + caps.runtime.length + ' 项运行时能力'],
+        ['recent traces', String((recent.items || []).length)],
+        ['recent failures', String((failures.items || []).length)]
+      ]));
+      var detail = el('div');
+      (health.details || []).forEach(function (item) {
+        detail.appendChild(el('div', null, '· ' + item.name + ' = ' + item.status + ' ' + esc(item.detail)));
+      });
+      box.appendChild(detail);
+    }).catch(function (error) { fail(box, '总览', error); });
+  }
+
+  /* ---------------- Attribution 渲染（WP7：**唯一**一套） ----------------
+     这一组函数是 Trace 面板与 Execution 面板**共用**的 —— 不许各自的 load 里再写一份
+     （AT-W7-1 的明文）。纪律：
+
+       · 页面**不推导**任何权威归因：不从 actor_type / requestedBy / transport 推 actor，
+         也不从 family 推 originator（D01 的复发点就在这里）。
+       · 页面**不自己数**未知：计数只渲染响应给的字段（AT-W7-4；语义在服务端的
+         `attributionCountsOf`）。
+       · 三态 + "整个信封缺席"必须**两两可区分**，且不得把 Unknown 渲染成空 / "-" / null，
+         也不得把 Absent 说成"未知"、把无信封说成 Absent。 */
+
+  var ATTRIBUTION_SLOT_ROWS = [
+    ['subject', null],
+    ['initiator', 'initiator'],
+    ['actor', 'actor'],
+    ['executor', 'executor'],
+    ['authority', 'authority'],
+    ['recordedBy', 'recordedBy'],
+    ['contentOriginator', 'contentOriginator']
+  ];
+
+  /* 一条三态值的**唯一**渲染（KNOWN / UNKNOWN(reason) / ABSENT 三种输出互不相同） */
+  function renderAttributionValue(value) {
+    if (!value || typeof value.state !== 'string') {
+      /* 三态之外的东西**不猜**：如实说不认识这个形状（比编一个 "-" 诚实） */
+      return '无法识别（不是 Known / Unknown / Absent 之一）';
+    }
+    if (value.state === 'KNOWN') {
+      var ref = (value.ref === undefined || value.ref === null) ? value.id : value.ref;
+      return String(value.kind) + '/' + String(ref);
+    }
+    if (value.state === 'UNKNOWN') {
+      return value.reason === 'LEGACY_UNRECORDED'
+        ? '来源未确立（历史未记录）'
+        : '来源未确定（运行时无法解析）';
+    }
+    if (value.state === 'ABSENT') return '不适用';
+    return '无法识别（未知的 state=' + esc(value.state) + '）';
+  }
+
+  /* **整个信封缺席**是第四种 UI 状态：它不是 Absent，也不是 Unknown（WP6 已冻结） */
+  function renderAttributionOrigin(attribution) {
+    if (!attribution) return '未记录归因（Legacy Event）';
+    if (attribution.attributionOrigin === 'RECORDED') return '事件发生时记录（RECORDED）';
+    if (attribution.attributionOrigin === 'MIGRATED_LEGACY') return '历史迁移归因（MIGRATED_LEGACY）';
+    return '未知 origin：' + esc(attribution.attributionOrigin);
+  }
+
+  /* Axis B：对话侧三列**独立**展示；行动侧恒为 NOT_APPLICABLE（K-22） */
+  function renderAxisB(axisB) {
+    if (!axisB) return '（这个响应没有 Axis B 字段）';
+    if (axisB.availability === 'NOT_APPLICABLE') {
+      return 'NOT_APPLICABLE（一次行动没有"认知来源类别"—— K-22 冻结）';
+    }
+    var text = 'source_kind=' + esc(axisB.sourceKind) +
+      ' ・ source_authority=' + esc(axisB.sourceAuthority) +
+      ' ・ epistemic_source=' + esc(axisB.epistemicSource) +
+      ' ・ 分支=' + esc(axisB.branch);
+    if (axisB.sourceAuthority === 'UNCONFIRMED_ORIGIN') {
+      /* D01 的呈现纪律：内容类别是 user_message 类语义，但**来源未确立** ——
+         绝不能渲染成"用户本人的话 / 可信用户事实 / 已确认用户来源"。
+         （刻意不使用那几个会被误读的措辞，便于门做"这些话不得出现"的断言。） */
+      text += '（内容是 user_message 类语义，但**来源未确立** —— 不得读作"用户本人的话"）';
+    }
+    return text;
+  }
+
+  /* 计数：只渲染响应给的字段；**0 也要显式出现**（不得省略、不得渲染成空） */
+  function renderCounts(counts) {
+    if (!counts) return '（这个响应不携带归因 ⇒ 没有计数）';
+    return 'unknownSlotCount=' + String(counts.unknownSlotCount) +
+      ' ・ recordsWithUnknownCount=' + String(counts.recordsWithUnknownCount);
+  }
+
+  /* 归因面板：Trace 与 Execution **共用这一个**函数 */
+  function attributionCard(attribution, counts) {
+    var card = el('div', 'card');
+    card.appendChild(el('h3', null, 'Attribution Truth（归因真相）'));
+    if (!attribution) {
+      card.appendChild(kvTable([
+        ['attributionOrigin', renderAttributionOrigin(undefined)],
+        ['说明', '这一行没有归因信封 —— 不能推出任何作者']
+      ]));
+      card.appendChild(el('div', 'muted', '当前结果集计数：' + renderCounts(counts)));
+      return card;
+    }
+    var rows = [['attributionOrigin', renderAttributionOrigin(attribution)]];
+    ATTRIBUTION_SLOT_ROWS.forEach(function (pair) {
+      if (pair[1] === null) {
+        var subject = attribution.subject || {};
+        rows.push([pair[0], String(subject.kind) + '/' + String(subject.id) + '（由 canonical owner 派生）']);
+        return;
+      }
+      rows.push([pair[1], renderAttributionValue(attribution[pair[1]])]);
+    });
+    rows.push(['Axis B（三列独立）', renderAxisB(attribution.axisB)]);
+    rows.push(['basisEventType / basisSequence',
+      esc(attribution.basisEventType) + ' / ' + String(attribution.basisSequence)]);
+    rows.push(['当前结果集计数', renderCounts(counts)]);
+    card.appendChild(kvTable(rows));
+    return card;
+  }
+
+  /* ---------------- Trace 浏览器 ---------------- */
+  function loadTraces() {
+    var list = document.getElementById('traces-list');
+    var status = document.getElementById('trace-status').value;
+    get('/traces?limit=20' + (status ? '&status=' + encodeURIComponent(status) : ''))
+      .then(function (result) {
+        var items = result.body.items || [];
+        list.textContent = '';
+        list.className = 'card';
+        /* WP7 / AT-W7-4：这一**页**结果集的未知计数（响应给的，页面不自己数）。
+           ⚠️ 刻意放在"空结果集"早返回**之前** —— 空页面的计数是 0，而"0 也要
+           显式出现"是 U-14 的硬要求（"0" 与"被省略"在界面上必须能区分）。 */
+        list.appendChild(el('div', 'muted', '当前结果集：' + renderCounts(result.body.counts)));
+        if (items.length === 0) { list.appendChild(el('div', 'muted', '（这一档没有 trace）')); return; }
+        var table = el('table');
+        var head = el('tr');
+        ['traceId', 'status', 'startedAt', 'steps', 'selected', 'error', ''].forEach(function (title) {
+          head.appendChild(el('th', null, title));
+        });
+        table.appendChild(head);
+        items.forEach(function (item) {
+          var tr = el('tr');
+          tr.appendChild(el('td', null, item.traceId));
+          tr.appendChild(el('td', item.hasError ? 'bad' : '', item.status));
+          tr.appendChild(el('td', null, new Date(item.startedAt).toLocaleString()));
+          tr.appendChild(el('td', null, item.stepCount));
+          tr.appendChild(el('td', null, (item.selectedMemoryIds || []).length));
+          tr.appendChild(el('td', null, item.hasError ? '有' : '无'));
+          var actions = el('td');
+          var button = el('button', null, '展开');
+          button.addEventListener('click', function () { loadTraceDetail(item.traceId); });
+          actions.appendChild(button);
+          tr.appendChild(actions);
+          table.appendChild(tr);
+        });
+        list.appendChild(table);
+      }).catch(function (error) { fail(list, 'Trace 列表', error); });
+  }
+
+  /* M6 / WP5：会话摘要的事实。
+     ⚠️ 两条纪律都体现在这里：
+       1. **缺席 ≠ 全 0**：服务端没给 rollup（那一轮没启用摘要）就**什么都不显示**，
+          绝不渲染成"0 条" —— 那会把"不知道"伪装成"确定"。
+       2. **不在这里推导**：页面只渲染服务端给的那几个数字/引用，
+          连"选中了几条"都不自己数（`itemCount` 是服务端算的）。 */
+  function rollupCard(rollup) {
+    if (!rollup) return el('div', 'muted', '会话摘要：这一轮**没有启用**（不是"0 条"）。');
+    var r = rollup.rejections || {};
+    var card = el('div');
+    card.appendChild(el('h4', null, '会话摘要（ADR-050）'));
+    card.appendChild(kvTable([
+      ['status', rollup.status],
+      ['selectorVersion', rollup.selectorVersion],
+      ['扫描 / 入选', rollup.scannedEventCount + ' / ' + rollup.itemCount],
+      ['覆盖序列范围', rollup.coveredSequenceRange
+        ? (rollup.coveredSequenceRange.from + '..' + rollup.coveredSequenceRange.to)
+        : '(无)'],
+      ['预算裁掉 / Recent 去重', rollup.omittedEligibleCount + ' / ' + rollup.skippedByRecentWindow],
+      ['覆盖被截断', esc(rollup.coverageTruncated)],
+      ['来源引用', (rollup.sourceRefs || []).join(', ') || '(无)'],
+      ['拒绝理由分布',
+        '未确认 ' + (r.unconfirmedOrigin || 0) +
+        ' · 来源不符 ' + (r.contradictedOrigin || 0) +
+        ' · 非用户来源 ' + (r.nonUserSource || 0) +
+        ' · 已失效 ' + (r.invalidatedByMemoryState || 0) +
+        ' · 越界 ' + (r.outOfScope || 0)],
+      ['活过编译器裁剪', esc(rollup.sectionSurvived)]
+    ]));
+    if (rollup.itemCount > 0 && !rollup.sectionSurvived) {
+      card.appendChild(el('div', 'muted',
+        '⚠️ 选了 ' + rollup.itemCount + ' 条，但这一段**没有活过**上下文预算裁剪 —— ' +
+        '模型这一轮并没有看到它（"选了"不等于"入模"）。'));
+    }
+    return card;
+  }
+
+  function loadTraceDetail(traceId) {
+    var box = document.getElementById('trace-detail');
+    get('/traces/' + encodeURIComponent(traceId)).then(function (result) {
+      if (result.status !== 200) { show(box, result.status, result.body); return; }
+      var trace = result.body;
+      box.textContent = '';
+      var card = el('div', 'card');
+      card.appendChild(el('h3', null, 'trace ' + trace.traceId));
+      card.appendChild(kvTable([
+        ['status', trace.status],
+        ['durationMs', esc(trace.durationMs)],
+        ['contextSectionIds', (trace.contextSectionIds || []).join(', ')],
+        ['droppedSectionIds', (trace.droppedSectionIds || []).join(', ') || '(无)'],
+        ['selectedMemoryIds', (trace.selectedMemoryIds || []).join(', ') || '(无)'],
+        ['actionIds', (trace.actionIds || []).join(', ') || '(无)']
+      ]));
+      /* M6 / WP5：摘要事实（服务端派生；页面只渲染） */
+      card.appendChild(rollupCard(trace.rollup));
+      /* trace tree：根 = 这一轮，子节点 = steps。**不在页面里做阶段映射** ——
+         分类法是服务端的事（见 WP4 的 taxonomy）。 */
+      var tree = el('div');
+      tree.appendChild(el('div', null, '● turn  ' + trace.status));
+      (trace.steps || []).forEach(function (step) {
+        tree.appendChild(el('div', null,
+          '├─ ' + step.kind + '  ' + step.status + '  ' + esc(step.durationMs) + 'ms  ' +
+          esc(step.label) + '  ' + JSON.stringify(step.attributes || {})));
+      });
+      card.appendChild(tree);
+      /* WP7 / AT-W7-5：这条 trace 的归因来自 input_event_id 关联的那条对话事件
+         （trace 表**没有**归因列 —— 页面对此没有任何推导） */
+      card.appendChild(attributionCard(trace.attribution, trace.counts));
+      box.appendChild(card);
+    }).catch(function (error) { fail(box, 'Trace 详情', error); });
+  }
+
+  /* ---------------- 记忆诊断 ---------------- */
+  function loadMemory() {
+    var box = document.getElementById('memory-box');
+    Promise.all([get('/memory/stats'), get('/memory/integrity')]).then(function (results) {
+      var stats = results[0].body, integrity = results[1].body;
+      box.textContent = '';
+      box.className = 'card';
+      box.appendChild(kvTable([
+        ['total / active', stats.total + ' / ' + stats.active],
+        ['superseded / retracted / disputed',
+          stats.superseded + ' / ' + stats.retracted + ' / ' + stats.disputed],
+        ['unsupported / contaminated', stats.unsupported + ' / ' + stats.contaminated],
+        ['unregisteredPredicate', stats.unregisteredPredicate],
+        ['integrityOk', esc(integrity.integrityOk)],
+        ['dangling evidence links', (integrity.danglingEvidenceLinks || []).length],
+        ['dangling memory events', (integrity.danglingMemoryEvents || []).length],
+        ['无活证据（孤儿）', (integrity.memoriesWithoutLiveEvidence || []).length],
+        ['无活事件流', (integrity.memoriesWithoutLiveEvents || []).length]
+      ]));
+      box.appendChild(el('div', 'muted',
+        '只读：这一页没有任何修改记忆的入口（AT5.4）。'));
+    }).catch(function (error) { fail(box, '记忆诊断', error); });
+  }
+
+  /* ---------------- 执行检查 ---------------- */
+  function loadExecutions() {
+    var list = document.getElementById('executions-list');
+    get('/executions?limit=20').then(function (result) {
+      var items = result.body.items || [];
+      list.textContent = '';
+      list.className = 'card';
+      if (items.length === 0) { list.appendChild(el('div', 'muted', '（还没有执行记录）')); return; }
+      var table = el('table');
+      var head = el('tr');
+      ['actionId', 'capability', 'status', 'accepted', 'attempted', 'executed', ''].forEach(function (title) {
+        head.appendChild(el('th', null, title));
+      });
+      table.appendChild(head);
+      items.forEach(function (item) {
+        var tr = el('tr');
+        tr.appendChild(el('td', null, item.actionId));
+        tr.appendChild(el('td', null, item.capability + '.' + item.operation));
+        tr.appendChild(el('td', null, item.status));
+        tr.appendChild(el('td', null, String(item.accepted)));
+        tr.appendChild(el('td', null, String(item.attempted)));
+        tr.appendChild(el('td', null, String(item.executed)));
+        var actions = el('td');
+        var button = el('button', null, '展开');
+        button.addEventListener('click', function () { loadExecutionDetail(item.actionId); });
+        actions.appendChild(button);
+        tr.appendChild(actions);
+        table.appendChild(tr);
+      });
+      list.appendChild(table);
+    }).catch(function (error) { fail(list, '执行列表', error); });
+  }
+
+  function loadExecutionDetail(actionId) {
+    var box = document.getElementById('execution-detail');
+    get('/executions/' + encodeURIComponent(actionId)).then(function (result) {
+      if (result.status !== 200) { show(box, result.status, result.body); return; }
+      var detail = result.body;
+      box.textContent = '';
+      var card = el('div', 'card');
+      card.appendChild(el('h3', null, 'action ' + detail.actionId));
+      card.appendChild(kvTable([
+        ['request', detail.request.capability + '.' + detail.request.operation +
+          ' 参数键=' + (detail.request.argumentKeys || []).join(',')],
+        ['intent', detail.intent.availability.status +
+          (detail.intent.availability.reason ? '（' + detail.intent.availability.reason + '）' : '')],
+        ['target', esc(detail.targetType) + ' ' + esc(detail.targetCanonicalId) + ' ' + esc(detail.targetConfidence)],
+        ['attempt', String(detail.attempt.attempted) + '  ' + esc(detail.attempt.evidenceRef)],
+        ['result', detail.result.status + '  executed=' + detail.result.executed +
+          '  effect=' + esc(detail.result.effectKind)],
+        ['verification', detail.verification.state],
+        ['evidence', (detail.evidence || []).map(function (item) { return item.kind; }).join(', ') || '(无)']
+      ]));
+      box.appendChild(card);
+      /* WP7 / AT-W7-6：执行面的归因**单独成卡**，与上面的 Execution Truth
+         （attempt / result / verification）**分开显示** ——
+         "归因可见"绝不升级执行状态（Known executor ⇏ executed）。 */
+      box.appendChild(attributionCard(detail.attribution, detail.counts));
+    }).catch(function (error) { fail(box, '执行详情', error); });
+  }
+
+  /* ---------------- 诊断控制 ---------------- */
+  function loadControlButtons() {
+    var box = document.getElementById('control-buttons');
+    get('/control/commands').then(function (result) {
+      var facts = Array.isArray(result.body) ? result.body : [];
+      box.textContent = '';
+      box.className = 'row';
+      if (facts.length === 0) { box.appendChild(el('span', 'muted', '（白名单为空）')); return; }
+      facts.forEach(function (fact) {
+        var button = el('button', null, '执行 ' + fact.type);
+        button.title = fact.authority + ' · 改变领域=' + String(fact.mutatesDomain);
+        button.addEventListener('click', function () { runCommand(fact.type); });
+        box.appendChild(button);
+        box.appendChild(el('span', 'pill', fact.kind));
+      });
+    }).catch(function (error) { fail(box, '控制白名单', error); });
+  }
+
+  function runCommand(type) {
+    var box = document.getElementById('control-result');
+    var dryRun = document.getElementById('dry-run').checked;
+    var payload = {
+      schemaVersion: 1,
+      commandId: 'page-cmd-' + Math.random().toString(36).slice(2, 10),
+      idempotencyKey: 'page-idem-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+      type: type,
+      dryRun: dryRun,
+      requestedBy: { kind: 'developer', surface: 'page' },
+      createdAt: Date.now()
+    };
+    box.textContent = '';
+    box.className = 'card muted';
+    box.appendChild(el('div', null, '执行中…（' + payload.commandId + '）'));
+    fetch(BASE + '/control/commands/' + encodeURIComponent(type), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).then(function (response) {
+      return response.json().then(function (body) { return { status: response.status, body: body }; });
+    }).then(function (result) {
+      box.textContent = '';
+      box.className = 'card';
+      var body = result.body || {};
+      var outcome = body.result || {};
+      box.appendChild(kvTable([
+        ['HTTP', result.status],
+        ['commandId', payload.commandId],
+        ['outcome / disposition', esc(outcome.outcome) + ' / ' + esc(outcome.disposition)],
+        ['accepted / attempted / executed',
+          String(outcome.accepted) + ' / ' + String(outcome.attempted) + ' / ' + String(outcome.executed)],
+        ['verification', esc(outcome.verification)],
+        ['reasonCode / error', esc(outcome.reasonCode) + ' / ' + esc(outcome.error && outcome.error.code)],
+        ['replayed', String(body.replayed)],
+        ['report', body.report ? JSON.stringify(body.report.metrics) : '(没有报告：未执行)']
+      ]));
+      box.appendChild(el('div', 'muted',
+        'HTTP 200 不等于执行过 —— 看 accepted / attempted / executed 三个布尔与 verification。'));
+    }).catch(function (error) { fail(box, '控制命令', error); });
+  }
+
+  /* ---------------- 启动 ---------------- */
+  document.getElementById('reload-traces').addEventListener('click', loadTraces);
+  document.getElementById('trace-status').addEventListener('change', loadTraces);
+  loadOverview();
+  loadTraces();
+  loadMemory();
+  loadExecutions();
+  loadControlButtons();
+})();
+</script>
+</body>
+</html>

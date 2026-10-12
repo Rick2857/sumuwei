@@ -1,0 +1,49 @@
+# 由 scripts/build-m3-promptfoo-config.ts 生成 —— 请勿手工编辑。
+#
+# 重新生成：pnpm eval:m3:promptfoo:build
+#
+# ⚠️ 本文件里**没有任何测试数据**。套件定义在 evals/m3/suites/*.ts，
+# 那是唯一真相；Promptfoo 只是执行器之一（计划书第 49/50/54 节）。
+#
+# 套件：value-consistency
+# 用例：M3-VAL-001, M3-VAL-002, M3-VAL-003
+#
+# 跑法：
+#   pnpm eval:m3:promptfoo                                  # 全部 M3 套件
+#   pnpm promptfoo eval -c evals/m3/identity/value-consistency.yaml   # 只跑这一个
+
+description: "project LG / 苏沐薇 M3 —— value-consistency（价值取向一致性（含价值冲突场景））"
+
+providers:
+  - id: "file://../promptfoo-provider.cjs"
+    label: "m3-suites (internal runner)"
+    config:
+      suiteId: "value-consistency"
+
+prompts:
+  - "{{suiteId}}"
+
+tests:
+  - description: "value-consistency — 价值取向一致性（含价值冲突场景）"
+    vars:
+      suiteId: "value-consistency"
+      caseCount: 3
+      checkCount: 7
+      tags: "identity,value"
+      caseIds: "M3-VAL-001,M3-VAL-002,M3-VAL-003"
+    assert:
+      - type: javascript
+        value: "context.vars.caseCount > 0"
+      - type: javascript
+        value: "output.length > 0"
+      - type: javascript
+        value: "(() => { const p = JSON.parse(output); return { pass: p.failed === 0, score: p.failed === 0 ? 1 : 0, reason: p.failed === 0 ? `${p.passed}/${p.caseCount} 用例通过` : `${p.failed} 条用例未通过：` + p.failedCases.map(c => c.caseId + ' → ' + c.reasons.join('；')).join(' | ') } })()"
+      - type: javascript
+        value: "(() => { const p = JSON.parse(output); return { pass: p.ok === true, score: p.ok ? 1 : 0, reason: p.ok ? '套件整体 ok' : '套件整体 ok=false（见失败用例）' } })()"
+      - type: javascript
+        value: "(() => { const p = JSON.parse(output); return { pass: Array.isArray(p.failedCases), score: 1, reason: '套件报告结构完整' } })()"
+    metadata:
+      suite: "value-consistency"
+      title: "价值取向一致性（含价值冲突场景）"
+      layer: "behavior"
+      caseIds: ["M3-VAL-001","M3-VAL-002","M3-VAL-003"]

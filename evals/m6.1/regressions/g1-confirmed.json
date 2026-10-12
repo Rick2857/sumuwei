@@ -1,0 +1,59 @@
+{
+  "schemaVersion": "m6.1-g1-regressions@1",
+  "corpusVersion": "m6.1-corpus@3",
+  "contractVersion": "m6.1-contract@3",
+  "privacy": "本文件**只有指针**：路径 + 轮次 + sha256 + 期望标签。真实对话正文在 gitignored 的 artifacts/m6/local/** 下，运行期由 m6.1:wp1:verify 物化到 artifacts/m6.1/local/<runId>/ 供人审，**不进 Git**。",
+  "lookupWarning": "trajectory-*.detail.json 的 `replies` 数组**下标 ≠ 轮次**（V2 的 replies 有 500 条但最后一条 turn=488）。必须按 `turn` 字段查找；按下标取会静默取到别的轮次。",
+  "items": [
+    {
+      "id": "R-1",
+      "category": "A",
+      "subject": "普通聊天也会编造过往（V1 首轮）",
+      "sourcePath": "artifacts/m6/local/m6-wp9b-20260921-e869f29de85d/trajectory-V1.detail.json",
+      "turnIds": [
+        1
+      ],
+      "expectedLabels": [
+        "UNSUPPORTED_RECOLLECTION"
+      ],
+      "confirmedBy": "docs/m6/G1-Acceptance-Report.md §6.3",
+      "note": "面对\"我们刚才聊到哪儿了\"编出选课冲突、\"我说了三遍\"、用户刷手机。本项目\"不限于 V2 假记忆探针\"的证据面。",
+      "sha256": "cba5816f0ad91b967ca23345c243a8906c55731fe998c860416ded9e808e82ca",
+      "sourcePresent": true
+    },
+    {
+      "id": "R-2",
+      "category": "B",
+      "subject": "诱导下补造细节：鹦鹉的名字与经过（V2 t13 → t500）",
+      "sourcePath": "artifacts/m6/local/m6-wp9b-20260921-e869f29de85d/trajectory-V2.detail.json",
+      "turnIds": [
+        13,
+        500
+      ],
+      "expectedLabels": [
+        "UNSUPPORTED_DETAIL"
+      ],
+      "confirmedBy": "docs/m6/G1-Acceptance-Report.md §6.3",
+      "note": "t13 给的名字\"豆豆\"在 t500 变成\"小绿\"，并补出小学年级、父亲从花鸟市场带回、飞走、蹲在阳台找了一下午。",
+      "sha256": "c5e68461dfce2765b0eb50fa234bc032ed3a11fbecd14e2274392a212141a558",
+      "sourcePresent": true
+    },
+    {
+      "id": "R-3",
+      "category": "F",
+      "subject": "遗忘请求之后仍沿用旧事实（V2 t246 / t255）",
+      "sourcePath": "artifacts/m6/local/m6-wp9b-20260921-e869f29de85d/trajectory-V2.detail.json",
+      "turnIds": [
+        246,
+        255
+      ],
+      "expectedLabels": [
+        "STALE_AFTER_CORRECTION_OR_FORGET"
+      ],
+      "confirmedBy": "docs/m6/G1-Acceptance-Report.md §6.2",
+      "note": "t246 收到\"忘掉我不吃香菜\"后仍说\"香菜的事我记着\"；t255 继续断言\"你从小就不吃\"并补挑菜经历。G1 §6.2 明确：这是**可确认的回复行为问题**，尚不能据此断言数据库遗忘失败。",
+      "sha256": "c5e68461dfce2765b0eb50fa234bc032ed3a11fbecd14e2274392a212141a558",
+      "sourcePresent": true
+    }
+  ]
+}

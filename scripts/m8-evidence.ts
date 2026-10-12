@@ -1,0 +1,233 @@
+/**
+ * M8 证据纪律 —— runId / 运行目录 / 清单（`m8-manifest@1`）。
+ *
+ * ============================================================================
+ *  这份模块抄的是谁的作业、为什么
+ * ============================================================================
+ * 通用算法（稳定序列化 / 清单自摘要 / 原子晋升）**复用**
+ * `scripts/m6.1-evidence.ts` 的既有实现 —— 「一个概念一处实现」；
+ * 本文件只提供 **M8 品牌层**：runId 形状、运行目录父目录、清单契约版本与必填字段。
+ * 品牌层的先例是 `scripts/m7-evidence.ts`（M7 抄 M6.1 的同一理由）。
+ *
+ * ⚠️ L-M61-14 的教训在这里被当作**设计输入**（与 M7 相同）：
+ *   M6.1 的 live 运行器写的 manifest 是简化 schema，晚于 WP2 时代的聚合器契约
+ *   ⇒ `m6.1:gates` 对那些 run 一律 REFUSED（拒收是真信息，但读数浪费了）。
+ *   因此 M8 从**第一个运行器**起就 emit 全字段清单；`m8:gates`
+ *   只需要按 `m8-manifest@1` 校验，不会出现"运行器早于契约"的漂移。
+ *
+ * 硬边界（与 M6.1/M7 相同，判据不是注释）：
+ *   · runId 目录**拒绝覆盖**（已存在 ⇒ 抛，绝不复用 —— TD-04①）；
+ *   · 清单**原子晋升**（`.manifest.tmp` → rename；只有 `manifest.json` 在才算完整）；
+ *   · `payloadSha256` 是去掉自身后的稳定摘要 ⇒ 「清单被事后改过」可机器判定。
+ */
+
+import { randomBytes } from 'node:crypto'
+import { existsSync, mkdirSync } from 'node:fs'
+import { basename, join, resolve } from 'node:path'
+
+import {
+  MANIFEST_FILE,
+  RunDirExistsError,
+  RunIdInvalidError,
+  computeManifestPayloadSha256,
+  normalizeHeadShort,
+  sealManifest,
+  stableStringify,
+  writeManifestAtomic,
+} from './m6.1-evidence.ts'
+
+// ---------------------------------------------------------------------------
+// runId：`m8-<wp>[-<sub>…]-<YYYYMMDD>-<headShort12>-<suffix4>`
+// ---------------------------------------------------------------------------
+
+/** 例：`m8-wp0-20260926-a82080865706-a1b2`（后缀 4 位 hex ⇒ 同 HEAD 同日也不覆盖）。 */
+export const M8_RUN_ID_PATTERN =
+  /^m8-[a-z0-9]+(?:-[a-z0-9]+)*-\d{8}-[0-9a-f]{12}-[0-9a-f]{4}$/
+
+export function assertValidM8RunId(runId: string): void {
+  if (!M8_RUN_ID_PATTERN.test(runId)) {
+    throw new RunIdInvalidError(
+      `runId 形状非法：${JSON.stringify(runId)}（要求 ${String(M8_RUN_ID_PATTERN)}）`,
+    )
+  }
+}
+
+/** M8 运行目录的父目录（仓库相对路径）。 */
+export const M8_RUN_PARENT = 'artifacts/m8'
+
+export function createM8RunId(input: {
+  /** 工作包 id，例如 `wp0` / `wp0-admission` */
+  readonly wpId: string
+  /** 候选提交短 hash（任意写法，会被归一化） */
+  readonly headShort: string
+  /** 注入时钟以便测试确定性；缺省 = now */
+  readonly now?: Date
+  /** 注入后缀以便测试确定性；缺省 = 2 字节随机 */
+  readonly suffix?: string
+}): string {
+  // 与 m6.1-evidence.createRunId / m7-evidence.createM7RunId 同一条纪律：
+  // 不做静默归一化，非法 wpId 直接抛。
+  const wp = input.wpId.toLowerCase()
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(wp)) {
+    throw new RunIdInvalidError(
+      `wpId 非法：${JSON.stringify(input.wpId)}（只允许 [a-z0-9] 与内部连字符；不做静默替换）`,
+    )
+  }
+  const head = normalizeHeadShort(input.headShort)
+  const date = (input.now ?? new Date()).toISOString().slice(0, 10).replace(/-/g, '')
+  const suffix = (input.suffix ?? randomBytes(2).toString('hex')).toLowerCase()
+  if (!/^[0-9a-f]{4}$/.test(suffix)) {
+    throw new RunIdInvalidError(`后缀必须是 4 位 hex：${JSON.stringify(input.suffix)}`)
+  }
+  const runId = `m8-${wp}-${date}-${head}-${suffix}`
+  assertValidM8RunId(runId)
+  return runId
+}
+
+/** `--out` 只接受 `artifacts/m8/<runId>` 这一种形状（运行目录的形状是判据的一部分）。 */
+export function runIdFromM8OutPath(root: string, out: string): string {
+  const abs = resolve(root, out)
+  const parent = resolve(root, M8_RUN_PARENT)
+  const runId = basename(abs)
+  if (resolve(abs, '..') !== parent) {
+    throw new RunIdInvalidError(
+      `--out 必须是 ${M8_RUN_PARENT}/<runId>（收到 ${out}）—— 不允许放到别处`,
+    )
+  }
+  assertValidM8RunId(runId)
+  return runId
+}
+
+/** 建立一次新运行：父目录可不存在，runId 目录已存在 ⇒ 抛（绝不复用）。 */
+export function openM8RunDir(root: string, runId: string): string {
+  assertValidM8RunId(runId)
+  const parent = join(root, M8_RUN_PARENT)
+  mkdirSync(parent, { recursive: true })
+  const dir = join(parent, runId)
+  if (existsSync(dir)) {
+    throw new RunDirExistsError(`runId 目录已存在，拒绝覆盖（TD-04①）：${dir}`)
+  }
+  try {
+    mkdirSync(dir, { recursive: false })
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+      throw new RunDirExistsError(`runId 目录已存在，拒绝覆盖（TD-04①）：${dir}`)
+    }
+    throw error
+  }
+  return dir
+}
+
+// ---------------------------------------------------------------------------
+// 清单契约：m8-manifest@1（第一天就是全字段 —— L-M61-14 的教训）
+// ---------------------------------------------------------------------------
+
+export const M8_MANIFEST_VERSION = 'm8-manifest@1'
+
+/**
+ * 必填字段。每个 M8 运行器（baseline / admission / 未来的 test·verify·live）
+ * emit 的 manifest 必须齐这组字段，`m8:gates` 才认。
+ *
+ * 字段语义（与 m7-manifest@1 逐字段同构）：
+ *   schemaVersion  恒为 'm8-manifest@1'
+ *   runId / wp / head / headShort / branch / date / toolVersions —— 运行身份
+ *   testType       这份证据测的是什么（'baseline' / 'admission' / …）
+ *   counts         { total, passed, failed } —— 计数型自检的分母必须 > 0（AGENTS §6.8）
+ *   phases         本次运行覆盖的阶段（如 ['before'] / ['before','after']）
+ *   supersedes     被本次运行取代的旧 runId（无则 null，不是省略）
+ *   payloadSha256  清单自摘要（由 sealManifest 添加；校验时重算比对）
+ */
+export const M8_MANIFEST_REQUIRED_FIELDS: readonly string[] = [
+  'schemaVersion',
+  'runId',
+  'wp',
+  'head',
+  'headShort',
+  'branch',
+  'date',
+  'toolVersions',
+  'testType',
+  'counts',
+  'phases',
+  'supersedes',
+  'payloadSha256',
+]
+
+export interface M8ManifestProblem {
+  readonly field: string
+  readonly problem: string
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** 校验一份 manifest 是否满足 `m8-manifest@1`（缺字段 / 类型错 / 摘要不符都算问题）。 */
+export function validateM8Manifest(manifest: unknown): M8ManifestProblem[] {
+  const problems: M8ManifestProblem[] = []
+  if (!isRecord(manifest)) {
+    return [{ field: '(root)', problem: 'manifest 不是 JSON 对象' }]
+  }
+  for (const field of M8_MANIFEST_REQUIRED_FIELDS) {
+    if (!(field in manifest)) {
+      problems.push({ field, problem: '必填字段缺失' })
+    }
+  }
+  if (manifest.schemaVersion !== M8_MANIFEST_VERSION) {
+    problems.push({
+      field: 'schemaVersion',
+      problem: `必须是 ${M8_MANIFEST_VERSION}（收到 ${JSON.stringify(manifest.schemaVersion)}）`,
+    })
+  }
+  if (typeof manifest.runId === 'string') {
+    try {
+      assertValidM8RunId(manifest.runId)
+    } catch (error) {
+      problems.push({ field: 'runId', problem: (error as Error).message })
+    }
+  }
+  if (!isRecord(manifest.counts)) {
+    problems.push({ field: 'counts', problem: 'counts 必须是对象 { total, passed, failed }' })
+  } else {
+    for (const key of ['total', 'passed', 'failed'] as const) {
+      if (!Number.isInteger(manifest.counts[key])) {
+        problems.push({ field: `counts.${key}`, problem: '必须是整数' })
+      }
+    }
+    if (Number(manifest.counts.total) <= 0) {
+      problems.push({
+        field: 'counts.total',
+        problem: '分母必须 > 0（0 检查 0 失败 = MEASUREMENT INVALID，不是 PASS —— AGENTS §6.8）',
+      })
+    }
+  }
+  if (!Array.isArray(manifest.phases) || manifest.phases.length === 0) {
+    problems.push({ field: 'phases', problem: 'phases 必须是非空数组' })
+  }
+  if (manifest.supersedes !== null && typeof manifest.supersedes !== 'string') {
+    problems.push({ field: 'supersedes', problem: '必须是 runId 字符串或 null（不许省略）' })
+  }
+  if (typeof manifest.payloadSha256 === 'string') {
+    const recomputed = computeManifestPayloadSha256(manifest)
+    if (recomputed !== manifest.payloadSha256) {
+      problems.push({ field: 'payloadSha256', problem: '摘要不符（清单被事后改过？）' })
+    }
+  }
+  return problems
+}
+
+/** 校验 + 封印 + 原子写。返回 manifest.json 的绝对路径。 */
+export function writeM8Manifest(runDir: string, manifest: Record<string, unknown>): string {
+  const sealed = sealManifest({ ...manifest, schemaVersion: M8_MANIFEST_VERSION })
+  const problems = validateM8Manifest(sealed)
+  if (problems.length > 0) {
+    throw new Error(
+      `manifest 不满足 ${M8_MANIFEST_VERSION}：\n` +
+        problems.map((p) => `  · ${p.field}: ${p.problem}`).join('\n'),
+    )
+  }
+  return writeManifestAtomic(runDir, sealed)
+}
+
+// 供脚本复用的重导出（避免每个 M8 脚本各自 import m6.1 命名空间）
+export { MANIFEST_FILE, stableStringify, writeManifestAtomic }

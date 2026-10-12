@@ -1,0 +1,21 @@
+name: lg-qq-private
+services:
+  napcat:
+    image: ${QQ_NAPCAT_IMAGE:?Run pnpm qq:prepare first}
+    pull_policy: never
+    init: true
+    restart: unless-stopped
+    environment:
+      ACCOUNT: ${QQ_BOT_ID:?Set the independent bot account}
+      WEBUI_TOKEN: ${QQ_NAPCAT_WEBUI_TOKEN:?Missing WebUI token}
+      TZ: Asia/Shanghai
+    ports:
+      - "127.0.0.1:6101:6099"
+      - "127.0.0.1:6701:3001"
+    volumes:
+      - ../../data/qq-private/qq:/app/.config/QQ
+      - ../../data/qq-private/config:/app/napcat/config
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"

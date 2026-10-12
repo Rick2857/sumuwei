@@ -1,0 +1,143 @@
+{
+  "schemaVersion": "memory-coverage-corpus-manifest@1",
+  "corpusVersion": "memory-coverage-corpus@public-20261012",
+  "itemCount": 47,
+  "corpusFile": "evals/memory-coverage/corpus/memory-coverage-corpus.jsonl",
+  "corpusSha256": "571af0cd15460afe6ef06f48b596efb4d0507b48f79b9c1ec6ea7430e0617446",
+  "corpusBytes": 18079,
+  "sha256Definition": "对**归一化后**的内容求 sha256（CRLF → LF）。理由见 `.gitattributes`：本机 `core.autocrlf = true`，不归一化会让「别人 clone 之后语料变成 CRLF」造成**误报**。内容真的变了仍然会 FAIL。",
+  "frozenAt": "2026-10-12",
+  "frozenBy": "Sanitized public distribution; prior approvals apply to the original corpus only.",
+  "gate": "memory-coverage:verify",
+  "provenanceKinds": {
+    "registry-example:<key>": "该槽位 `examples` 里的**逐字**句子，前面补一个意图关键词。⚠️ 登记表的 examples 是**内容短语**（不带『记住』）⇒ 照原样**走不到**显式路径；补关键词是本门的统一约定。",
+    "doc-verbatim:<where>": "逐字来自该处（含其标点）。",
+    "adapted:<from> → <what changed>": "取自该处，但**改了一处**（改动逐字写在字段里）。",
+    "frozen-fixture:<where>": "来自冻结条文 / 验收脚本里的断言句。",
+    "boundary-direction:<where>": "句式取自某个文档点名的**未来方向**（例如 M5 G1 的 birthday / hometown / relationship / schedule）。",
+    "constructed:<why>": "本门**构造**的句子，理由写在字段里（通常是为了把两道闸门分开量、或去探测一个具名分支）。"
+  },
+  "revisions": [
+    {
+      "rev": 1,
+      "oldSha256": "40bbfa6d40e1ecacbc248856f6207b92bf424a85af2c91b22c8873b7f4c8f9a7",
+      "what": "把「更正一下，我的专业是历史学。」从 `extract_unresolved` 改成 `not_remember_intent`（id 也从 `mc-unresolved-0009` 改成 `mc-outofscope-0001`）。",
+      "why": "本门**第一次运行**报了一条『闸门不符』。查明是**语料/量具的错**：该句意图是 `correct`，走 `service.correct()`（含 ADR-058 兜底），而初版把它按 `remember` 的抽取流程跑 —— 那量的是一个**不是本门要判的东西**（AGENTS §6.2）。量具随之改为对非 `remember` 意图**不跑抽取器**，并把量具版本升到 `@2`。",
+      "evidence": "artifacts/memory-coverage/memory-coverage-20260930160520.-4b75f7e41b0e-11e5/（FAIL 档，保留不删）"
+    },
+    {
+      "rev": 2,
+      "oldSha256": "a4663859e3d7f7200f9540205e44a100773f4e792e739a0d3bea6fb9acba96ed",
+      "what": "① 把登记表 **17 个 declared examples 完整**收进语料（新增 11 条，其余 6 条原先已在）；② 修正若干 `provenance` 的**误归属**；③ 类名统一（`registry_example` / `registry_unreachable`）。",
+      "why": "① 原来的 supported 组是**手挑**的句式，任意性太强；登记表自己的 `examples` 是一份**非任意**的可测集合。② 复核发现三处归属不准（`tooling.preference.editor` / `education.status` 的逐字例子其实不是我写的那两句；`device.primary` 那句来自 ADR-056）。③ 类名统一后「登记表扫描」的 17 条可一眼数清。",
+      "boundary": "本次**没有**为了读数好看而改任何**期望**。",
+      "evidence": "见基线报告 §3 与 §4"
+    },
+    {
+      "rev": 3,
+      "oldSha256": "606c85e78f3ec68409a74bfd4048a663be547971588e6935d6407026a8e5a5b3",
+      "what": "4 条从 `registry_unreachable`（期望 `content_unresolved`）改成 `registry_example`（期望 `extracted` + 槽位 + 取值）：`mc-registry-0012`（我已经毕业了）· `0013`/`0014`（我每天睡 7 小时 / 420 分钟）· `0015`（现在简单说就行）。",
+      "why": "⚠️ 这是**设计好的**流程，不是改语料去凑绿：M9.7 / WP1 增量 1 把 `CONTENT_RULE_VERSION` 从 `content-rules@2` 升到 **`@3`**、**有意**扩了线索表。改完之后本门**当场报红并逐条指出是哪 4 条**（正是 rev 2 把期望做成「特征化」的用途）⇒ 回来**有意**更新语料并记下这一条。",
+      "boundary": "改的是**语料对实现的期望**，而**不是**把实现改成迎合语料 —— 顺序恰好相反（先改实现、门报红、再更新期望）。新取值逐条核对过：`graduated` / `7 小时` / `420 分钟` / `brief`，**没有**出现「抽出了槽位但取值是错的」那一类（§4.4）。",
+      "evidence": "ADR-078 §2.1 / §5.1。⚠️ 那两个**报红档最初没有 `manifest.json`**（只有 `coverage.json`）—— 原因是产生它们的 PowerShell 管道用了 `Select-Object -First N`，它会在收满 N 行后**终止上游进程**，而本门是**清单最后写**（`writeManifestAtomic`）⇒ 进程在写完 `coverage.json`、还没写清单时被杀。**这恰好说明「清单最后写」这条纪律有用**：没有清单的目录 = **不完整的 run**（按仓库惯例读作 NOT RUN，不是 PASS）。⇒ 处置：删掉那两个不完整的目录，改用**完整重放**：`memory-coverage-20260930221304-0dcc6837ccc8-4392/`（临时把「海鲜过敏」那个 cue 注回去、跑完、再撤回；它的 `dirtyPaths` 如实记着 `src/kernel/app/memory/content-extractor.ts` 当时是脏的）。该档读数逐字可核：`mc-registry-0011` = `actualGate=extracted · predicate=food.avoid.general · value=\"喜欢辣\"`。"
+    },
+    {
+      "rev": 4,
+      "oldSha256": "6dc81ae45a250219e9e8696f16bd2efbdde9e5d517f83e6a9f4f92fc9c6e48c8",
+      "what": "① 两条 G1 方向的语料（`mc-unresolved-0005` 生日 / `0006` 老家）从 `content_unresolved` 翻成 `extracted`；② 新增 3 条 `registry_example`（`mc-person-0003`/`0004`/`0005`）把**新增槽位**的 4 个 declared examples 补齐；③ 新增 1 条**探针** `mc-probe-0001`，把「问句会被记成事实」这条**已知假阳路径量出来**。",
+      "why": "M9.7 / WP1 **增量 2**（`content-rules@3` → **`@4`**）：登记表新增 `person.birthday` / `person.hometown` 两个槽位（`ADR-079`），各加一条规则。与 rev 3 同一个流程：先改实现 → 门报红（当场指出是哪 2 条）→ 再有意更新语料。",
+      "boundary": "新取值逐条核对过：`person.birthday` = 「3 月 14 日」/「10 月」· `person.hometown` = 「成都」/「西安」，**没有**出现「抽出了槽位但取值是错的」。⚠️ 但**新增了一条已知假阳**（`mc-probe-0001`）：问句「我的生日是什么时候」会被记成 `person.birthday = 什么时候` —— 它**不是**取值错误，是**抽取器没有问句守卫**这一既有性质；如实量出来并登记（ADR-079 §5.3），**没有**修。",
+      "evidence": "ADR-079 · `docs/memory-coverage/M9.7-WP1-Handoff.md` §2"
+    },
+    {
+      "rev": 5,
+      "oldSha256": "50444e80f4b48aef4f8177f6e1e5bf684b0e8abbaf9ee464e953be8469d9a416",
+      "what": "① `mc-registry-0009` 加**取值**断言（`Alex`）② `mc-registry-0006` 与 `mc-probe-0001` 从 `extracted` 翻成 `content_unresolved`（前者类名改为 `registry_unreachable`）。",
+      "why": "⚠️ **M9.7 取值边界线**（`CONTENT_RULE_VERSION` `@4` → **`@5`**，ADR-080）：这次动的是**取值前后缀剥法**（① 尾部填充语 ② 整值级拒绝 `VALUE_STOP_SET`），**没有**加任何线索词、**没有**改 priority/cueInValue —— 那是**另一条线**，两处裁定都逐字禁止混着做。与 rev 3/4 同一个流程：先改实现 → 门**当场报红并逐条指出是哪 2 条** → 回来有意更新语料。",
+      "boundary": "⚠️ **其中一条是有意的覆盖损失**：`mc-registry-0006`（「我不是计算机专业的」）原先记下的是**虚词取值**「的」，现在如实回 `content_unresolved`。依据任务书 §19「Coverage 不完美可以接受，False Success 不可接受」：一条会被召回、会被展示给模型的错记忆，比「她如实说没抓住」更坏。根因（**登记不修**）：线索表**表达不了 qualifier / 否定**。另一条（`mc-probe-0001`）是**收益**：疑问词取值被挡住 ⇒ 那条问句假阳**不再落库**（`L-M97-02` 收窄，**未关闭**）。",
+      "accounting": "⚠️ **更正一处我自己写错的账**（2026-09-30 核对 git 历史）：rev 4 的 `registrySweep` 声明 `reachable 17 / unreachable 4`，而按**当时的语料实际数**应为 **`reachable 18 / unreachable 3`**（18 = 17 个 `registry_example` + `mc-unresolved-0006` —— 它是 `person.hometown` 的逐字例子，但类名是 `person_slot`；3 = `mc-registry-0011/0016/0017`）。**两个字段各错 1，而合计 21 是对的** ⇒ 错的是**分列**，不是总数。rev 5 起按「**哪些语料覆盖了 declared example**」显式对账：reachable = 16（`registry_example`）+ 1（`mc-unresolved-0006`）= 17；unreachable = 4（`mc-registry-0006/0011/0016/0017`）；合计 21 = declaredExamples。",
+      "evidence": "ADR-080 · `docs/memory-coverage/M9.7-Value-Boundary-Round1-Handoff.md`"
+    },
+    {
+      "rev": "public-20261012",
+      "oldSha256": "8d67ae9c6ab3e29ad5dfba67c1dbc0e3817afc538968a8c592d2873cf9e244a1",
+      "what": "Replace private nickname and education examples with fictional values for the public distribution. Expectations and substitutions are applied consistently.",
+      "why": "Public distribution sanitization; original private repository remains unchanged.",
+      "lineEndings": "Fingerprint measured over LF-normalized bytes, as required by sha256Definition."
+    }
+  ],
+  "expectedByClass": {
+    "supported": 9,
+    "registry_example": 16,
+    "registry_unreachable": 4,
+    "intent_absent": 3,
+    "intent_not_leading": 3,
+    "extract_unresolved": 6,
+    "person_slot": 2,
+    "probe_known_false_positive": 1,
+    "not_remember_intent": 1,
+    "content_empty": 2
+  },
+  "expectedByGate": {
+    "extracted": 27,
+    "content_unresolved": 11,
+    "intent_not_detected": 6,
+    "not_remember_intent": 1,
+    "content_empty": 2
+  },
+  "registrySweep": {
+    "declaredExamples": 21,
+    "reachable": 17,
+    "unreachable": 4,
+    "unreachableIds": [
+      "mc-registry-0006",
+      "mc-registry-0011",
+      "mc-registry-0016",
+      "mc-registry-0017"
+    ],
+    "accounting": "reachable = 16（`registry_example`）+ 1（`mc-unresolved-0006` —— 它是 `person.hometown` 的逐字例子，但类名是 `person_slot`）；unreachable = 4；合计 21 = declaredExamples。",
+    "note": "⚠️ 这**不是**「登记表承诺过可抽」的违约：`memory-invariants.md` §16.10 逐字写着线索表的不完整是**被设计允许的**。这组读数的用途是**特征化 + 基线**：它是「扩线索表」这条方向的**待办清单**，也是改完之后**前后对照**的起点。⚠️ 分母 21 = 11 个原槽位的 17 个 examples + 2 个新槽位（`person.birthday` / `person.hometown`）的 4 个。⚠️ `mc-registry-0006` 是**取值边界线**（ADR-080）之后**从可达变成不可达**的那一条 —— **有意的覆盖损失**，见 `revisions[4].boundary`。",
+    "stillUnreachable": [
+      {
+        "id": "mc-registry-0006",
+        "text": "记住，我不是计算机专业的",
+        "slot": "education.major",
+        "whyNotFixed": "⚠️ **取值边界线（ADR-080）之后才变成不可达的**：这句的取值「往后」那一支是虚词「的」，而「往前」那一支是「不是计算机专业」（**把否定也当成取值**）⇒ 两边都不是一个可用的取值 ⇒ 按 `VALUE_STOP_SET` **终止**抽取、如实回 `content_unresolved`。⚠️ **这是有意的覆盖损失**（宁可如实说没抓住，也不记一个错值）。根因（**登记不修**）：线索表**表达不了 qualifier / 否定**（规则产出 `{subject, predicate, value}`，没有 qualifiers 位）⇒ 要真修得先让规则表能表达「不是」这类限定"
+      },
+      {
+        "id": "mc-registry-0011",
+        "text": "记住，海鲜过敏",
+        "slot": "food.avoid.general",
+        "whyNotFixed": "该规则的取值是**短语专属**的（`positive: '喜欢辣'` / `negative: '回避辣'`）。把「海鲜过敏」挂进去 ⇒ 它不含任何 `negativeGuards` ⇒ 落到 `positive` ⇒ 系统记下 **`food.avoid.general = 喜欢辣`**。那是**语义错误**（不报错、不丢事实、只是记错了）⇒ **宁可留着不覆盖**。⚠️ 而且**线索表表达不了 qualifier**（规则产出 `{subject, predicate, value}`，没有 qualifiers 位；只有 LLM 抽取器能带），而该槽位说明逐字写着「多个具体食物时会与 qualifier 区分」⇒ 要先裁定取值 / qualifier 语义。见 ADR-078 §5.1"
+      },
+      {
+        "id": "mc-registry-0016",
+        "text": "记住，我平时用 Windows",
+        "slot": "device.primary",
+        "whyNotFixed": "该槽位的 cues 是 ['电脑','设备','系统','用的是']，而这个例子一个都不命中。⚠️ **本轮实测过**（不是推断）：加一个平台名 cue `'Windows'` 会**同时**造成 ① 目标句可抽但取值是「平时用Windows」（修饰语与线索词都漏进取值）② **既有条目取值退化**：「记住，我平时用的是 Windows 笔记本。」从「Windows 笔记本」变成「笔记本」（`best` 取最长线索词 ⇒ 取值那一支从「往后」翻到「往前」）⇒ **在既有正确条目上造成回归** ⇒ 要先裁定取值语义，不是加个 cue 的事。另有 `mac` 会撞 ADR-058 `D-58c` 的 ★负控。见 ADR-078 §5.1"
+      },
+      {
+        "id": "mc-registry-0017",
+        "text": "记住，我用 VS Code",
+        "slot": "tooling.preference.editor",
+        "whyNotFixed": "cue 是小写 `vscode`，而句子写的是 `VS Code`（`text.includes(cue)` **区分大小写**）。要覆盖它只能加 `VS Code` 这类大小写变体 —— ⚠️ 但那会**同时**让「记住，我平时主要用 VS Code」变得可抽，而那句是 **4 条既有断言**的输入（`verify-m4-nl-mutation.ts:251` 的 L3-02 等），计划 §1.5 的 `LC-A2` 明写**不许改既有判据**。⇒ 要么改判据（要单独授权），要么保持现状。见 ADR-078 §5.1"
+      }
+    ]
+  },
+  "note": "本语料**只**用于『哪一道闸门把这句话挡下了』的可达性读数：每一条都带 `provenance`（逐字出处）。⚠️ 它**不**判取值正确性（那是 ADR-056 / `m6.1:extractor:repro` 的职责），也**不**主张覆盖率百分比可外推到真实对话（它是**抽样**，不是总体）。⚠️ 冻结机制：`memory-coverage:verify` 每次运行都会重算语料的 sha256（归一化后）并与 `corpusSha256` 比对，不一致即 FAIL —— 改语料必须**有意**重刷本字段。",
+  "deliberatelyExcluded": [
+    {
+      "what": "更正/忘掉/存疑路径的**写入结果**（例如『更正一下，我转到历史学了。』『更正一下，我换成 Mac 了。』是否真的落库）",
+      "why": "它们的写入由 `correct()` / `forget()` 的服务路径（含 ADR-058 的槽位限定兜底）决定，而**本门只测 `remember` 的抽取层**。把它们塞进来会量到一个不是本门要判的东西（AGENTS §6.2）。⇒ 语料里**保留了**一条非 remember 意图的说法（`mc-outofscope-0001`），但它的期望是 `not_remember_intent`（**如实记为 out-of-scope**），不是「抽不出」。那两条的现状读数见 `docs/memory-coverage/Memory-Coverage-Execution-Plan.md` §0.5 ②。"
+    },
+    {
+      "what": "『把闲聊记成长期记忆』这类假阳场景",
+      "why": "它需要**真的写入**与真实对话流（服务层 + 库），不是纯函数可达性；属 WP1/WP4 的隔离库预演。⚠️ 注意区分：`mc-probe-0001` 量的是**纯函数层的问句假阳**（不需要库），不是这一类。"
+    },
+    {
+      "what": "后台自动路径（`CHARACTER_MEMORY_BACKGROUND_ENABLED`）的任何说法",
+      "why": "该路径 NOT-WIRED，且按 `C-3` 建议**明确排除**在本里程碑之外（归 TD-19）。⚠️ `mc-probe-0001` 那条假阳**今天够不到生产**，正因为这条路径没接线 —— 它一旦接线就会变成现实风险。"
+    }
+  ],
+  "originalFrozenAt": "2026-09-30"
+}

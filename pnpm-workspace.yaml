@@ -1,0 +1,48 @@
+# pnpm 构建脚本白名单。
+#
+# 只有真正需要的原生依赖才允许执行安装脚本 —— 其余一律显式拒绝，
+# 这样「某个依赖悄悄跑脚本」不会成为默认行为。
+#
+# 本次新增 promptfoo 后 pnpm 列出了它带进来的可选原生依赖。取舍：
+#   esbuild            ✅ 需要（tsx 与 promptfoo 都依赖它）
+#   @swc/core          ❌ 不用（promptfoo 的转译路径不走它）
+#   @playwright/...    ❌ 不用（我们的"浏览器"是 CLI，不是 Chromium）
+#   onnxruntime-node   ❌ 不用（嵌入式模型；本项目不做本地推理）
+#   protobufjs         ❌ 不用
+#   sharp              ❌ 不用（不处理图片）
+#   bun                ❌ 不用（本项目跑 Node 22）
+#
+# 实测确认：以上拒绝项不影响 `pnpm eval:promptfoo` / `pnpm eval:telemetry`
+# 与全部 M2.5 测试（见 docs/milestones/M2.5-verification.md）。
+#
+# 实用能力加装（2026-10-04）追加一项：
+#   tesseract.js       ❌ 不用。它的 `postinstall` 是 `opencollective-postinstall || true`
+#                         —— 只打印一条募捐横幅，**没有任何功能作用**（已读安装后的
+#                         package.json 逐字确认）。而本批 OCR 的纪律恰好要求
+#                         "语言/core 资产固定在本地路径、日常识别不得触发 CDN 下载"
+#                         ⇒ 让一个联网的安装脚本默认跑起来与该纪律方向相反。
+#                         显式拒绝并在此登记（pnpm 12 的 `ERR_PNPM_IGNORED_BUILDS`
+#                         要求每个带脚本的依赖都有一个明确取值）。
+allowBuilds:
+  esbuild: true
+  '@swc/core': false
+  '@playwright/browser-chromium': false
+  onnxruntime-node: false
+  protobufjs: false
+  sharp: false
+  bun: false
+  tesseract.js: false
+overrides:
+  handlebars@4.7.9: 4.7.10
+  drizzle-orm@0.44.7: 0.45.4
+  undici@5.29.0: 6.29.0
+  pdfjs-dist@5.7.284: 6.4.299
+  esbuild@0.18.20: 0.25.12
+  basic-ftp@5.3.1: 6.2.2
+  smol-toml@1.8.0: 1.9.0
+minimumReleaseAgeExclude:
+  - data-urls@8.0.0
+  - jsdom@30.1.2
+  - tr46@7.0.0
+  - whatwg-url@17.2.0
+  - drizzle-orm@0.45.4

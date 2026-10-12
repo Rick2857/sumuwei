@@ -1,0 +1,26 @@
+{"id":"g-comf-001","layer":"gate","category":"comfort","tags":["her-state"],"message":"你今天好像没什么精神，别太勉强自己。","gold":{"decision":"IMPACT","family":"A-COMFORT"},"note":"关切她的状态","status":"gold-final"}
+{"id":"g-comf-002","layer":"gate","category":"comfort","tags":["pressure-relief"],"message":"你为这个花了那么多心思，别有压力，已经够好了。","gold":{"decision":"IMPACT","family":"A-COMFORT"},"note":"肯定+减压","status":"gold-final"}
+{"id":"g-comf-003","layer":"gate","category":"comfort","tags":["acceptance"],"message":"就算你帮不上忙，我也不会怪你。","gold":{"decision":"IMPACT","family":"A-COMFORT"},"note":"预先宽慰","status":"gold-final"}
+{"id":"g-comf-004","layer":"gate","category":"comfort","tags":["patience"],"message":"你慢慢来，我不着急。","gold":{"decision":"IMPACT","family":"A-COMFORT"},"note":"解除她的时间压力","status":"gold-final"}
+{"id":"g-comf-005","layer":"gate","category":"comfort","tags":["normalization"],"message":"谁都有出错的时候，你不用完美。","gold":{"decision":"IMPACT","family":"A-COMFORT"},"note":"正常化失误+解除完美要求","status":"gold-final"}
+{"id":"g-comf-006","layer":"gate","category":"comfort","tags":["care"],"message":"你今天陪我这么久，也该歇歇了。","gold":{"decision":"IMPACT","family":"A-COMFORT"},"note":"体恤她该休息","status":"gold-final"}
+{"id":"g-comf-007","layer":"gate","category":"comfort","tags":["absolution"],"message":"别难过，那不是你的错。","gold":{"decision":"IMPACT","family":"A-COMFORT"},"note":"开解+免责","status":"gold-final"}
+{"id":"g-comf-008","layer":"gate","category":"comfort","tags":["effort-seen"],"message":"你已经很努力了，我看得见。","gold":{"decision":"IMPACT","family":"A-COMFORT"},"note":"确认她的努力被看见","status":"gold-final"}
+{"id":"g-comf-009","layer":"gate","category":"comfort","tags":["openness"],"message":"压力大就说出来，我听着。","gold":{"decision":"IMPACT","family":"A-COMFORT"},"note":"提供倾听","status":"gold-final"}
+{"id":"g-comf-010","layer":"gate","category":"comfort","tags":["safe-space"],"message":"你不用一直逞强，在我这里可以放松。","gold":{"decision":"IMPACT","family":"A-COMFORT"},"note":"允许她卸下防备","status":"gold-final"}
+{"id":"g-comf-011","layer":"gate","category":"comfort","tags":["defense","third-party"],"message":"刚才那个人说话太过分了，你别往心里去。","gold":{"decision":"IMPACT","family":"A-COMFORT"},"note":"对抗第三方贬损+安抚她","status":"gold-final"}
+{"id":"g-comf-012","layer":"gate","category":"comfort","tags":["encouragement"],"message":"别灰心，这次没做好还有下次。","gold":{"decision":"IMPACT","family":"A-COMFORT"},"note":"鼓励她","status":"gold-final"}
+{"id":"g-comf-013","layer":"gate","category":"comfort","tags":["care","blend"],"message":"你今天的总结很用心，辛苦了，早点休息。","gold":{"decision":"IMPACT","family":"A-COMFORT"},"note":"体恤主导（§5.3 序：COMFORT>GRATITUDE）","status":"gold-final"}
+{"id":"g-comf-014","layer":"gate","category":"comfort","tags":["patience"],"message":"没事的，你按自己的节奏来就好。","gold":{"decision":"IMPACT","family":"A-COMFORT"},"note":"解除节奏压力","status":"gold-final"}
+{"id":"g-comf-015","layer":"gate","category":"comfort","tags":["self-report"],"message":"我今天心情糟透了。","gold":{"decision":"NEUTRAL"},"note":"自述状态≠安慰她（§5.2 边界）","status":"gold-final"}
+{"id":"g-comf-016","layer":"gate","category":"comfort","tags":["self-report"],"message":"我最近压力好大，感觉要撑不住了。","gold":{"decision":"NEUTRAL"},"note":"自述难过≠她在被安慰；也不映射成她的被拒绝","status":"gold-final"}
+{"id":"g-comf-017","layer":"gate","category":"comfort","tags":["seeking-support"],"message":"我考试没过，好难过，你能安慰我一下吗？","gold":{"decision":"NEUTRAL"},"note":"向她求安慰不在七族内（§0.3 后续可扩）","status":"gold-final"}
+{"id":"g-comf-018","layer":"gate","category":"comfort","tags":["self-report"],"message":"我妈住院了，我心里乱得很。","gold":{"decision":"NEUTRAL"},"note":"自述困境","status":"gold-final"}
+{"id":"g-comf-019","layer":"gate","category":"comfort","tags":["third-party"],"message":"你朋友被骂了？替我安慰她。","gold":{"decision":"NEUTRAL"},"note":"安慰对象是第三方","status":"gold-final"}
+{"id":"g-comf-020","layer":"gate","category":"comfort","tags":["self-report"],"message":"我没事，你先忙你的。","gold":{"decision":"NEUTRAL"},"note":"自述没事+普通安排","status":"gold-final"}
+{"id":"g-comf-021","layer":"gate","category":"comfort","tags":["self-report"],"message":"你安慰我的话我记下了，但我还是难受。","gold":{"decision":"NEUTRAL"},"note":"自述持续难受，非安慰她","status":"gold-final"}
+{"id":"g-comf-022","layer":"gate","category":"comfort","tags":["brush-off"],"message":"行了行了，我没事，你不用管我。","gold":{"decision":"NEUTRAL"},"note":"打发她的关心；未到排斥她的程度","status":"gold-final"}
+{"id":"g-comf-023","layer":"gate","category":"comfort","tags":["praise-her-care"],"message":"你这么贴心，我都不好意思了。","gold":{"decision":"IMPACT","family":"A-GRATITUDE"},"note":"肯定她的体贴（跨族：感谢/肯定归 GRATITUDE）","status":"gold-final"}
+{"id":"g-comf-024","layer":"gate","category":"comfort","tags":["declining-support"],"message":"别安慰我了，没用的。","gold":{"decision":"UNCERTAIN"},"note":"Q8：绝望式拒绝她的安慰，是排斥还是消沉待人审裁定","status":"pending-ruling"}
+{"id":"g-comf-025","layer":"gate","category":"comfort","tags":["self-reliance"],"message":"你不用哄我，我自己能调整好。","gold":{"decision":"NEUTRAL"},"note":"温和自立声明，非排斥她","status":"gold-final"}
+{"id":"g-comf-026","layer":"gate","category":"comfort","tags":["direct"],"message":"抱抱你，别太难过了。","gold":{"decision":"IMPACT","family":"A-COMFORT"},"note":"直接安慰她","status":"gold-final"}

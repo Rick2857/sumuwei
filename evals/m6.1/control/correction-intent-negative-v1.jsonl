@@ -1,0 +1,12 @@
+{"id":"CIN-01","category":"quotation","text":"你刚才说「更正」是什么意思？","mustNotChangeMemory":true,"note":"引用：把「更正」当词引用，不是在要求更正"}
+{"id":"CIN-02","category":"quotation","text":"他跟我说了一句「更正一下」，我该怎么回他？","mustNotChangeMemory":true,"note":"引用他人话语"}
+{"id":"CIN-03","category":"negation","text":"不用更正，就这样。","mustNotChangeMemory":true,"note":"否定：明确说不要更正"}
+{"id":"CIN-04","category":"negation","text":"先别改，我想想再说。","mustNotChangeMemory":true,"note":"否定：明确说先别改"}
+{"id":"CIN-05","category":"hypothesis","text":"如果我要更正的话会告诉你。","mustNotChangeMemory":true,"note":"假设：条件句，不是真要求"}
+{"id":"CIN-06","category":"hypothesis","text":"假设我之前记错了，那你会怎么办？","mustNotChangeMemory":true,"note":"假设：反事实提问"}
+{"id":"CIN-07","category":"word_discussion","text":"我们讨论一下「更正」这个词在中文里的用法。","mustNotChangeMemory":true,"note":"词义讨论：谈的是词，不是记忆"}
+{"id":"CIN-08","category":"word_discussion","text":"你觉得「纠正」和「更正」有区别吗？","mustNotChangeMemory":true,"note":"词义讨论：比较两个词"}
+{"id":"CIN-09","category":"plain_text_edit","text":"帮我把这段文字改一下，标点有点乱。","mustNotChangeMemory":true,"note":"普通文本修改：改的是文字，不是记忆"}
+{"id":"CIN-10","category":"plain_text_edit","text":"这行代码改一下，变量名写错了。","mustNotChangeMemory":true,"note":"普通文本修改：改的是代码，不是记忆"}
+{"id":"CIN-11","category":"non_memory_object","text":"把明天的安排改一下，下午那场挪到晚上。","mustNotChangeMemory":true,"note":"非记忆对象修改：改的是日程安排"}
+{"id":"CIN-12","category":"non_memory_object","text":"这篇文章的标题改一下，太长了。","mustNotChangeMemory":true,"note":"非记忆对象修改：改的是文档标题"}

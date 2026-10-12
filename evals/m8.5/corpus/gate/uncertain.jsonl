@@ -1,0 +1,14 @@
+{"id":"g-unc-001","layer":"gate","category":"uncertain","tags":["bare"],"message":"嗯。","gold":{"decision":"UNCERTAIN"},"note":"裸短回复无法独立支持分类（§6.1）","status":"gold-final"}
+{"id":"g-unc-002","layer":"gate","category":"uncertain","tags":["bare"],"message":"哦。","gold":{"decision":"UNCERTAIN"},"note":"同上","status":"gold-final"}
+{"id":"g-unc-003","layer":"gate","category":"uncertain","tags":["bare"],"message":"随便。","gold":{"decision":"UNCERTAIN"},"note":"立场不明","status":"gold-final"}
+{"id":"g-unc-004","layer":"gate","category":"uncertain","tags":["deflection"],"message":"你说呢？","gold":{"decision":"UNCERTAIN"},"note":"反问无立场","status":"gold-final"}
+{"id":"g-unc-005","layer":"gate","category":"uncertain","tags":["bare"],"message":"……","gold":{"decision":"UNCERTAIN"},"note":"无内容","status":"gold-final"}
+{"id":"g-unc-006","layer":"gate","category":"uncertain","tags":["bare"],"message":"好吧。","gold":{"decision":"UNCERTAIN"},"note":"无奈还是同意，无上下文不可判","status":"gold-final"}
+{"id":"g-unc-007","layer":"gate","category":"uncertain","tags":["bare"],"message":"是吗。","gold":{"decision":"UNCERTAIN"},"note":"怀疑还是认同不明","status":"gold-final"}
+{"id":"g-unc-008","layer":"gate","category":"uncertain","tags":["bare"],"message":"行。","gold":{"decision":"UNCERTAIN"},"note":"顺从还是敷衍不可判","status":"gold-final"}
+{"id":"g-unc-009","layer":"gate","category":"uncertain","tags":["unclear-referent"],"message":"她说的对吗？","gold":{"decision":"UNCERTAIN"},"note":"'她'指代不明","status":"gold-final"}
+{"id":"g-unc-010","layer":"gate","category":"uncertain","tags":["vague"],"message":"就那样吧。","gold":{"decision":"UNCERTAIN"},"note":"含糊敷衍，立场不足","status":"gold-final"}
+{"id":"g-unc-011","layer":"gate","category":"uncertain","tags":["bare"],"message":"也许吧。","gold":{"decision":"UNCERTAIN"},"note":"模糊立场","status":"gold-final"}
+{"id":"g-unc-012","layer":"gate","category":"uncertain","tags":["deflection"],"message":"看你。","gold":{"decision":"UNCERTAIN"},"note":"交给她决定，无自身立场","status":"gold-final"}
+{"id":"g-unc-013","layer":"gate","category":"uncertain","tags":["skepticism"],"message":"真的假的。","gold":{"decision":"UNCERTAIN"},"note":"怀疑指向不明","status":"gold-final"}
+{"id":"g-unc-014","layer":"gate","category":"uncertain","tags":["indifference"],"message":"无所谓。","gold":{"decision":"UNCERTAIN"},"note":"冷漠指向不明","status":"gold-final"}

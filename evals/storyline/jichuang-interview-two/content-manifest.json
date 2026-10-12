@@ -1,0 +1,39 @@
+{
+  "storyId": "jichuang-interview-two",
+  "storyVersion": 1,
+  "title": "一起去参加极创工作室的二面",
+  "inkSource": "evals/storyline/jichuang-interview-two/jichuang-interview-two.ink",
+  "inkSourceSha256": "7e96977429d883301ee8b93a431a3c54d82481513ce5d5da5e9b42c2182ac97e",
+  "compiledStory": "evals/storyline/jichuang-interview-two/jichuang-interview-two.json",
+  "compiledStorySha256": "18721a710e1688d1635ff6a0f52ff70061bea74f3c4c012c8988641be5ae7fb5",
+  "compiledAt": "2026-10-03T05:58:26.779Z",
+  "machineTagContract": [
+    "node:<id>",
+    "stage:<id>",
+    "visible:<id>",
+    "choice:<id>"
+  ],
+  "graph": {
+    "nodes": 12,
+    "transitions": 13,
+    "stages": [
+      "confirm_goal",
+      "prepare_and_drill",
+      "attend_interview",
+      "result_and_review"
+    ],
+    "endings": [
+      "passed_together",
+      "pending_further_review",
+      "not_passed_this_time",
+      "exited_by_user"
+    ],
+    "exitNodes": [
+      "s1_intro",
+      "s2_prepare",
+      "s3_attend",
+      "s4_result"
+    ]
+  },
+  "note": "本 manifest 是内容包指纹（来源身份含 storyVersion）。inkjs 2.4.0 运行期不暴露选项行标签 ⇒ 选项身份按**位置**锚定（ink-runtime.ts）。"
+}
