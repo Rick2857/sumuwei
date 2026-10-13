@@ -422,6 +422,38 @@ export function foldGoalRowsInMemory(
     const key = goalRowKeyFromEvent(event)
     if (key === undefined) continue
     const entry = cache.get(key)
+    /*
+     * ==========================================================================
+     *  ⚠️ 幂等闸（`F-WP5-10`，2026-10-13）—— 这条事件**已经折过**就跳过
+     * ==========================================================================
+     *  判据：`event.sequence <= 该行已折到的序号`。
+     *
+     *  没有这道闸时：把**全部历史**喂给增量折叠，会让每个历史事件**每次提交**都被重折一次
+     *  ⇒ `entry.revision += 1` 每次都加 ⇒ `revision` 变成"**提交次数**的函数"而不是
+     *  "**事件数**的函数"。实测（源快照，19 行里 18 行）：存的 52 / 全量重放只有 4，
+     *  Δ合计 563。
+     *
+     *  ⚠️ **与 `applyMemoryEvent` 的既有闸同源**：那边按 `(memory_id, domain_event_id)`
+     *     判"已经折叠过 ⇒ 不重复 reduce（否则 revision 会叠加，而 Replay 会算不出来）"。
+     *     目标域缺的就是这一条 —— 补上它，两个域的折叠语义才一致。
+     *
+     *  ⚠️ **为什么修在这里，而不是只修调用方**：
+     *     `agreement-runner` 的 `already_applied` 那一支（`eventsWritten: 0`）是**修复/追赶**路径
+     *     —— 它的全部意义就是"事件已落库但投影可能落后 ⇒ 再折一遍追上去"。
+     *     若把调用方改成"只喂这一批"，那一支的折叠输入会变成**空集** ⇒ **追赶能力消失**
+     *     （崩在"事件已写、投影未写"之间就再也补不回来）。
+     *     ⇒ 修在闸上：**喂全部历史仍然安全**，追赶保留，膨胀消失。
+     *
+     *  ⚠️ 两条路径不受影响：重建（cache 从空开始 ⇒ `entry === undefined`）与
+     *     `replayGoalRows`（同样是空 cache）。
+     */
+    if (
+      entry !== undefined &&
+      entry.lastDomainEventSequence !== undefined &&
+      event.sequence <= entry.lastDomainEventSequence
+    ) {
+      continue
+    }
     const next = reduceGoalRow(entry?.state, event)
     if (next === undefined) continue
     if (entry === undefined) {

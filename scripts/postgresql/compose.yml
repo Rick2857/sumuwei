@@ -1,0 +1,109 @@
+# PostgreSQL 迁移 WP2 —— 隔离试验实例（**不是**生产部署）
+#
+# ============================================================================
+#  这个文件是什么
+# ============================================================================
+#  计划 §4/WP2 要求："独立 Compose、命名卷、固定镜像；扩展安装；账号分离；
+#  bootstrap/迁移/运行分流及互斥"。
+#
+#  它是**隔离试验**用的：一个长期存在的 PG 服务，各道 PG 门在里面创建
+#  自己的一次性数据库（命名规则 `lg_test_<门>`，见 ADR-132 `D03`）。
+#  它不是生产部署 —— 生产部署的身份/卷/端口/重启策略由 WP6 定稿。
+#
+# ---------------------------------------------------------------------------
+#  三条刻意选择（每条都有理由，别"顺手改掉"）
+# ---------------------------------------------------------------------------
+#  ① `image` 用 **digest 固定**，不用 tag
+#     计划 §2 逐字："部署固定 digest"、"不能自动使用 latest"。
+#     tag 会漂移；digest 不会。换版本必须是一次显式改动 + 重新核对 PG minor/扩展版本。
+#
+#  ② 端口**只绑 loopback**：`127.0.0.1:55432`
+#     计划 §1 逐字："远程管理预留标准 PostgreSQL 连接方式，首轮部署限 loopback"。
+#     写 `55432:5432`（不带 127.0.0.1）会把数据库暴露到局域网 —— 那不在本轮授权内。
+#
+#  ③ `restart: "no"` —— **刻意不自动启动**
+#     2026-10-13 实测教训：本机 QQ 用的 NapCat 容器是 `unless-stopped`，
+#     引擎一启动它就自动回来了（当时 LG 核心并未运行）。数据库服务在生产上
+#     确实需要"服务器重启后仍可读"（计划 §1 的生命周期判据），但**那是 WP6 的裁定**，
+#     而且要用独立的可用性证据支撑，不是靠一个 compose 字段顺手带过。
+#     ⇒ 试验实例一律显式启停；WP6 再决定生产重启策略。
+#
+#  ④ 持久性设置**一律不关**（`fsync` / `synchronous_commit` 保持默认）
+#     计划 §5 逐字："不为得到更快数字关闭持久性设置"。
+#
+# ---------------------------------------------------------------------------
+#  怎么用（不在这里执行 —— 由 WP2 的脚本/门驱动）
+# ---------------------------------------------------------------------------
+#   凭据：`artifacts/post-lv2/local/pg-migration/pg-trial.env`（**gitignore**，不入库）
+#   起：  docker compose -f scripts/postgresql/compose.yml --env-file <上面那个> up -d
+#   停：  docker compose -f scripts/postgresql/compose.yml down        （**不加 -v**：卷要留）
+#   查：  docker compose -f scripts/postgresql/compose.yml ps
+#
+#  ⚠️ `down -v` 会删掉命名卷（数据没了）。要重来一次全新实例才用 `-v`。
+
+name: lg-postgresql
+
+services:
+  postgres:
+    image: pgvector/pgvector@sha256:ac08538c6f8b9904c33c8224c5e5706dbe760aca29db1d096972b4052c22a75d
+    container_name: lg-postgresql-trial
+    restart: "no"
+
+    ports:
+      # 只绑 loopback。容器内仍是标准 5432；宿主端口刻意避开 5432（本机可能已有别的 PG）
+      - "127.0.0.1:55432:5432"
+
+    environment:
+      # bootstrap 超级用户（initdb 时创建）。**运行账号不是它** —— 见 init/010-roles.sh
+      POSTGRES_USER: ${LG_PG_BOOTSTRAP_USER:-lg_bootstrap}
+      POSTGRES_PASSWORD: ${LG_PG_BOOTSTRAP_PASSWORD:?必须提供 LG_PG_BOOTSTRAP_PASSWORD（见 pg-trial.env）}
+      POSTGRES_DB: ${LG_PG_BOOTSTRAP_DB:-lg_trial}
+      # 数据页校验和：让"静默损坏"可被发现（读的时候会报 checksum failure）
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+      # 下面几个只给 init 脚本用（建账号），不参与服务本身
+      LG_PG_MIGRATE_PASSWORD: ${LG_PG_MIGRATE_PASSWORD:?必须提供}
+      LG_PG_RUNTIME_PASSWORD: ${LG_PG_RUNTIME_PASSWORD:?必须提供}
+      LG_PG_READONLY_PASSWORD: ${LG_PG_READONLY_PASSWORD:?必须提供}
+      LG_PG_TEST_PASSWORD: ${LG_PG_TEST_PASSWORD:?必须提供}
+
+    volumes:
+      - lg-postgresql-data:/var/lib/postgresql/data
+      # 建账号 / 授权：只在**空数据目录**时执行一次（PG 官方镜像的 initdb 语义）
+      - ./init:/docker-entrypoint-initdb.d:ro
+      # WP2 的建库/授权脚本（每建一个 `lg_test_<门>` 都要重放同一套授权）。
+      # 挂只读：容器**不该**能改这些脚本 —— 判据与被判对象要分开。
+      - .:/opt/lg:ro
+
+    # 显式写出来的服务参数：为了**可审计**（而不是藏在默认值里）
+    command:
+      - postgres
+      # 连接审计（谁连上来了、什么时候走的）—— 排查"第二核心"时的第一手证据
+      - -c
+      - log_connections=on
+      - -c
+      - log_disconnections=on
+      # DDL 全记：schema 变更必须是显式动作，日志要能对上
+      - -c
+      - log_statement=ddl
+      # 锁等待可见（WP3 的写入资格故障排查要用）
+      - -c
+      - log_lock_waits=on
+      - -c
+      - deadlock_timeout=1s
+      # 持久性**保持默认**（不写 fsync=off 之类）
+      - -c
+      - fsync=on
+      - -c
+      - synchronous_commit=on
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${LG_PG_BOOTSTRAP_USER:-lg_bootstrap} -d ${LG_PG_BOOTSTRAP_DB:-lg_trial}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+volumes:
+  lg-postgresql-data:
+    # 固定名字（不随项目目录名变化）—— 换目录不会变成"另一个空库"
+    name: lg-postgresql-data

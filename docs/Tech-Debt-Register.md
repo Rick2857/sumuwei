@@ -2320,6 +2320,7 @@ M111-F02派生来源有效正例下6/17 FAIL（`a77266ba092f-f278`），修复�
 
 ⚠️ 后续动作（**需授权**）：真实库被写了什么、是否需要恢复，属**独立裁定**
 （`INC-01` 的恢复流程默认 dry-run、apply 需逐字授权）；本登记册**不**自行发起。
+```
 
 ### R-38 · **已按用户授权完成的只读确认**（2026-10-02，用户：「要确认真实库被写了什么，看情况判断需要恢复」）
 
@@ -2534,3 +2535,1622 @@ M111-F02派生来源有效正例下6/17 FAIL（`a77266ba092f-f278`），修复�
 - **安全停机入口** `scripts/coexist/stop.mjs` 少算一层项目根，已修正；真实脚本在一次性项目中从任意 cwd 执行写入正确哨兵，共存专项通过。生产的排空/关闭实现沿用原状态机。
 
 最终运行与完整回归读数以激活记录和该轮 machine evidence 为准；两个无修补版本依赖公告与旧 INC-01 漂移 FAIL 未销账。
+
+## 2026-10-12 PostgreSQL 迁移 WP0 登记（新增，不回写上列任何历史读数）
+
+用户 2026-10-12 指令「按计划执行 `docs/post-lv2/PostgreSQL-Migration-Execution-Plan-2026-10-12.md`」。
+WP0（基线 / ADR / 契约 / 门矩阵）已交付，**实现未开始**，生产未切换。
+载体：[WP0 基线](post-lv2/PostgreSQL-Migration-WP0-Baseline.md)（runId `pg-migration-wp0-20261012T232804`）·
+[ADR-132](adr/ADR-132-postgresql-migration-backend-and-activation.md) · [验收契约](post-lv2/PostgreSQL-Migration-Acceptance-Contract.md) ·
+[门矩阵](post-lv2/PostgreSQL-Migration-Gates-Matrix.md)。
+
+**本轮的两条正向发现（都是读出来的，不是推的）**：
+
+```text
+① 来源库版本已读回：从 2026-10-11T12:53Z 的 verified 快照**副本**读出
+   schema **v18** / **51** 张 public 基表 / 引擎 PostgreSQL 17.5 / 扩展 vector **0.8.0** +
+   fuzzystrmatch 1.2；且迁移 17/18 的四个列**真的存在**（4/4）。
+   ⇒ 修正一处流传说法：AGENTS.md 的「真实库 v16」是 2026-10-07 的读数，**当前是 v18**。
+     旧文字按历史保留，不回写。
+② 「插件到底读哪一条连接配置」有源码级结论：是 `POSTGRES_URL`（`getSetting`），
+   `DATABASE_URL` 在 1.7.2 里**只**进 `migrate()` 的 advisory lock 判定，**不参与后端选择**。
+```
+
+### R-71 · pgvector 扩展版本在迁移中会从 **0.8.0** 漂到 **0.8.7**（登记，未销账）
+
+- **事实**：来源库（PGlite 0.3.16 捆绑）的扩展是 `vector 0.8.0`；候选镜像
+  `pgvector/pgvector:0.8.7-pg17-bookworm` 提供 `0.8.7`。pgvector 0.8.7（2026-10-05 发布）
+  修的是 **IVFFlat 索引构建**的缓冲区溢出（CVE-2026-103484）。
+- **本仓库实测**：`src/**` 与 `node_modules/@elizaos/plugin-sql/dist/node/index.node.js`
+  全文搜 `ivfflat` / `hnsw` ⇒ **0 命中**；来源库 112 个索引里也没有向量索引
+  （`memory_semantic_index_scope` 是普通 btree）。
+- **状态**：**OPEN（低风险，已裁定处置）**。ADR-132 `D08` 裁定：固定 0.8.7；
+  **不主张**该 CVE 在本仓库被触发过；迁移后逐列核对 vector 列（`PG-G06.2`）并显式记录两边版本差；
+  **不为对齐版本去重建向量索引**。
+- **未决**：镜像 digest 与 PG minor 仍 **NOT VERIFIED**（本机 Docker 引擎未运行）。
+
+### R-72 · 测试隔离只认 PGlite 目录 ⇒ PG 后端下"隔离"会静默失效（登记，WP1 修）
+
+- **问题**：`src/dev/sandbox.ts` 的 `isolateDatabase()` 只设 `PGLITE_DATA_DIR` 与
+  `PROJECT_LG_SANDBOX`；`assertIsolated()` 也只读 `PGLITE_DATA_DIR`。
+  ⇒ 一旦 `.env` 带上生产 `POSTGRES_URL`，**253 个**用 `isolateDatabase` 的脚本会连上生产库，
+  而它们的隔离断言**照样通过**（量的还是那个不起作用的环境变量）。
+- **同族真缺陷（读代码复核得到，本轮未运行）**：
+  `resetPluginSqlConnection()` 在 PG 分支 `postgresConnectionManagers?.clear()` **只清 Map 引用、不调 `close()`**；
+  且函数开头 `if (!bag?.pgLiteClientManager) return false` ⇒ **只有 PG 池的进程整个函数早退**。
+- **状态**：**OPEN**。裁定 = ADR-132 `D03`（`isolateDatabase()` 在 PG 后端下**默认失败关闭**）
+  与 `D12`（两个缺陷随 WP1 一起修，且**不调 close 的旧实现必须在门里判红**）。
+- **边界**：不主张这 253 个脚本"都已验证拒绝"；WP1 只做**代表性**负控，名单在门脚本里具名列出。
+
+**本轮明确未做**：未启动 Docker 引擎、未拉镜像、未安装 `@electric-sql/pglite-tools`、未导出任何数据、
+未跑任何门、未改任何源码与 `.env`。真实库**连租约都没取**（全部读数来自合格快照的**副本**，
+三个探针均自证"源目录前后指纹逐字相同"）。
+
+### WP1 实施追加（2026-10-12，runId `pg-migration-wp1-20261012T235534`；上面 R-71/R-72 的**登记当时**读数不回写）
+
+载体：[WP1 Handoff](post-lv2/PostgreSQL-Migration-WP1-Handoff.md)。门
+`pnpm postgresql:g01:verify` = **37 正控 + 2 负控 · 0 失败 · 3 条具名 NOT RUN**（`measured_count = 39`）。
+
+- **R-72 的两个真缺陷已修**（`src/dev/sandbox.ts`）：
+  ① `resetPluginSqlConnection()` 现在**先逐个 `await close()` 再 clear**，并把"关失败"如实计数与告警
+  —— 修法抽成纯函数 `closePostgresPoolManagers()`，**负控在门里真的跑**（`D12.3`：把"只 clear 不 close"
+  的旧实现跑一遍，"池真的被关了"这条断言**必须抛**）；
+  ② 开头的 `if (!bag?.pgLiteClientManager) return false` **早退已去掉**，两个分支互不短路。
+- **R-72 的隔离面已按 `D03` 实现**：`isolateDatabase()` 在 PG 后端下**默认拒绝**
+  （`postgres_isolation_not_provided`），给了测试目标还要过三道（可解析 / ≠生产目标 / 带 `lg_test_` 前缀）；
+  `assertIsolated()` 按后端分判据；`assertConnectedToSandbox()` 在 PG 侧**直问** `current_database()`。
+  ⇒ `assert.equal` 级读数：**PGlite 正控照常**（`G01.1`，开库步骤照常执行 ⇒ 没被新闸误伤）·
+  **PG + 无测试目标 ⇒ 隔离直接拒**（`G01.6`，开库步骤 0 次）·
+  **祖先 `.env` 的 `POSTGRES_URL` 真被读到**（`G01.4`，靠真实目录层级而非模拟）。
+- **本包新登记的三条边界**（详见 Handoff §6）：`L-PGW1-01`（`LG_PRODUCTION_POSTGRES_URL` 未设 ⇒
+  "等于生产目标"判不了）· `L-PGW1-03`（主机名**不做** DNS 解析，`db.internal` vs 它的 IP 判为不同）
+  · `L-PGW1-05`（**`m4.5:ci` 本包未跑**：替代门 10 道全 EXIT 0，但不把替代门说成完整 CI）。
+- **两处本轮真踩到的判据缺陷，作为纪律留下**：
+  ```text
+  ① **假阴性**：门脚本的 `decide()` 第一版只把 `rest.dataDir` 传给 PGlite 目录闸，
+     而多数用例只给 `env.PGLITE_DATA_DIR` ⇒ 目录闸拿到 `undefined` ⇒ **永远放行** ⇒
+     "真实库目录被拒"那条断言**永远通过却什么都没量到**。
+     修法：数据目录以**解析结果**为准（`resolution.dataDir`），显式覆盖才用参数。
+     ⇒ 纪律：**断言"应当被拒"时，先证明它在"不该被拒"的对照下会放行**（否则量的是常数）。
+  ② **负控分类反了**：`checkNegative` 的语义是"**期望抛**，没抛就红"；而
+     `postgresIsolationDecision` 是**返回**拒绝（不抛）⇒ 把"期望返回拒绝"放进负控，
+     "没拦住"反而被记成通过。修法：负控只用**注入失效检测器**的形状
+     （`compareTargets` 注入点），正控负责"返回拒绝"。
+  ```
+- **回归读数**（本包改动面）：`typecheck` EXIT 0 · `m4:isolation:verify` **22/0** · `m4:verify` **147/0** ·
+  `m4:test` **266/0** · `m3:migrate-gate` **17/0** · `postlv2:database-env:verify` EXIT 0
+  （`productionDatabaseOpened: false`）· `inc-01:test` **25/0**（含 **T24**：中央闸仍在
+  `registerPlugin` **之前** ⇒ 本包没有把 INC-01 的保护移位）· `postlv2:affected:verify` **23/0** ·
+  `scripts:catalog:verify` PASS · **`m4.5:ci` = EXIT 0**（G12 38/0 · G13 32/0 · G14 52/0 三个 HARD GATE ·
+  G2 150/0 · L2 53/0 · G9 12/0 · 场景回归 7/0 · G14 选档器自证 5/5；日志
+  `artifacts/post-lv2/postgresql-migration/m45ci-wp1-20261012.log`）。
+  ⚠️ CI 运行期间只改过 `.md`、源码 mtime 全部早于该次运行 ⇒ 读数对应当前源码指纹；
+  日志里 `PgliteDatabaseAdapter，已建 18 张表` 是"未设后端字段 ⇒ 逐字走 PGlite"在真实插件路径上的印证。
+  ⚠️ **`postlv2:db:verify` EXIT 1 与本包无关**：它自报 `SNAPSHOTS PRUNED`
+  （`PL2-AI-01` 需要的两份旧快照已被保留策略清掉）⇒ 本次**没有重测**；旧读数不改写。
+- **登记面（只追加）**：`package.json` 一行 · `scripts/gates/manifest.ts` 一门
+  （`resources` 逐条核对后填 `SAFE_PURE`：不碰真库、不占端口、不写证据）· `scripts/gates/affected-map.ts`
+  **两条新规则**（`src/dev/sandbox.ts` 与 `database-backend.ts`+`db.ts`）—— 补这道规则的理由是
+  **253 个脚本**用 `isolateDatabase`，不登记则"改了隔离保护一道门都不跑"是结构上可能的
+  （同型先例：QQ 主动联系、浏览器全工具档）。
+- **仍未运行**：三条需要真 PG 实例的用例（错库身份拒绝 / 第二目标 / 写入前拒绝的证明）。
+  ⇒ 归 **WP2**（前置 = Docker 引擎，见 WP0 `L-PGM-01`）。
+  ⏩ **2026-10-13 修订**：其中**两条已关闭**（见下面 WP2 一节）；只剩"同进程第二个 PG 目标"归 WP3。
+
+## 2026-10-13 PostgreSQL 迁移 WP2 实施追加（runId `pg-migration-wp2-20261013T130636`）
+
+用户 2026-10-13 裁定：**启动 Docker Desktop 引擎、按计划的 Compose 路线推进 WP2**。
+启动引擎时发现用户的 `lg-qq-private-napcat-1`（`RestartPolicy=unless-stopped`，是用户自己的配置）
+被自动拉起，而 LG 核心并未运行 ⇒ 按用户指令**优雅停止**（`docker stop --time 30` ⇒ `Exited (143)` = SIGTERM）。
+此后 `docker ps` 为空，其余 13 个容器保持各自原有 Exited 状态。
+
+### L-PGM-01 已关闭（WP0 遗留的镜像/digest/PG minor 未验证）
+
+```text
+镜像      pgvector/pgvector:0.8.7-pg17-bookworm
+digest    pgvector/pgvector@sha256:ac08538c6f8b9904c33c8224c5e5706dbe760aca29db1d096972b4052c22a75d
+PG        **17.11**（Debian 17.11-1.pgdg12+2，x86_64）
+pgvector  镜像内 **0.8.7**（vector.control 的 default_version）
+架构/OS   amd64 / linux（镜像 636900560 B，created 2026-10-01T17:35:53Z）
+许可证    两者都是 **PostgreSQL License**（`/usr/share/doc/pgvector/LICENSE` 实读；
+          镜像 Config.Labels 为 null ⇒ 按镜像内文件判定，不按标签）
+```
+
+⇒ 计划 §2 的"部署固定 digest / 不能自动使用 latest"由此可执行。
+
+### WP2 已交付（隔离实例 + 账号分离 + 建库工具）
+
+- `scripts/postgresql/compose.yml`：独立项目 `lg-postgresql` · 命名卷 `lg-postgresql-data` ·
+  **digest 固定** · **端口只绑 loopback** `127.0.0.1:55432` · `restart: "no"`（**刻意不自动启动**，
+  理由与刚踩到的 NapCat 自动拉起同一件事）· 持久性设置一律不关 · 连接/DDL/锁等待日志全开。
+- `scripts/postgresql/init/010-roles.sql`：四账号分离（用 psql `\getenv`，**不用** `.sh`——
+  Windows 挂载权限不可靠，`.sh` 可能被 entrypoint **source** 进它自己的 shell）。
+- `scripts/postgresql/create-test-db.sql` / `drop-test-db.sql`：一次性测试库的建/删，
+  两者都有 `lg_test_` 前缀守卫（**负控实测**：`lg_prod_like` 建库被拒 exit 3；
+  `lg_trial` 删库被拒 exit 3）。
+- `scripts/postgresql/init-probe.ts`：让 LG 的**真实** `initDatabase()` 跑在真 PG 上。
+
+**账号分离读数**（17 条负控，全部 rc 如预期）——关键一条是 D07 要求的那条：
+
+```text
+lg_readonly 把**第二层**（default_transaction_read_only）关掉之后：
+  INSERT/UPDATE/DELETE ⇒ **permission denied for table**（★第一层 GRANT 真的挡得住）
+  DROP                 ⇒ must be owner
+  SELECT               ⇒ 仍然可以
+lg_runtime   INSERT/UPDATE/DELETE ⇒ 允许；CREATE/ALTER/DROP ⇒ 拒
+lg_test      CONNECT ⇒ FATAL: permission denied for database "lg_trial"（**连接层**拒绝）
+pg_roles     四个业务账号全部 super/createdb/createrole/bypassrls/inherit = false
+```
+
+**从零可运行读数**（`init-probe`，目标库由 `create-test-db.sql` 从零建立）：
+
+```text
+✅ isolateDatabase({postgres}) 放行 · 适配器 = **PgDatabaseAdapter** · backend 读回 postgres
+✅ 身份核对读到真服务端地址 172.25.0.2/32:5432（PGlite 下为空）
+✅ 负控：**未放行时 Kernel 迁移闸拦住**（kernel_migration_pending）⇒ M3 迁移闸在 PG 下照样生效
+✅ 显式放行后 initDatabase 成功：public 表 **51** 张 · Kernel schema **v18** · pgvector **0.8.7**
+   ⇒ 与 WP0 从来源快照读出的 51 表 / v18 **逐项对上**
+❌ 第 12 步 isDatabaseClosed=false —— 见 F-WP2-01
+```
+
+### F-WP2-01 · `isDatabaseClosed()` 在 PostgreSQL 后端下**假阴性**（登记，归 WP3）
+
+- **现象**：池**真的**关了（`pg_stat_activity` 里 `lg_migrate` 会话数 = **0**，剩余 2 个都是
+  `lg_bootstrap` 即本次 psql 自身），而 `isDatabaseClosed()` 返回 `false`。
+- **根因**：`runtime-shutdown.ts` 的 `isDatabaseClosed()` 只认 PGlite 形状
+  （`connection.closed` 布尔 / `adapter.closed`）；`pg.Pool` 不暴露 `.closed`，
+  `PostgresConnectionManager` 暴露的是 `isClosed()`（方法）与 `_closed`（私有）⇒ 落到 `return false`。
+- **方向是安全的**（失败关闭：宁可误报"没关"也不误报"关了"），但**"关闭是问出来的"这句在 PG 上答不出来**。
+- **归属**：WP3。计划 §3.2 / ADR-132 `D06` 要求 PG 侧判据 = 关闭 Promise 成功 + 本进程会话释放。
+
+### F-WP2-02 · **初始化失败不回收连接池 ⇒ 进程挂住**（登记，归 WP3）
+
+- **实测**：把 `LG_PG_EXPECT_DATABASE` 故意写成错的 ⇒ 身份核对抛 `db_identity_mismatch`（正确），
+  但**探针进程 14 分钟没有退出**；`pg_stat_activity` 里 `lg_migrate` 有 **1 个 `idle/Client` 会话**
+  ⇒ 池握着连接等客户端 ⇒ Node 事件循环被撑住。强制结束后会话立刻归 0。
+- **机理**：`initDatabase()` 顺序是 `registerPlugin(sqlPlugin)`（这一步就建好 `PgDatabaseAdapter`
+  + `pg.Pool`，min=2）→ 身份核对 → `runPluginMigrations()`。身份核对抛错时池已存在，
+  **没有任何人关它**。PGlite 分支没有这个症状 ⇒ **换库才暴露**。
+- **为什么严重**：生产上"初始化失败"会变成**挂住**而不是**快速失败**：supervisor 看到的是
+  活着但不干活的进程；共存/自动重启链会把挂住当正常运行。计划 §1 要求"初始化失败…有可审计结果"。
+- **归属**：WP3（计划 §4/WP3 必交付物逐字包含"初始化失败回收"）。
+- **本包不改**：WP1 已收口且 `m4.5:ci` EXIT 0，改动会让那份读数指纹不适用；且属 WP3 职责。
+
+### WP1 遗留的真 PG 用例：2 条关闭
+
+```text
+✅ G01.5-real-pg  错库 ⇒ db_identity_mismatch（写入前拒绝）。旁证：期望 kernel_migration_pending
+                  的那一步实际拿到 db_identity_mismatch ⇒ 身份核对**先于**插件迁移
+✅ G01.8-real-pg  拒绝后重读 information_schema.tables ⇒ **0 张**（与基线相同）
+⏳ G01.7-real-pg  同进程第二个 PG 目标 —— 归 WP3（要驱动池复用路径，池键不含连接地址）
+```
+
+**本轮明确未做**：未改 `.env`（现状仍是 PGlite）· 未改任何源码 · 未导出/迁移任何数据 ·
+未打开真实库（`data/pglite` 全程未被触碰）· 未跑 `m4.5:ci`（WP1 已跑过 EXIT 0，本轮只加隔离侧文件）。
+
+## 2026-10-13 PostgreSQL 迁移 WP3 实施追加（runId `pg-migration-wp3-20261013T134718`）
+
+载体：[WP3 Handoff](post-lv2/PostgreSQL-Migration-WP3-Handoff.md)。
+**WP3 部分交付**：计划 §4/WP3 的六项里完成**两项**（连接池关闭 / 初始化失败回收）；
+资格锁、服务器重连、消费者生命周期、共存启停适配、`PG-G03` 门**均未开始**。
+
+### ✅ F-WP2-01 已修（`isDatabaseClosed()` 的 PostgreSQL 分支）
+
+```text
+改动      src/infrastructure/persistence/runtime-shutdown.ts（指纹 2596c16f527ed832）
+判据选    **pg.Pool.ended** —— pg-pool/index.js:141，只在 `this._clients.length === 0`
+          那一支里置 true ⇒ 这才是"池真的空了"
+明确拒用  ① pool.ending（index.js:107，end() 一调用就 true）⇒ **假阳性**
+          ② manager._closed（PostgresConnectionManager.close() 是"先置标记再 await
+             pool.end()"）⇒ 同样假阳性；ADR-132 D06 明确不许用管理器标记当关闭凭证
+修前      isDatabaseClosed=false，而池**真的**关了（lg_migrate 会话数 = 0）⇒ 假阴性
+修后      isDatabaseClosed=true（init-probe 在全新库 lg_test_wp3 上 12 步全过）
+顺序      PGlite 客户端没有 ended、pg.Pool 没有 closed ⇒ 两分支互不干扰，
+          既有 PGlite 判据**逐字未动**
+```
+
+### ✅ F-WP2-02 已修（初始化失败回收连接池）
+
+```text
+改动      src/db/index.ts（指纹 f8230adb660a4806）—— 对外 initDatabase() = try/catch 包装层
+          + 内层 initDatabaseInner()（正常路径）
+两条纪律  ① 不覆盖原始错误（原错误才是可诊断的那个）
+          ② 不假装回收成功（回收失败如实记 error，不吞）
+安全性    closeDatabaseConnection() 在无 adapter 时是安全 no-op（AT3.3）⇒
+          "assertDatabaseAccessAllowed() 就抛了"这条路径调它也安全
+修前      进程 **14 分钟**未退出；池里握着 1 个 idle/Client 会话
+修后      进程 **1 秒**内退出，exit 1，错误信息**一字未变**；
+          服务端 lg_migrate 会话数 = **0**（池真的回收了，不只是进程结束）
+```
+
+### 一处量具修正（纪律）
+
+`init-probe` 的负控"未放行时 Kernel 迁移闸拦住"**有前置条件**：目标库必须是**全新**的。
+对已有 schema 的库 `pendingMigrations()` 返回 0 ⇒ 闸没有东西可拦 ⇒ 首次 init 会成功 ——
+**那是正确行为**。第一版记成 `FAIL` 是**量具的错**。现在如实分列（`notRun` + 具名原因）。
+⇒ 纪律：**负控也要写清前置条件**，否则"负控红了"可能只是环境不对。
+
+### 回归读数（本包源码改动后重跑）
+
+```text
+pnpm typecheck                     EXIT 0
+pnpm postlv2:database-env:verify    EXIT 0（productionDatabaseOpened: false）
+pnpm inc-01:test                   25/0 —— 含 T24：中央闸仍在 registerPlugin **之前**
+                                   ⇒ 包装层**没有**把 INC-01 的保护移位
+pnpm m4.5:ci                       **EXIT 0**（G12 38/0 · G13 32/0 · G14 52/0 三个 HARD GATE ·
+                                   G2 150/0 · L2 53/0 · G9 12/0 · 场景回归 7/0 · 选档器自证 5/5）
+日志：artifacts/post-lv2/postgresql-migration/m45ci-wp3-20261013.log
+```
+
+⚠️ WP1 那份 `m4.5:ci` 读数对应**改动前**指纹 ⇒ 本包重跑是**新读数**，**不覆盖**旧读数。
+
+### 本包新登记的边界（`L-PGW3-01…04`，详见 Handoff §6）
+
+```text
+L-PGW3-01  未跑 m4.5:ci:full（含真实模型档）—— 那是交付候选纪律，非单 WP 最小纪律
+L-PGW3-02  `pg` 仍**不是**根依赖（本包没动依赖声明）⇒ 未销账
+L-PGW3-03  F-WP2-02 只覆盖 initDatabase 这一条路径 ⇒ **不主张**"所有初始化失败都会回收"
+L-PGW3-04  资格锁未做 ⇒ **不主张**"第二核心会被拒绝"；计划 §3.2 的
+           "WP3 故障门未过前不允许生产切换"**没有**过
+```
+
+### WP3 仍未做（下一轮清单）
+
+```text
+⏳ 服务器重连 · ⏳ 核心资格锁（D05：专用连接 + session advisory lock +
+   (pg_backend_pid, generation) + 池错误即失效；**不许复用** plugin-sql 迁移锁的 lockId 派生）·
+⏳ 消费者生命周期 / 共存启停适配 · ⏳ PG-G03 门（两个真实 OS 进程）·
+⏳ G01.7-real-pg（同进程第二个 PG 目标）
+```
+
+## 2026-10-13 PostgreSQL 迁移 WP2 收口追加（`PG-G02` 门落成，销 `L-PGW2-01`）
+
+**`pnpm postgresql:g02:verify`** 已落成（`scripts/postgresql-g02-verify.ts`）：
+**27/27 · 0 失败 · 0 notRun**（`measured_count = 27`，实测 8.1s）。
+它把 WP2 那两张读数表（17 条账号权限负控 + 12 步从零可运行）收进了一道
+可被 `pnpm` 调起、已登记 manifest / affected-map / Scripts-Catalog 的门。
+
+**覆盖的契约项**（验收契约 `PG-G02`）：`G02.1` 从零可运行（含 51 表 / kernel v18 / pgvector 0.8.7）·
+`G02.2`/`G02.4` 待迁移未放行 ⇒ 拒 · `G02.3` 并发两个迁移执行者（**每条迁移恰好登记一次**）·
+`G02.5` runtime DDL 拒 · `G02.6` readonly 写全拒（**把只读事务关掉后**仍拒 = 靠 GRANT）·
+`G02.7` readonly bootstrap 操作拒 · `G02.8` lg_test 连接层拒 · `G02.9` 事务失败回滚 ·
+外加**敏感性对照**：把 `lg_readonly` 临时提权 ⇒ 写**必须变成允许**（证明 G02.6 量的是 GRANT），
+随后恢复并复验仍拒。
+
+### 落门时才发现并修掉的两件事（**都不是读数，是门自己的缺陷**）
+
+```text
+① **假绿**：第一版在**实例不可达时以 0 退出**（只跑 2 条静态断言 + 记 notRun）
+   ⇒ CI 会把"根本没有数据库"当成绿。那正是验收契约 §2「缺证据…拒收」与
+   §9「任一关键门 FAIL / NOT RUN 不能汇成 PASS」要挡的东西。
+   修法：**只要有关键断言未运行，本门就不报 PASS**（非零退出 + 具名原因）。
+   ⚠️ 这条差点被当成"失败关闭做得挺好"放过去 —— 它其实是个**假绿出口**。
+
+② **lane 归属错**：第一版把 PG-G02 放进 `OFFLINE_GATES`。而那条 lane 的声明与
+   `pnpm m4.5:ci` **逐条等价** ⇒ 等于让本仓库的核心离线 CI **依赖 Docker 在跑**。
+   修法：改为**自己的 `postgresql` lane**（标 `serial`），与 `desktop-control` 的先例一致
+   （那个 lane 的注释逐字写着"有意不并入 offline lane"）。
+   ⇒ `m4.5:ci` 的组成**不受 PG 线影响**；PG 门用 `pnpm gates:run --lane postgresql` 调。
+   `postgresql:g01:verify` **留在** offline lane（纯函数 + 临时目录子进程，不需要实例）。
+```
+
+### 一条新的"语句形状不能当权限探针"陷阱（与 WP0 那条同族）
+
+```text
+对**已安装**的扩展，`CREATE EXTENSION` 的两种写法都**量不到权限**：
+  · 带 `IF NOT EXISTS` ⇒ **静默空操作**，rc=0（根本不触发权限检查）
+  · 不带            ⇒ 报 `already exists` —— **也不是**权限拒绝：
+                       "已存在"这条短路发生在权限检查**之前**
+⇒ 同 WP0 记的 `add column if not exists`：**"已存在就短路"的语句形状不能当权限探针**。
+⇒ 所以 `G02.7` 用的是 **CREATE SCHEMA**（确定会真正尝试的操作），
+  并把上面这个行为本身写成了 `G02.7b` 断言 —— 让"为什么不用它"可复核，而不是只留注释。
+```
+
+**回归**：`typecheck` 0 错 · `gates:run --lane postgresql` PASS（8.1s）·
+`scripts:catalog:verify` PASS（605 条）· `m4.5:ci` 见 `m45ci-wp4-20261013.log`。
+⚠️ 本包**未改任何 `src/**`**（只加门与登记面）⇒ WP3 那份源码指纹仍然有效。
+
+### WP3 仍未做（更新后）
+
+```text
+⏳ 服务器重连 · ⏳ 核心资格锁（D05）· ⏳ 消费者生命周期 / 共存启停适配 ·
+⏳ PG-G03 门（两个真实 OS 进程）· ⏳ G01.7-real-pg（同进程第二个 PG 目标）
+```
+
+## 2026-10-13 PostgreSQL 迁移 WP3 追加：单认知执行者资格（`D05`）已实现并验证
+
+**`pnpm postgresql:g03:verify`** 已落成：**14/14 · 0 失败 · 0 notRun**（`measured_count = 14`）。
+实现：`src/infrastructure/persistence/single-core-qualification.ts`。
+探针：`scripts/postgresql/qualification-probe.ts`（三种模式：`hold` / `try` / `read`）。
+载体：[WP3 Handoff](post-lv2/PostgreSQL-Migration-WP3-Handoff.md) §5.1。
+
+### 形状与关键读数
+
+```text
+资格 = 专用连接（pool.connect() 取一条并**持有**，不是借了还）
+     + 该连接上的 session 级 pg_try_advisory_lock
+     + 记录 (pg_backend_pid, generation)
+取得：拿不到就**具名拒绝** —— 不等待、不重试、不"试着跑跑看"
+```
+
+**两个真实 OS 进程**（计划 §5 对 `PG-G03` 的逐字要求）：
+
+```text
+持有者  --mode=hold  acquired=true  backendPid=8410  lockId=6521252741284615669
+挑战者  --mode=try   acquired=false denial=lock_not_acquired（**同一 lockId**）
+只读    --mode=read  ok=true        readValue=691  ← **不受资格限制**
+```
+
+**失效由可观测事件判定**（计划 §3.2 逐字："获取一次 advisory lock 不构成完整失效保护"）：
+
+```text
+触发：pg_terminate_backend 终止持有者专用连接（限定 usename='lg_migrate'）
+轻量核对序列：[true, true, true, false]  ·  heldAfterWait=false
+invalidationReason = **connection_error**（可观测事件）
+⇒ 序列**由真变假**被单独断言（G03.3b）：否则"失效检测"可能只是恒 false
+⇒ 持有者会话消失后另一个进程可取得 ⇒ session 锁随会话释放
+```
+
+**lockId 与 plugin-sql 迁移锁不同源**（`D05` 的硬约束），**改两处**而非一处：
+
+```text
+        plugin-sql（迁移互斥）        本模块（认知执行者资格）
+输入    pluginName                    lg:single-core:v1:<角色>
+字节    sha256 的 **0…8**             sha256 的 **8…16**
+掩码    & 0x7fff…（63 位），0→1       同
+```
+`D05.3` 断言**两种**最易被顺手复用的写法都必然不同，其中"**只改输入、不改字节范围**"
+尤其重要 —— 它证明"只靠命名空间不够"。
+
+### 本包新登记的边界
+
+```text
+L-PGW3-04  资格锁**已实现但尚未接进生产装配**：main.ts 的装配根还没有"取得资格 →
+           失败则拒绝启动 / 撤销后停止接收新轮次"这条接线。
+           ⇒ **不主张**"生产上第二个核心会被拒绝"；主张的是"模块与门已就位且读数通过"。
+           计划 §3.2 的"WP3 故障门未过前不允许生产切换"因此**仍未过**。
+L-PGW3-05  verifyStillHeld() 的推理链是"同一条连接 ⇒ 锁还在"（依赖 session 锁随会话消失）。
+           直连下成立，但**没有**覆盖：连接池代理（pgbouncer 的 transaction 模式会让
+           session 锁失效）、连接被中间层"透明重连"而 pid 恰好复用。
+           ⇒ 计划 §1 首期不引入 PgBouncer 是**必要条件**；将来引入则本判据要重新设计。
+```
+
+⚠️ **本包新增了一个源码文件**（`single-core-qualification.ts`）⇒ 按既有纪律重跑 `m4.5:ci`
+（见 `m45ci-wp5-20261013.log`），不覆盖旧读数。
+
+### WP3 仍未做（再次更新）
+
+```text
+⏳ 服务器重连 · ⏳ 消费者生命周期 / 共存启停适配 ·
+⏳ 在飞模型晚返回（计划 §5 的 G03.4）· ⏳ 把资格锁接进生产装配（L-PGW3-04）·
+⏳ G01.7-real-pg（同进程第二个 PG 目标）
+```
+
+## 2026-10-13 PostgreSQL 迁移 WP3 追加 ②：资格锁**接进生产装配**（销 `L-PGW3-04` 的接线部分）
+
+**门** `pnpm postgresql:g03:verify` 从 14 条扩到 **19/19 · 0 失败**（`measured_count = 19`）。
+
+### 接了什么（`src/main.ts` 的装配根）
+
+```text
+开库（initDatabase）之后
+  → dedicatedPoolOf(runtime) 判后端       ← PG 才有池；PGlite（嵌入式，没有 connect）⇒ 跳过
+  → acquireSingleCoreQualification(...)   ← 拿不到就**抛具名 KernelError**（拒绝启动）
+  → initCharacterState(...)               ← 在**任何业务写入之前**
+收尾 afterRun
+  → singleCoreQualification.release()     ← 放在 afterRun：放不掉**不影响退出码**
+                                        （连接即将释放，session 锁随会话消失）
+资格丢失 onInvalidated
+  → stopAfterQualificationLoss() → **既有的** shutdown()   ← 不另发明一条收尾路径
+```
+
+**"纯追加"的关键判据**是 `dedicatedPoolOf()` **按形状**区分两种后端：
+PG 的 `adapter.manager.getConnection()` 是 `pg.Pool`（**有** `connect`）；PGlite 的嵌入式客户端
+**没有** `connect` ⇒ 返回 `undefined` ⇒ 根本不尝试取得资格 ⇒ 既有行为逐字不变。
+这条判据的**两侧**都验了：纯函数侧（`D05.7`）+ 真运行时侧（`init-probe`：
+真 PG 的池 `connect()` 真给出一条能查询的连接，实测 `pg_backend_pid=10986`）。
+
+### ⚠️ 接线验证是**结构性**的，必须说清它证明了什么
+
+```text
+证明   ：装配根**确实**在"开库之后、状态引导之前"取得资格、拿不到就抛具名错误、
+         收尾释放、丢失时接上既有 shutdown（PG-G03 的 W3.1–W3.4 四条静态断言）
+不证明 ：真的起两个**完整生产核心**时第二个会被拒
+         —— 那需要跑两个核心（角色、插件、模型、入口），属 **WP6 的演练/Runbook**
+⇒ 因此**仍不主张**"生产上第二个核心会被拒绝"；主张的是
+  "模块已实现并验证（两个真实 OS 进程）+ 装配根已接线并有结构断言"。
+⇒ 计划 §3.2 的"WP3 故障门未过前不允许生产切换"**仍未过**。
+```
+
+⚠️ 本包改了 `src/main.ts` 与 `single-core-qualification.ts`（都是源码）⇒ 重跑 `m4.5:ci`
+（见 `m45ci-wp6-20261013.log`），不覆盖旧读数。
+
+### WP3 仍未做（第三次更新）
+
+```text
+⏳ 服务器重连 · ⏳ 消费者生命周期 / 共存启停适配 ·
+⏳ 在飞模型晚返回（计划 §5 的 G03.4）· ⏳ G01.7-real-pg（同进程第二个 PG 目标）·
+⏳ **两个完整生产核心**的演练（"第二核心被拒"的端到端读数）⇒ WP6
+```
+
+## 2026-10-13 PostgreSQL 迁移 WP3 追加 ③：`G01.7-real-pg` 关闭（同进程第二个 PG 目标）
+
+**要防的实测形状**：`plugin-sql` 的连接池全局键是 `` `${managerKey}:${useNeonDriver ? 'neon' : 'pg'}` ``
+（`managerKey` 缺省 `default`）—— **键里没有连接地址** ⇒ 同进程先开 A、再开 B 会**复用 A 的池**
+⇒ 对 B 的查询实际落在 A 上，而调用方从配置上以为连的是 B。
+计划 §3.2 的首期裁定："隔离库用**独立进程**…**同进程多目标路径必须拒绝**"。
+
+**实现**：`postgresTargetGuard()`（`database-backend.ts`），接在 `initDatabase()` 里、
+**`registerPlugin` 之前**（那一步才是创建/复用连接池的地方）。判据用**规范化三元组**，
+不按字符串比（否则 `localhost` / `127.0.0.1` 这类同一目标的两种写法会被误判成换目标）。
+⚠️ 刻意**不**做"清掉缓存再连" —— 那正是计划 §3.2 禁止的"直接清空缓存掩盖悬空连接"。
+
+**真 PG 行为读数**（`PG-G02` 的 `G01.7-real-pg` 四条，两个真库）：
+
+```text
+① 首次打开 A            ⇒ ok，database=lg_test_g02
+② **重复打开同一个** A   ⇒ ok   ← **必需的对照**：没有它，"③ 被拒"可能只是因为
+                                "第二次调用 initDatabase 本身就会失败"
+③ **换到 B**            ⇒ 拒绝，code=second_postgres_target_in_process
+④ closedClean=true      ⇒ 进程 1.1s 退出
+```
+
+纯函数真值表在 `PG-G01` 的 `G01.7a–e`（6 条，不需要实例）。
+
+### F-WP3-01 · 探针在**成功**路径下也必须自己关池（登记，已修）
+
+- **症状**：探针进程**永不退出**；`pg_stat_activity` 里 `lg_migrate` 握着 1 个 `lg_test_sa` 会话；
+  强杀后立刻归 0。机理：三次尝试**共用同一个池**（插件按 `default:pg` 缓存）。
+- **与 F-WP2-02 的关系（同一件事的两面）**：
+  `F-WP2-02` 是"初始化**失败**时没人关池"（已在 `initDatabase` 修掉）；
+  这一条是"初始化**成功**"时池**本来就该开着**（那是应用自己的池）
+  ⇒ 失败回收**不会**（也不该）触发 ⇒ **探针/脚本**在正常路径要自己关。
+- **第二次仍挂的原因**：`closeDatabaseConnection()` 给的是**失败那次**的 runtime ——
+  守卫在 `registerPlugin` **之前**就抛了 ⇒ 那个 runtime 没有 adapter ⇒ 关闭是 no-op（AT3.3）。
+  ⇒ 修法：只记**成功开库**的那个 runtime。
+- **纪律**：探针/脚本的**正常路径**也要收尾；"失败回收"不覆盖它。
+
+### 同批修掉的三处"看起来像证据、其实不可解析"
+
+```text
+① PG-G01 的 notRun 列表**过时**：仍把 G01.5/G01.7/G01.8 列成 NOT RUN，理由"本机 Docker 引擎未运行"。
+   ⇒ G01.5/G01.8 已于 WP2 关闭、G01.7 行为面搬到 PG-G02 ⇒ 该列表**已清空**。
+   现在 PG-G01 = **42 正控 + 2 负控 · 0 NOT RUN**（measured_count=44）。
+   ⚠️ 纪律：**NOT RUN 列表会过期**；它写的是"没量到"，而"已经量过、读数在别处"是另一回事。
+
+② **块注释陷阱**：在 PG-G01 的 `/* */` 里写了 `pg-migration-wp2-<星号>/identity-...`，
+   其中的 `星号斜杠` **提前终止了块注释** ⇒ 37 个 tsc 错误。
+   ⇒ 纪律：注释里写路径时避免出现 `*/`（用 `<runId>` 之类代替）。
+
+③ **证据 JSON 有三份不可解析**（本轮全量校验发现）：
+   · `pg-migration-wp2-*/identity-mismatch-and-init-failure.json` —— 值写成 `-1（被强杀…）`
+     （既不是数字也不是带引号的字符串）
+   · `pg-migration-wp3-*/single-core-qualification.json` —— 字符串里有**未转义的内层双引号**
+   · 同批新增的那份也犯了同一个错（写完即发现）
+   ⇒ 已全部修好，并**全量校验**：`OK=10 BAD=0`。
+   ⚠️ 纪律：**写完 JSON 立刻解析一遍**（`JSON.parse`）。不可解析的证据比没有证据更糟 ——
+      它**看起来**是证据。手工写 JSON 时避免在字符串里用 `"`（改用 `『』`/`「」`）。
+```
+
+**门读数（本轮）**：`postgresql:g01:verify` **44**（42 正控 + 2 负控 / 0 NOT RUN）·
+`postgresql:g02:verify` **31/31** · `postgresql:g03:verify` **19/19** ·
+`gates:run --lane postgresql` **2 道 PASS**（g03 串行于 g02）· `m4.5:ci` **EXIT 0**
+（`m45ci-wp7-20261013.log`）· `typecheck` 0 错 · `scripts:catalog:verify` PASS。
+⚠️ 本包改了 `src/db/index.ts` 与 `database-backend.ts`（源码）⇒ 按纪律重跑 `m4.5:ci`。
+
+### WP3 仍未做（第四次更新）
+
+```text
+⏳ 服务器重连 · ⏳ 消费者生命周期 / 共存启停适配 ·
+⏳ 在飞模型晚返回（计划 §5 的 G03.4）·
+⏳ **两个完整生产核心**的演练（"第二核心被拒"的端到端读数）⇒ WP6
+```
+
+## 2026-10-13 PostgreSQL 迁移 WP3 追加 ④：服务器重连（`G03.6`）关闭
+
+`postgresql:g03:verify` 从 19 条扩到 **23/23 · 0 失败 · 0 notRun**（`measured_count = 23`）。
+
+### 它抓的是什么
+
+```text
+朴素实现：只在启动时取一次 advisory lock，之后不再核对。
+服务器重启 ⇒ 所有会话消失 ⇒ 那条 session 级 advisory lock **也随之消失**
+⇒ 旧资格已经不成立。朴素实现会在重启后继续以为自己是唯一执行者 ——
+   而实际上另一个核心可以**正当地**取得锁 ⇒ **两个认知执行者同时写**。
+```
+
+### 方法（复用既有的 `hold` 模式，**不新造探针**）
+
+```text
+起持有者（--mode=hold --seconds=30）→ 等 4s → docker restart --time 20
+→ 等实例回到健康（最多 90s）→ 读持有者读数 → 另起一个 try 探针
+```
+
+### 读数（四条，全 PASS）
+
+```text
+G03.6-前置  容器重启命令成功
+G03.6       重启后服务器**确实回来了**（不把实例留在停着的状态）
+G03.6b      持有者的资格被**观测到**失效（heldAfterWait=false + 具名可观测原因）  ← 核心
+G03.6c      重启后**另一个进程可以取得**资格（旧锁真的随会话消失了）
+```
+
+### 两个刻意的设计
+
+```text
+① **接受四种失效原因**：connection_error / connection_ended / verify_failed /
+   **backend_pid_changed**。
+   第四个也在列的理由：重启时"池悄悄换了一条新连接"是可能的（pg.Pool 按需新建）⇒
+   那种情形下失效原因是 backend_pid_changed 而不是 connection_error。
+   四种都是**可观测事件**；断言不挑具体哪一种，但**必须**是这四种之一。
+
+② **门自己会重启容器 ⇒ 它必须无论断言成败都把实例带回来**（`waitForHealthy` 最多 90s）。
+   否则一次失败的断言会把实例留在停着的状态，后面所有 PG 门跟着失败 ——
+   那会把"一个门红了"放大成"整条 PG 线不可用"。
+   manifest 的 `title`/`why` 已写明，并把该门标为 **serial**（它会打断别的 PG 门）。
+```
+
+⚠️ 容器重启**不丢数据**：数据在命名卷 `lg-postgresql-data` 里。
+
+### WP3 进度小结（本轮后）
+
+```text
+✅ 连接池关闭（F-WP2-01）· ✅ 初始化失败回收（F-WP2-02）· ✅ 核心资格锁（D05，含装配根接线）
+✅ 服务器重连（本条）· ✅ G01.7-real-pg（同进程第二个 PG 目标）
+⏳ 消费者生命周期 / 共存启停适配 · ⏳ 在飞模型晚返回（G03.4）
+⏳ **两个完整生产核心**的演练（"第二核心被拒"的端到端读数）⇒ WP6
+```
+
+**门读数（本轮）**：`postgresql:g01:verify` **44** · `postgresql:g02:verify` **31/31** ·
+`postgresql:g03:verify` **23/23** · `m4.5:ci` **EXIT 0**（`m45ci-wp8-20261013.log`）·
+`typecheck` 0 错 · `scripts:catalog:verify` PASS（606 条）· 证据 JSON 全量校验 **OK=11 BAD=0**。
+
+### 同批修掉的两处**未闭合的 markdown 代码围栏**（其中一处是**既存**缺陷）
+
+```text
+① 本册（本文件）：块开在 **2290 行**（R-38 的 `现象/机制/影响`）而**从未闭合** ——
+   于是紧随其后的 `### R-38 · 已按用户授权完成的只读确认` 标题被**吞进代码块**里。
+   判据：**HEAD 版本的围栏数也是奇数（83）** ⇒ 这是**既存**缺陷，不是本轮引入的
+   （本轮改动加了偶数个围栏，62）。
+② `WP3-Handoff`：L-PGW3-04 那段编辑留下了一个**嵌套围栏** + 一条**重复的旧 L-PGW3-04**
+   （旧文字没被完全替换掉）。⇒ 已修。
+
+⚠️ 纪律：**写完文档要数一遍围栏**（开/闭必须成对）。未闭合的块会把后面的正文渲染成代码 ——
+   它不是"格式不好看"，而是**内容被藏起来了**。
+   检测法（本轮用的）：逐行翻转一个布尔量，最后必须回到"未打开"。
+```
+
+## 2026-10-13 PostgreSQL 迁移 WP4 开工：**规范化比较器**（`PG-G09` 的量具本体）
+
+载体：[WP4 Handoff](post-lv2/PostgreSQL-Migration-WP4-Handoff.md)。
+**门 `pnpm postgresql:g09:verify` = 23/23 · 0 失败 · 0 notRun**（`measured_count = 23`）。
+
+### 为什么先做它
+
+WP4 的必交付物里**只有它不依赖 `@electric-sql/pglite-tools`**（那个依赖仍未装，`L-PGM-02`），
+而它恰恰最要紧：**迁移的完整性结论全靠它** —— 比较器本身不可信，后面所有"一致"都不算数。
+
+### 它解决的核心问题
+
+同一份逻辑数据经 **PGlite** 与 **真 PostgreSQL** 两个驱动到达 JS 时**形状不同**：
+
+```text
+bigint   PGlite 可能给 number 5；pg 驱动**默认给字符串 "5"**
+jsonb    PG **不保留键序** ⇒ JSON.stringify 产出不同文本（**假不等**）
+numeric  "1.50" vs "1.5" · 时间 Date vs 字符串 · bytea Buffer vs hex
+```
+
+⇒ 直接 `JSON.stringify(row)` 比的是**驱动的编码差异**，不是数据差异。
+
+### F-WP4-01 · 第一版归一化**只按 JS 形状**做 ⇒ 造出**假相等**（已被自己的负控抓出并修）
+
+```text
+第一版：bigint 5 → "5" 与 text "5" → "5" **撞在一起**
+⇒ 一个 bigint 列里的 5 与一个 text 列里的 "5" 被判成"相同" —— **真的会漏掉差异**
+门里那条专为此设计的负控当场抓出：
+  FAIL  bigint 5 与 text "5" 归一成了同一个（5）⇒ 比较器会造出假相等
+修法：归一化结果带**类型家族标签**（n/s/j/b/t/x/v），用控制字符与内容隔开
+     标签是**家族级**而非精确 SQL 类型级（bigint 与 integer 都算 n）——
+     精确级会把"源 bigint / 目标 integer"这种 **schema 差异**表现成"每行都不同"的噪声
+连带：两条测试原本把**具体编码**写死（`=== '5'` / `=== 't'`）⇒ 加标签后红了。
+     改成断言**等价性**而非编码 —— 编码是实现细节，不该被测试钉死。
+```
+
+⚠️ 这是"**负控真的在干活**"的又一例：那条负控不是形式，它抓出了一个会让**所有**完整性
+结论失效的缺陷。
+
+### 真跨驱动读数（本门最有分量的一条）
+
+```text
+来源  WP0 读过的那个 verified 快照
+表    character_schema_migrations（18 行 · 有主键 · **含一个 bigint 列** applied_at）
+方法  readPgliteTable 只读副本 → 逐值原样插进真 PG → psql json_agg 读回 → 两侧算摘要 → 比较
+结果  **一致**（G09.3e PASS）· 读取器自证 sourceUnchanged / copyMatchesSource / closedClean
+```
+
+### 负控的四条**互不相同**的具名原因（契约要求）
+
+```text
+row_count_differs · primary_key_set_differs · content_digest_differs · multiset_differs
+其中 multiset_differs 那条是"无主键表**删一行加一行**（总数不变）"——
+正是计划 §6.6 逐字要求"不只比总数"的原因。
+```
+
+### 本包新登记的边界
+
+```text
+L-PGW4-01  只在**一张 18 行的真表**上做过真跨驱动验证 ⇒ 不主张"覆盖所有列类型"。
+           已覆盖：整数家族（含 bigint 的 number/string 两种形状）· 文本 · JSON（键序）·
+           numeric · 布尔 · 时间 · null。
+           **未在真数据上验证**：bytea · vector · uuid · 数组 · timestamptz 的时区表示。
+L-PGW4-02  只比数据，不比 schema（列类型/约束/索引/序列由表清单与 schema 比较负责）。
+L-PGW4-03  readPgliteTable 目前"每次调用复制一次整个 PGlite 目录"（约 49 MB / 1269 文件）
+           ⇒ 全库比较（51 张表）要改成"打开一次、读多表"，否则复制 51 遍。
+L-PGW4-04  `@electric-sql/pglite-tools` 未装 ⇒ WP4 的**导出那一支无法开工**。
+           这是**具体前置**（一次依赖变更 + 版本固定 + integrity 复算），不是"难度"。
+```
+
+**门读数（本轮）**：`postgresql:g09:verify` **23/23** ·
+`gates:run --lane postgresql` **3 道 PASS**（g03 串行于 g02；g09 串行于 g02|g03）·
+`m4.5:ci` **EXIT 0**（`m45ci-wp9-20261013.log`）· `typecheck` 0 错 ·
+`scripts:catalog:verify` PASS（607 条）· 证据 JSON 全量校验 **OK=12 BAD=0**。
+
+### WP4 仍未做
+
+```text
+⏳ 固定兼容导出工具（`@electric-sql/pglite-tools`）—— **前置：先装它并固定版本**
+⏳ PGlite 副本 → SQL → 空 PG（导出/恢复日志 + dump 摘要）
+⏳ PG 在线备份 → 新库（pg_dump + 独立恢复）
+⏳ 完整清单（所有迁移范围对象）· ⏳ 外部资产清单 · ⏳ manifest 与数据摘要
+⏳ 损坏备份拒收（篡改 / 截断 ⇒ 具名拒绝）
+```
+
+## 2026-10-13 PostgreSQL 迁移 WP4 追加：**固定版导出工具** + **PGlite → SQL → 空 PG 整条链已通**
+
+载体：[WP4 Handoff](post-lv2/PostgreSQL-Migration-WP4-Handoff.md) §3.1/§3.2。
+
+### 工具版本为什么是 **0.2.21**（不是 latest）—— 这条是硬约束
+
+```text
+pglite-tools 的每个版本对一个**精确的 pglite 版本**有 peer 要求（从 registry packument 逐版读出）：
+  tools 0.2.21 → pglite **0.3.16**   ← 与本仓库安装的 pglite 完全一致
+  tools 0.3.6  → pglite 0.4.6
+  tools 0.4.9  → pglite 0.5.9        ← latest
+⇒ 用 latest 会**倒逼把源库引擎从 0.3.16 升到 0.5.9** —— 那是"同时升级框架"，
+  研究 §3 明确要避免的。计划 §2 的"不能自动使用 latest"在这里**不是谨慎，是必需**。
+```
+
+**integrity 独立复算**（下载官方 tarball → 本地 SHA-512 → 与 registry 声明比）：两条都 **MATCH**
+（tools 535 214 B · pglite 8 132 416 B）。许可证 **Apache-2.0**，**无运行时依赖**。
+装在 `artifacts/post-lv2/local/pg-migration/export-runtime/`（**gitignore**）——
+本仓库对"外部工具"的既有做法（同 desktop-runtime / ocr-runtime）：不进项目依赖树，
+避免扰动别人的在途改动与锁文件。
+
+### 整条链的读数
+
+```text
+导出（full）       11 335 681 B · sqlDigest 4ddc267bc70f… · 7.1s
+                   `-- Dumped by pg_dump version 17.5`（与源引擎同版本）
+自证               sourceUnchanged=true · copyMatchesSource=true · closedClean=true
+恢复到空 PG        **exit=0，无任何 ERROR**
+                   public 表 **51** · migrations 表 3 · kernel 版本 **18** ·
+                   conversation_events **548** —— 与来源逐项一致
+```
+
+### 排除集与**逐条原因**（计划 §6.3 要求"列清系统/扩展对象排除原因"）
+
+```text
+--no-owner       源 owner 是 `postgres`，目标没有这个角色（实测 `role "postgres" does not exist`，
+                 57 条 OWNER TO）⇒ 计划 §6.5 的"目标账号显式映射"= 省略源所有权，
+                 让目标的角色模型（ALTER DEFAULT PRIVILEGES）生效
+--no-privileges  同上
+--no-comments    来源里**只有 2 条 COMMENT，且都在 EXTENSION 上**。而 `COMMENT ON EXTENSION`
+                 要求扩展所有权，偏偏 `ALTER EXTENSION … OWNER TO` **语法不存在**
+                 （实测 `syntax error at or near "OWNER"`）⇒ 迁移账号无法应用。
+                 代价 = 2 条扩展描述文字（非数据）
+⚠️ 这三条是**实测逼出来的**，不是预设的 ⇒ 换来源或换 pg_dump 版本时要重新核对
+   （判据：恢复 exit=0 且无 ERROR）。
+```
+
+### F-WP4-02 · 凭据读取没剥 UTF-8 BOM ⇒ 第一个 key 被静默读坏（**已修**）
+
+```text
+怎么发现：一个**没有兜底**的探针当场失败（建库 rc=2 / `FATAL: role ... does not exist`），
+          而三道正式门**照样绿**。
+根因    ：凭据文件由 PowerShell `Set-Content -Encoding utf8` 写出 ⇒ 带 UTF-8 BOM
+          （前 3 字节 EF BB BF）。`readFileSync(file,'utf8')` 的第一个 key 变成
+          "\uFEFFLG_PG_BOOTSTRAP_USER"。
+为什么门还绿：三道门当时都写着 `credentials.LG_PG_BOOTSTRAP_USER ?? 'lg_bootstrap'`
+          —— **兜底把"读不到"变成了"看起来读到了"**。
+修法    ：① 新增共用模块 `scripts/postgresql/credentials.ts`（**读时剥 BOM** +
+          **不给任何 key 兜底**）；② 三道门删掉各自的读取实现改用它；
+          ③ 新增 `missingCredentialKeys()` —— 缺 key 就写进 notRun 的**具名原因**。
+纪律    ：**兜底默认值会把"读不到"变成"看起来读到了"** —— 这正是这个 BOM 陷阱
+          被盖了三轮的原因。
+```
+
+### ⚠️ 一次差点误判（与 WP0 记的那条同源）
+
+我一度把 `conversation_events=548` 当成"与 WP0 读到的 395 不符"。
+**548 才是这个快照的真实行数**；395 来自**另一份来源**（2026-10-07 的迁移前备份）。
+⇒ 差一点把**正确的结果**误判成不一致。**两个读数必须绑定各自来源**这条纪律
+（WP0 §6.2 就写了）在这一轮真的救了场。
+
+### 门读数（本轮）
+
+`postgresql:g02:verify` **31/31** · `postgresql:g03:verify` **23/23** ·
+`postgresql:g09:verify` **23/23** · `gates:run --lane postgresql` **3 道 PASS** ·
+`m4.5:ci` **EXIT 0**（`m45ci-wp10-20261013.log`）· `typecheck` 0 错 ·
+`scripts:catalog:verify` PASS（607 条）· 证据 JSON 全量校验 **OK=13 BAD=0**。
+
+### WP4 仍未做（更新后）
+
+```text
+✅ 固定兼容导出工具 · ✅ PGlite 副本 → SQL → 空 PG
+⏳ PG 在线备份 → 新库（从**真 PG 侧** pg_dump + 独立恢复）
+⏳ 完整清单（当前只对了几张表的行数与 kernel 版本）· ⏳ 外部资产清单
+⏳ manifest 与数据摘要（导出/恢复日志已有雏形：bytes + sqlDigest）
+⏳ 损坏备份拒收（篡改 / 截断 ⇒ 具名拒绝）· ⏳ 逐表比较（51 张，用比较器）⇒ WP5
+```
+
+---
+
+## 2026-10-13 PostgreSQL 迁移 WP4 追加 ②：**在线备份 → 独立恢复**（`PG-G07` 47/47）+ **完整清单** + **库外资产**
+
+载体：[WP4 Handoff](post-lv2/PostgreSQL-Migration-WP4-Handoff.md) §3.3/§3.4/§3.5/§4.3/§4.4/§6。
+runId：`pg-migration-g07-20261013T092549Z`（证据 `artifacts/post-lv2/postgresql-migration/<runId>/`）。
+
+### 门读数（本轮）
+
+```text
+pnpm postgresql:g07:verify      **47/47 · 0 失败 · 0 notRun**（measured_count = 47）
+pnpm gates:run --lane postgresql **4 道 PASS**（墙钟 100.3s；g07 73s）
+pnpm typecheck                  0 错
+pnpm scripts:catalog:verify     PASS（608 条）—— ⚠️ **这条门之前就是红的**，见下
+证据 JSON                       写完即 JSON.parse 校验通过
+```
+
+### 一、在线备份的「活动」是**如实做出来**的，不是假装出来的
+
+契约 `G07.1` 要求"核心活动时备份成功（不停止核心）"。隔离实例上没有核心，
+于是起一个**独立 OS 进程**（`scripts/postgresql/g07-writer.sh`，经 `docker exec`）持续写，
+并且它**每批恰好 2 行、一个事务、提交之后才把摘要打到 stdout**。这两条设计把两件事变成可判定：
+
+```text
+① 目标库里出现"只有 1 行的批次" ⇔ 备份取到了**半提交状态**（必须红）
+② stdout 就是一份**提交后记录** ⇒ 校验拿它与恢复出来的内容对，
+   **不**去比"还在变的实时源"（契约 G07.6 要的正是这个）
+```
+
+实测读数：
+
+```text
+在线备份      exit 0 · **416 ms** · `--no-comments` · 11 124 527 B · sha256 29882973…（56 表 / 4 276 行）
+备份窗口内    提交 8 批；探针表 10 → 26 行；第三方采样看到 `pg_dump` 后端
+探针两读数    备份里 k = **7** 批（14 行）< 源里 m = **15** 批（30 行）
+静默态对照    停写后再 dump ⇒ 源探针表 **30 行 == 2m**
+新空库恢复    exit 0 · **无 ERROR** · 扩展注释 **3/3 逐字与源相同** · 51 张表行数 0 处不一致
+```
+
+`k < m` 是这轮最有分量的一条：备份不是"停下之后才做的"，取到的是写入过程中的某一刻，
+而那一刻意外的完整（连续前缀、每批 2 行、与提交后记录逐字一致）。
+
+⚠️ **不主张**"已对真实核心做过在线备份" —— 那属 WP7/WP8（`L-PGW4-07`）。
+
+### 二、`--no-comments` 的代价：实测 **0**（而且这个结论是被判据逼出来的）
+
+第一次跑**不带** `--no-comments` ⇒ 恢复红在 `ERROR: must be owner of extension vector`。
+根因：`COMMENT ON EXTENSION` 要求**扩展所有权**，`vector` 非 trusted（只有超级用户能装）
+⇒ 目标库里它由 bootstrap 装、注释归 bootstrap；而 `ALTER EXTENSION … OWNER TO` **语法不存在**
+（PG 的 `ALTER EXTENSION` 只支持 `UPDATE` / `SET SCHEMA` / `ADD` / `DROP`）。
+
+我一度加了一条"用超级用户把注释补回去"的**补偿步骤** —— 那个判断是**错的**：
+写那两句注释的不是人，是**扩展自己的安装脚本**（`vector--0.8.7.sql` 末尾）⇒
+目标侧一装扩展就自带。⇒ 正确判据不是"把语句搬过去"，而是**验证两边逐字相同**（3/3 相同）。
+
+### 三、F-WP4-03 … F-WP4-10：本轮抓到并修掉的（**全是我自己的工具/量具**）
+
+```text
+F-WP4-03  `relkind` 是 `"char"` 不是 text ⇒ `text || "char"` 报 operator is not unique；
+          同一条 SQL 里 `order by 1, 2` 又报 `ORDER BY position 2 is not in select list`
+          （输出只有一列）。两个错**一个盖住另一个**，表面都表现为"对象清单读不出来"
+          （看着像权限问题）。修：`::text` + **排序写显式列名，别用位置号**。
+
+F-WP4-04  在线备份不带 `--no-comments` ⇒ `must be owner of extension vector`（见上）。
+
+F-WP4-05 ★ **量具自身缺陷（最值钱的一条）**：采样循环里的 `psql()` 走 **`spawnSync`**，
+          它**阻塞整个事件循环** ⇒ "不留睡眠"的紧循环让 `dumpProcess.on('close')`
+          **永远排不上队**，`dumpExit` 一直是 `undefined`，循环只能跑到超时。
+          读数表现极其误导：`committedDuringDump = 1818`（看着像备份跑了 60s），
+          真相是**备份 0.6s 就结束了**，而循环空转了 **180s**。
+          反方向也踩过：第一版 `sleep(250)` ⇒ dump 只有 0.5s、只采到 **1** 个样本，
+          判据就变成在量**采样频率**。
+          修：每轮 `await` 让出 ~15ms；并把"并发"的硬判据放在**确定性的行数增长**上
+          （那条不依赖采样频率）。⇒ 纪律：**阻塞式调用不能放进"等异步事件"的循环**。
+
+F-WP4-06  `data/` 下 7 个 `pglite.*` 目录没有归属 ⇒ 完整性判据**第一次跑就点名**。
+          （这是判据**生效**，不是缺陷。）修：通配声明 + `matchedRoots`（逐条列出盖住了谁）。
+
+F-WP4-07  写入进程 stdout 按 chunk 直接 `split('\n')`、**没留残行** ⇒ 跨块那一行被切成两段、
+          两段都过不了正则 ⇒ 那一批从记录里消失。后果："src 3261 批 ≠ 记录 3259 批" ——
+          **量具自己的丢行被报成数据不一致**（假红）。修：留 pending。
+
+F-WP4-08  篡改用**字符串**替换：`str[i]` 是 1 个 UTF-16 码元，而文件里的中文是 3 字节 UTF-8
+          ⇒ "同长度篡改"实际少了 **2 字节**，于是"篡改"看起来像"截断"，
+          `G07.3`（要求 digest_mismatch）与 `G07.4`（要求 truncated）双双失去区分力。
+          修：在 **Buffer** 上翻一个字节。
+
+F-WP4-09  取数顺序错误：先读 src 清单、**之后**才建本门的探针表 ⇒ dump 里多出两个对象 ⇒
+          `G07.2d` 报"目标多对象"。不是数据问题，是量具自己造的。修：自造对象先于取清单。
+
+F-WP4-10  `srcSummary!` 非空断言把"清单读不出来"变成
+          `TypeError: Cannot read properties of undefined` ⇒ 真正的失败原因被一段栈盖住。
+          修：显式挡一道并抛出**说清原因**的错误。
+```
+
+⚠️ 十条里有 **5 条是量具/夹具自己的缺陷**（03/05/07/08/09），且它们会往**两个方向**错：
+F-WP4-07 把一致报成不一致（假红），而上一轮的 F-WP4-01 把不一致报成一致（**假绿**）——
+假绿更危险。**量具自身要有正控与负控**这条纪律，本轮又添了五条实例。
+
+### 四、⚠️ `scripts:catalog:verify` 是**先前就在红**的（顺手修，如实说明归属）
+
+```text
+用 HEAD 版本的清单   ❌ EXIT 1（已提交 695 行 / 现在应 728 行）
+重新生成之后         ✅ 608 条 · EXIT 0
+```
+
+⇒ 这条门在我这一轮之前就是红的（**并行的其它会话**加了 `scripts/` 条目却没重新生成清单）。
+我重新生成了它，于是 diff 里带上约 20 条**不属于 WP4** 的条目
+（`coexist:chat` · `learning:contracts:verify` · `memory:automatic:*` · `postlv2:image:*` ·
+`postlv2:model-memory:*` · `postlv2:avatar-opening:*` · `postlv2:affected:verify` ·
+`postlv2:database-env:verify` · `postlv2:orchestration:verify` · `postlv2:oss-mechanisms:verify` …）。
+**那不是我的改动**，登记在此以免归属被弄错。
+
+### 五、本包新登记的边界（`L-PGW4-07…13`）
+
+```text
+L-PGW4-07  "在线备份"里的"活动"是**并发写入进程**，不是真实认知核心 ⇒
+           不主张"已对真实核心做过在线备份"（那属 WP7/WP8 的 P2.3）
+L-PGW4-08  备份清单的 rows 来自 COPY 块**行数** ⇒ 依赖"行内换行被转义成 \n"；
+           真出现裸换行会**多算**（假红，不是假绿）
+L-PGW4-09  `data/runtime/automatic-memory/langmem-*` 判 exclude 是**裁定**不是读数
+           （第三方运行时检出，含 .venv/.git）。若 M9.6 线将来把它当权威记忆存储，要重开。
+           同理 `data/diagnostics` 是"**刻意不遍历**"，不是"确认无内容"
+L-PGW4-10  `image-inputs` 在缺省 dataDir 下**目录不存在** ⇒ 无图片原件。
+           ⚠️ 不能推广成"从来没有图片输入"：若某次以 `PGLITE_DATA_DIR` 指向别处，
+           那些原件不在本清单的根里。`personal-library` 存在但为空 —— 两条都按**目录状态**记
+L-PGW4-11  在线备份只有 ~0.4s ⇒ 采样窗口极窄；本轮把"并发"的硬判据放在确定性行数增长上，
+           采样只作旁证（samples 2 / 看到 pg_dump 1）⇒ 不主张"采样覆盖了整个窗口"
+L-PGW4-12  `psql()` 在建库脚本调用上**四份重复**（G02/G03/G09 + 新的 pg-exec.ts）。
+           本轮只新增、**没有回头改写**那三份（它们是绿的）⇒ 重复仍在，交下一轮收敛
+L-PGW4-13  逐表**行数**一致（51 张）**不**证明内容一致（契约 §5 N02）⇒
+           本门观测记录里**逐字写着这句话**；内容级比较属 WP5
+```
+
+### 六、一条环境事实（差点让整条恢复路线写错）
+
+compose 里 `.:/opt/lg:ro` 的那个 `.` 是 **compose 文件所在目录**，不是仓库根：
+
+```text
+容器内 /opt/lg == scripts/postgresql/
+⇒ 门的脚本路径是 /opt/lg/create-test-db.sql（不是 /opt/lg/scripts/postgresql/…）
+⇒ 宿主机的 artifacts/ **容器里看不见** ⇒ 11 MB 的备份只能从宿主进程灌进 psql 的 **stdin**
+⇒ 连"停机哨兵文件"也得从文件改成**库里的一行**（public.g07_control.stop）
+```
+
+这是 `docker inspect` 读出来的（**不是**从 compose 文本推断的）：实测
+`Source=…/project LG/scripts/postgresql → Destination=/opt/lg`。
+⇒ 纪律：**挂载点的实际位置要读出来**，别按"显然"的语义猜。
+
+### WP4 仍未做（更新后）
+
+```text
+✅ 固定导出工具 · ✅ PGlite → SQL → 空 PG · ✅ PG 在线备份 → 新库 · ✅ 完整清单
+✅ 库外资产清单 · ✅ manifest 与数据摘要 · ✅ 损坏备份拒收（六种具名原因）
+⏳ **逐表内容比较**（51 张表的全列规范化摘要）⇒ **WP5**
+⏳ 备份的保留策略 / 实际 RPO·RTO / 异地 / WAL·PITR ⇒ 计划 §10 第二阶段
+```
+
+---
+
+## 2026-10-13 PostgreSQL 迁移 **WP5 开工**：`PG-G05` 全库逐表内容比较（**29/29**）
+
+载体：[WP5 Handoff](post-lv2/PostgreSQL-Migration-WP5-Handoff.md)。runId：`pg-migration-g05-20261013T095334Z`。
+
+**这一轮销的是 WP4 留下的两笔账**：`L-PGW4-01`（"比较器只在一张 18 行真表上验证过"）
+与 `L-PGW4-13`（"逐表行数一致**不**证明内容一致"）。
+
+### 门读数
+
+```text
+pnpm postgresql:g05:verify    **29/29 · 0 失败 · 0 notRun**（measured_count = 29）
+typecheck                     0 错
+```
+
+### 规模与逐表结论
+
+```text
+表 54（public 51 + migrations 3）· 行 4 261 · 空表 14
+策略 primary-key 53 · **multiset 1**（`public.logs` 421 行 = 全库唯一无主键表）
+导出 11 330 234 B · sqlDigest 0dc0066c2b913363…（**与 WP4 那一轮逐字相同**）
+G05.1 表清单**双向**差集为空 · G05.2 主键集合 + 列规格逐表一致
+G05.3 ★ **54/54 张表的规范化内容摘要一致**（0 处不一致）
+G05.R 重新从同一份导出恢复一次 ⇒ 全部 54 张**又一致**
+```
+
+### 主题面（不是"行数一样"）
+
+```text
+memory_records 5 行：status {active 3, **retracted 2**} · epistemic_status {reported 5} ·
+                     authority {EXPLICIT_USER_STATEMENT 5} · valid_until 非空 5
+memory_events.kind  {MEMORY_CREATED 5, **MEMORY_RETRACTED 2**}   ⇒ 撤回历史**在**
+生命周期字段非空计数逐项相同（valid_from 0 / valid_until 5 / occurred_at 0 /
+  recorded_at 5 / superseded_by 0 / revision 5 / schema_version 5）
+水位 processor_watermarks 12 条（affect-semantic-cutover 117 · post-turn-model-memory 944 ·
+  belief-memory-reconciler 1028 · reflection-scheduler 1028 …）· storyline 3 条（各 1）
+序号 character 1028 · action 436 —— 两侧逐项相同（**没有推进水位来跳过问题**）
+登记表 character_schema_migrations 18 行 · 版本 1…18 · 最新 `reminder-repeat-mode-and-attempt`
+```
+
+⚠️ 那 **2 条 retracted** 是 M9 的 `F-4`（同内容重述永不复活）留下的真实历史 ——
+迁移把它**带过来了**，而不是清理掉。这是"不忽略撤回历史"这条判据的实证。
+
+### 六条真数据负控（触达**四条具名原因**）
+
+```text
+N1 character_jobs 删一行 ⇒ row_count_differs（1133→1132）
+N2 memories 改主键值 ⇒ primary_key_set_differs（146→146 行）
+N3 memory_records 改 authority（归因）⇒ content_digest_differs（5→5）
+N4 memory_semantic_index 改向量（逐分量 +0.001）⇒ content_digest_differs（5→5）
+N5 processor_watermarks **回退水位** ⇒ content_digest_differs（12→12）
+N6 logs（无主键）改一行内容 ⇒ multiset_differs（421→421；N6b 断言总行数**没变**）
+```
+
+每条负控都**先断言探针读数确实变了**（`before !== after`）—— 否则一条没生效的改动
+会让门报"比较器没抓到"，那是**假红**（WP4 的 `F-WP4-07` 就是量具自己造的假红）。
+
+### F-WP5-01 … F-WP5-04（本轮抓到并修掉的）
+
+```text
+F-WP5-01  `listTargetTables` 把分隔符写成**裸控制字符**（不是 SQL 字符串字面量）⇒
+          语法错 ⇒ "目标表清单读不出来"；而**带引号**的同一写法是对的（同一个字符，
+          两种写法只差一对引号）。修：SQL 里一律 `chr(1)` 生成，
+          **命令行参数里不放控制字符**。
+          ⇒ 纪律：分隔符别用不可见字符；一定要用就在 SQL 里生成。
+
+F-WP5-02  ★ 两侧形状不同会造出**假不等**：源把无时区 `timestamp` 给成 `Date`
+          （解释里带上了时区）、`vector` 给成数组、`bigint` 给成 number ⇒ 与目标侧的
+          文本 / JSON 数字对不上。修：两侧**共用** `column-encoding.ts` 一条判据
+          （有歧义的类型在 SQL 里就 `::text`；**默认方向是"转文本"** —— 不认识就走
+          不丢信息的那条路）。⚠️ 与 F-WP4-01（**假相等**）方向相反：
+          那条把不一致报成一致，这条会把一致报成不一致 ⇒ **两个方向都要有判据**。
+
+F-WP5-03  `numeric` 走 `Number()` + `toPrecision(15)` ⇒ 第 16 位起的差异**一律看不见**
+          （假绿）。修：`canonicalDecimal`（纯字符串移动小数点，一位不丢）。
+          ⚠️ 本轮数据里**一个 numeric 列都没有** ⇒ 预防性修复（`L-PGW5-02`），
+          但它是真的：修复前 `1.00000000000000001` 与 `1` 会判成相同。
+
+F-WP5-04  编辑时把 `export interface TargetTableReading {` **整行**当锚点换掉了 ⇒
+          3 条 tsc 错（TS1011×2 + TS1128），整轮门没跑起来。修：补回。
+          ⇒ 锚点行别选边界行（代价只是时间，tsc 立刻可见）。
+
+F-WP5-05  **量具自己被 shell 弄坏**（与 `L-QQP-03` 同源，第二次）：我用
+          `node -e "... t.match(/^```/gm) ..."` 数 markdown 围栏，而 PowerShell 把
+          **反引号当转义字符** ⇒ 那个正则到 node 手里已经不是它写的样子了，
+          于是它报"5 份文档围栏不平衡"。改成**从文件里读脚本**再跑 ⇒ 全部平衡
+          （登记册 154 + 我新增的 14 = 168，逐字对得上）。
+          ⇒ 纪律：**不要把带反引号的代码塞进 PowerShell 双引号字符串**；
+          量具脚本一律落成文件再跑（本仓库对 CJK 源文件已有同一条纪律，这是它的近亲）。
+          ⚠️ 代价是"以为文档坏了"—— 差点去修五份**没坏**的文件（假红）。
+```
+
+### 本包新登记的边界（`L-PGW5-01…07`）
+
+```text
+L-PGW5-01  **14 张表两侧都是 0 行**（含 embeddings / relationships / tasks / channels…）⇒
+           判据是"**结构性**一致"（表在、列在、主键在、0==0），**不是内容一致**。
+           连带：`embeddings` 的 6 个 vector(384…3072) 列**全是 NULL** ⇒
+           真正走到向量归一化路径的只有 `memory_semantic_index.embedding`（5 行）
+L-PGW5-02  本轮**没有 numeric 列** ⇒ `canonicalDecimal` 只在纯函数层验证过
+L-PGW5-03  **没有 bytea 列** ⇒ `x:` 家族仍只在纯函数层验证过（同 L-PGW4-01）
+L-PGW5-04  `timestamptz` 走 Date/ISO ⇒ **毫秒以下被截断**（两个只差亚毫秒的时间戳
+           会被判成相同 —— 方向上是**宽**的一侧）。本批数据时间戳都来自 JS Date，未触达
+L-PGW5-05  只比**数据**，不比 schema 细节（约束/索引/序列定义/默认值）；
+           本门断言了"列规格 + 主键集合"一致，其余 schema 面由表清单与 WP6 审查负责
+L-PGW5-06  六条负控期间目标库**确实被改过**，靠"**再恢复一次**"回到一致（`G05.R`），
+           **不是**靠逐条回滚语句 ⇒ 若将来改成"就地回滚"，必须重新证明回滚完整
+L-PGW5-07  源侧读取仍是"整轮复制一次"（约 49 MB / 1269 文件），只是从"每表一次"
+           降到"整轮一次" ⇒ `L-PGW4-03`/`L-PGW4-06` 的"复制一次、用多次"已落地
+```
+
+### WP5 仍未做
+
+```text
+✅ PG-G05 迁移完整性（全库逐表内容比较）
+⚠️ **PG-G06 投影与语义召回：28/29 —— 一条真 FAIL**（见下节）
+⏳ **PG-G08 功能整链与回归**（记忆增改撤回 e2e · 认知恢复 · 后台消费者 · 通知提醒 ·
+   QQ/Live2D 路由 · 重启续跑 · 外部发送受控 · typecheck + **m4.5:ci EXIT 0**）
+⏳ 资源测量（p50/p95 · 错误/超时 · 连接数 · CPU/内存/磁盘 · 备份耗时；PGlite 对照用同一快照副本）
+⏳ 有限真模型（受控 smoke）· 性能与行为读数**分列**
+```
+
+---
+
+## 2026-10-13 PostgreSQL 迁移 **WP7 首次尝试**：授权已收到，但**发现一个真缺口** ⇒ 停在相 A 之前
+
+**授权**：用户 2026-10-13「**允许最终生产迁移**」⇒ WP7 已授权。
+**载体**：`scripts/postgresql-cutover-apply.ts`（两相受控程序：相 A 只写 PG 目标 · 相 B 才改配置）
++ `scripts/postgresql-cutover-probe.ts`（起一次核心验证"单一后端切换"真的成立）。
+
+```text
+干跑（无 --apply/token）⇒ 退出 2、**什么都不动** ✓
+相 A（--apply）⇒ 走到"建生产库"那一步失败，然后在读回那一步**未捕获地抛出**（我的程序缺陷：
+   `check()` 只记录不抛 ⇒ 前两步失败被"记下来"而不是"停下来"，随后 read-back 抛错整个中止）
+⇒ **没有留下任何半成品**（实测）：`.env` **一字未改** · 真实库指纹 `137b7233…` **未变** ·
+  数据库清单里**没有** `lg_prod`、也没有残留测试库
+```
+
+### ★ 缺口（`F-WP5-21`）：**仓库里没有"建生产库"的路径**
+
+```text
+`scripts/postgresql/create-test-db.sql` 第 47–50 行**断言库名以 `lg_test_` 开头**
+（ADR-132 `D03` 的命名纪律，且 `postgresIsolationDecision()` 依赖它）
+⇒ 用**测试库创建脚本**建生产库会被它**按设计拒绝**（实测：`lg_prod` 根本没被建出来）。
+而 `lg_trial`（bootstrap 库）里只有 **1 张表** ⇒ 直接往里灌 dump 会与既有对象冲突。
+⇒ WP2 的"bootstrap/迁移/运行分流"在**生产库创建**这一步**没有对应交付物**。
+```
+
+**要做的（下一轮）**：写一个**生产库创建脚本**（与测试脚本同形，但**不**断言测试前缀：
+owner=迁移账号 + `lg_runtime`/`lg_readonly` 授权），并把**生产库名**写进 Activation-Candidate
+与 Runbook（那是 WP6/WP7 的一个**显式决定**，不是随手取名）。
+
+**另修（程序缺陷）**：`postgresql-cutover-apply.ts` 里"建库/灌库"失败后**必须立刻停**
+（把 `check()` 的失败当成硬中断），否则会带着坏前置继续跑到后面抛错 —— 那正是
+`F-WP5-14`（一个场景抛错吃掉别的读数）的同型。
+
+---
+
+## 2026-10-13 PostgreSQL 迁移 **WP6 交付**：`PG-G10` 只读审查 **17/17** · lane **10 道 · PASS 10** · 四份文档落地
+
+```text
+pnpm postgresql:g10:verify = **17/17 · 0 失败 · 0 notRun**（只读聚合器：不连库、不跑门、不改东西）
+gates:run --lane postgresql = **10 道 · PASS 10 · FAIL 0**（墙钟 245s；G10 本身 0.2s）
+四份文档：Activation-Candidate · **Runbook** · Known-Limitations · Gate-Decision
+```
+
+**`PG-G10` 断言了什么**（逐条可审查）：
+
+```text
+① G04/G05/G06/G07/G08/G09/S8/LIVE 的**最新证据**全过且**分母非零** —— 选档按 `runId` **字典序**
+   （**不看 mtime**：mtime 会被复制/检出/同步改掉，拿它选档等于让文件系统决定用哪份证据）
+② G02/G03 证据在案 —— ⚠️ **旧形态**（WP2/WP3 期逐场景 JSON、**无 `counts`**）⇒ 本条**只证"有档"**，
+   报告里明说它比新形态弱（不假装一样）
+③ **run 归属**：所有门记的**来源快照是同一个** ⇒ 防止"这份绿、那份比的是别的库"
+④ **恢复演练**：G07 证据里"备份/恢复"那一族 **18/18 全过**
+⑤ **四份文档**逐要素齐（缺一个就具名）—— 含"冻结镜像 digest / 目标身份 / 停机估计 / R1 / R2 / 前后验证"
+⑥ 旧后端回归适用：⚠️ **本轮只证到"证据目录在案"** ⇒ 判定为 **PARTIAL**（`L-PG-16`），
+   **不当过**（这是 `G10.6` 的判据文本里逐字写的）
+```
+
+**本轮抓到的缺陷（`F-WP5-20`）**：
+
+```text
+`PG-G09` **一个字节都不落盘** —— 它绿了 23/23，但只读聚合器**核不了它**（"找不到证据档"）。
+计划逐字："缺证据…均拒收" ⇒ **不落盘的门在审查面上等于不存在**。
+⇒ 修：给 G09 补上与其他门同形的落盘（`counts` + `sourceSnapshot` + `head` + 写后 `JSON.parse` 自证），
+  重跑仍 23/23。⚠️ 修的时候**必须用编辑工具**：该文件用 `Get-Content` 读出来是**乱码**
+  （本机代码页 936 ⇒ `L-QQP-03` 那条纪律），用 PowerShell 写回去会逐字丢字节。
+```
+
+**WP6 的判定（分列，不合成一个总分）**：`PG-G01…09 全 PASS` ✅ · 恢复演练 ✅ ·
+Runbook/目标身份/停机估计/回滚条件 ✅ · 四份交付物 ✅ · 无待猜测命令 ✅ ·
+**旧后端回归适用 = PARTIAL**（`L-PG-16`）。
+⚠️ **这不是授权**：WP7 需要用户当轮**逐字授权**。
+
+---
+
+## 2026-10-13 PostgreSQL 迁移：**`PG-G04` 补齐** ⇒ lane **9 道 · PASS 9 · FAIL 0**
+
+WP6 的前置缺口（`PG-G10` 要求 `PG-G01…09` 全 PASS，而 G04 一直"未登记"）已补上。
+
+```text
+pnpm postgresql:g04:verify = **20/20 · 0 失败 · 0 notRun**
+七组判据（契约逐字）：JSON/null · bigint 边界 · RETURNING · 唯一/部分索引 · 幂等 ·
+乐观冲突 · 事务原子性 · Memory/Conversation/Event/Job 四仓储真实执行
+关键读数：
+  bigint  9007199254740993 → **文本层不丢**；JS number 变成 …992（**如实记录**，判据不依赖它）
+  冲突    错的 expectedRevision ⇒ 具名 `projection_revision_conflict`，且 **revision 仍是 1**（没写进去）
+  事务    事务内第二次插同键 ⇒ 整体回滚 **0 行**（不是"半写"）
+  部分唯一 谓词命中报 `23505`；**谓词不命中不拦**（这才是"部分"的语义）
+gates:run --lane postgresql = **9 道 · PASS 9 · FAIL 0**（墙钟 244.6s）
+```
+
+**本门自己踩的三个量具错（都登记在案，都是"红得对"）**：
+
+```text
+F-WP5-17  ① `psql` 默认**不打印 SQLSTATE** ⇒ 拿 stderr 找 `23505` 永远找不到（四条索引判据全红）。
+            修：`\set VERBOSITY verbose`，且它打的是 **`ERROR:  23505: …`**（同行），
+            **不是** `SQLSTATE: 23505` 字段形态 ⇒ 正则要认两种形态。
+          ② `RETURNING` 的读数里混着 psql 的命令行尾（`INSERT 0 1`）⇒ 只取第一行。
+F-WP5-18  **部分唯一索引的探针序列错了**：先插 `archived` 再插 `active` ⇒ 那条 `active` 是部分索引里的
+          **第一条** ⇒ 当然不冲突。⇒ 冲突必须发生在**两条都满足谓词**的行之间；
+          而"谓词不命中不拦"要另用一对 `archived` 去证。
+F-WP5-19  猜 API 形状：`recordProcessedOperation` 的入参是
+          `{idempotencyKey, characterId, processor, processorVersion, operation, domainEventId?}`
+          （我第一版猜 `{characterId, key}` ⇒ 整段抛错并**吃掉后面 6 条判据**）。
+          ⇒ 又一次印证：**一个场景抛错不许吃掉别的场景的读数**（`F-WP5-14` 同源）。
+```
+
+---
+
+## 2026-10-13 PostgreSQL 迁移 WP5 **收官**：交付条件全部达成 · `m4.5:ci` EXIT 0 · lane 8/8
+
+```text
+PG-G05 29/29 · PG-G06 30/30 · PG-G07 47/47 · PG-G09 23/23 · S8 资源读数 12/12 · PG-G08 28/28
+有限真模型 smoke **7/7**（`pnpm with-test-model pnpm postgresql:live:smoke`）
+  runId pg-migration-live-smoke-20261013T121906Z · 来源 = 新基线快照
+  模型 **deepseek-v4.1-flash** @ ark.cn-beijing.volces.com（测试端点）
+  tick kind=ran · scanned=1 · processed=1 · **noImpact=1** · 耗时 **1734 ms**
+  两条失败关闭都实测过：① 不经 `with-test-model` ⇒ 拒绝（measured_count=0 ⇒ INVALID，**不回落生产 key**）
+  ② 来源必须是 verified snapshot（第一版没给 `--snapshot-source` ⇒ 导出工具拒绝导出真实库 ⇒ 当场红）
+typecheck 0 · scripts:catalog:verify PASS（614 条）
+**pnpm m4.5:ci EXIT 0**（G12 38/0 · G13 32/0 · G14 52/0 · G2 150/0 · L2 53/0 · G9 PASS；
+ 日志里"真实库…本次不会被写入"）
+gates:run --lane postgresql = **8 道 · PASS 8 · FAIL 0**（本线第一次全绿）
+```
+
+**契约 WP5 的退出条件逐条对照**：数据一致 ✅（G05）· 投影重建 ✅（G06 的 `G06.1f` 逐行相同）·
+并发只读/备份 ✅（G07 + bench）· 断连恢复 ✅（G08 的 D 段）· 功能整链 ✅（G08 六段）·
+资源测量 ✅（S8）· 有限真模型 ✅（smoke 7/7）· `typecheck` ✅ · **完整离线 CI EXIT 0** ✅。
+
+**本包的两件大事（都有完整记录）**：
+
+```text
+PG-ISO-01（S2 事故） 核心静默回退成 PGlite 适配器 ⇒ 打开了真实库。内容未变已证（54/54 表摘要相同）。
+                     三道防线已落地；此后**每道新门**都带"真实库目录逐字未动"的断言。
+ⓓ 生产数据写入        用户裁定后在真实库上受控重建 `goal:%`（19 行）⇒ revision 614→51 = 事件数。
+                     走 INC-01 状态机 · 一个事务 · 读回 A==B 19/19 · cleanClose · 新快照。
+                     操作类别 `goal_projection_rebuild`（枚举**追加**）。
+```
+
+**下一包（WP6 切换候选与运维手册）的前置**：`PG-G10` 要求 **PG-G01…09 全 PASS**。
+现状：G01/G02/G03/G05/G06/G07/G09 已登记且绿；**G04（SQL/仓储兼容）仍是"未登记"** ⇒ WP6 开工前要处理它。
+
+---
+
+## 2026-10-13 PostgreSQL 迁移 WP5 追加 ⑤：ⓓ **已执行** —— 真实库 `goal:%` 受控重建 + 新 verified 快照 ⇒ **`PG-G06` 30/30 · lane 8/8**
+
+**授权**：用户「ⓓ 在真实库上受控重建 goal:% + 取新快照」（2026-10-13）。
+**载体**：`scripts/postgresql-goal-rebuild-apply.ts`（新程序）· 操作类别 `goal_projection_rebuild`
+（`OPERATION_KINDS` **追加**，理由写在枚举注释里：这次不是 schema 迁移，复用 `migrate` 会让审计面撒谎）。
+
+### 安全边界（一条都没省）
+
+```text
+① 必须显式 `--apply`（不带 ⇒ 干跑，打印计划后退出 2，**不碰库**）—— 实测干跑 EXIT=2 ✓
+② 只对真实库目录生效（`isProductionDir`）；其它目录一律拒绝
+③ 走 INC-01 生产状态机；④ 重建在**一个事务**里（中途失败回滚）
+⑤ 事后**读回核对 A == B**（用真代码折叠一遍，逐行比 revision / 序号 / lastId / state）
+⑥ 只打印行键尾与计数，不打印任何 state 正文
+```
+
+### 实测读数（`artifacts/post-lv2/postgresql-migration/goal-rebuild-20261013120206797/`）
+
+```text
+状态机  IDLE → LEASED → PREOPEN_SNAPSHOT_VERIFIED → DB_OPEN → SERVICES_STOPPED
+        → DB_CLOSED_VERIFIED → POSTCLOSE_SNAPSHOT_VERIFIED → RELEASED
+cleanClose = **true** · 操作类别 goal_projection_rebuild
+pre-open verified snapshot : **2026-10-13T12-02-09-596Z-da3d92413269**（回滚点）
+post-close verified snapshot: **2026-10-13T12-02-14-409Z-90cae4d22dcd**（新基线）
+goal 行 19 → 19 · 领域事件 470 → 470（重建**不写事件**）· appliedEvents 51 · previousRowCount 19
+A==B 核对：storedRows 19 · foldedRows 19 · relevantEvents 51 · **mismatchCount 0**
+逐行 revision（存前 → 存后）：52→4 · 42→2 · 8→2 · 74→4 · 72→4 · 4→2 · 17→3 · …
+**revision 总和 614 → 51**（51 = 目标域事件数 ⇒ `revision` 重新成为**事件数的函数**）
+快照保留：**没有剪枝**（10-09/10-10/10-11 的旧快照全部还在 ⇒ 未发生"删旧快照"这种需单独授权的动作）
+```
+
+### 迁移来源已**重新基线化**
+
+```text
+旧来源：pglite-2026-10-11T12-53-02-968Z-55f0cb5676aa（WP0 那一份；已被本次写入**改变**）
+新来源：pglite-2026-10-13T12-02-14-409Z-90cae4d22dcd（post-close verified）
+11 个脚本/探针的默认来源已改（用 node 改，**不走 PowerShell** —— CJK 源文件在代码页 936 下会逐字丢字节）
+```
+
+### 门读数（**全绿**）
+
+```text
+pnpm postgresql:g06:verify   **30/30 · 0 失败 · 0 notRun**（`G06.1f` **绿了**：`differing 0`）
+pnpm postgresql:g05:verify   29/29（54 张表在**新来源**上仍然逐表一致 ⇒ 迁移保真不受影响）
+gates:run --lane postgresql  **8 道 · PASS 8 · FAIL 0**（墙钟 234.9s）—— 本线**第一次全绿**
+```
+
+⚠️ **`G06.1m` 换了方向**（不是放宽）：它原来是**归因**判据（断言"差异在**源**上就已存在"，
+`storedGreater ≥ 15` 且 `deltaSum > 100`）；源修干净之后那组断言按定义不再成立
+⇒ 现在它守**修复的回归**：源上"存的"必须与"折叠出来的"逐行相等（`storedGreater=0` ·
+`storedSmaller=0` · `deltaSum=0` · `stateEqual=19`）。**历史归因不丢**（本文件追加③ + Handoff §3.7.2b）。
+
+### 真实库指纹（**按设计变了**）
+
+```text
+事故后（未变）  e46d8b39512ab9ab…（1269 文件 / 48 992 858 B）
+本次重建之后    137b723369c7184b4371f2855a93b90a3896285d1728865c69372c5bd3fcaefe
+                （1269 文件 / 49 009 242 B —— 19 行被重写）
+⇒ 从此以后"真实库有没有被动过"的参照物是**新的** post-close 快照，不是 WP0 那一份。
+```
+
+---
+
+## 2026-10-13 PostgreSQL 迁移 WP5 追加 ④：`F-WP5-16` —— **两条竞态判据**（我自己的门造的假红）
+
+**发现方式**：`F-WP5-10` 修完后跑 lane（8 道）⇒ `bench` 与 `g07` **红了**，而它们**单独跑都是绿的**
+（`bench` 12/12 · `g07` 47/47）。⇒ 同代码时红时绿 = **量具的竞态**，不是被测物的回归。
+
+```text
+`g07 G07.1h`  原第三条断言：`samplesWithDump >= 1` —— 「采样时**看得见** `pg_dump` 后端」
+`bench B08`   原断言：`maxConnectionsDuringLoad >= 2` —— 「负载下应看得见写入 + 只读两条连接」
+
+两条都是**点采样**：采样是另起 `docker exec psql`（每次约 85–100ms），
+而 dump 只有 300–400ms、只读连接在 psql 退出时就关了 ⇒ "看得见/看不见"取决于时序。
+```
+
+**修法（都是把弱代理换成直接证据，不是放宽）**：
+
+```text
+g07.1h  判据改挂**备份窗口内的直接证据**：`committedDuringDump >= 1` 且 `rowsAtDumpEnd > rowsBeforeDump`
+        （这两条**原来就在**，且正是"备份确实发生在写入进行中"要说的意思）；
+        采样结果降级为**读数**（仍记录，不再当判据）。
+bench B08 判据改挂**只读窗口内探针表行数在长**：`rowsAtReadEnd > rowsAtReadStart`
+        实测新读数：**76 → 240**（4 秒里提交了 164 行，而 22 次只读全部成功）✓
+        连接数降级为读数。
+```
+
+⚠️ **`bench` 还踩了第二层（同一类）**：第一版我把"写入还在进行"的信号挂到**子进程 stdout 的行数**上
+（`batchesAtReadEnd > batchesAtReadStart`）—— 实测窗口内 **3 → 3** 行没动，而同一个进程最终产出 **116** 批。
+⇒ **`docker exec` 的管道是成块缓冲的**，用 stdout 行数测进度 = **量具在量缓冲**（`F-WP4-07` 的镜像）。
+⇒ 纪律：**要问"还在不在写"，问数据库自己，别问管道**。
+
+**修完读数**：`g07` 47/47 ✓ · `bench` 12/12 ✓ · lane 见下节。
+
+---
+
+## 2026-10-13 PostgreSQL 迁移 WP5 追加 ③：`F-WP5-10` **已修**（幂等闸）· 附行为级证明
+
+**授权**：用户「按你的建议来」（2026-10-13，对应 WP5 Handoff §3.7.2b 的三个候选处置）。
+**改动**：`src/kernel/projections/goal.ts` 的 `foldGoalRowsInMemory` 加**幂等闸**（一行判据）：
+
+```ts
+if (entry !== undefined && entry.lastDomainEventSequence !== undefined
+    && event.sequence <= entry.lastDomainEventSequence) continue
+```
+
+### 为什么修在折叠里，而不是只修调用方（**与我原来的建议不同，这里要说明白**）
+
+我原来的建议是"三个调用点只喂这一批事件"。**实现时发现那会退化一个能力**：
+
+```text
+`agreement-runner.ts:131-138` 的 `already_applied` 那一支是**修复/追赶**路径
+（`eventsWritten: 0`）：它的全部意义就是"事件已落库但投影可能落后 ⇒ 再折一遍追上去"。
+若改成"只喂这一批"，那一支的折叠输入会变成**空集** ⇒ **追赶能力消失**
+（崩在"事件已写、投影未写"之间就再也补不回来）。
+⇒ 修在闸上：**喂全部历史仍然安全**，追赶保留、膨胀消失。
+```
+
+⚠️ 并且这与仓库**既有的**纪律同源：`applyMemoryEvent` 早就有这道闸
+（"已经折叠过：不重复 reduce（否则 revision 会叠加，而 Replay 会算不出来）"）——
+**目标域缺的就是这一条**，补上之后两个域的折叠语义才一致。
+
+### 行为级证明（`scripts/postgresql/goal-fold-idempotency-probe.ts`，只读源快照）
+
+照生产调用点的形状做：**读回全部目标域事件 → 喂给增量折叠**（cache 按 `applyGoalRows` 的形状
+从库里存的 revision/lastSeq 播种）。同一份数据跑两遍，只差"有没有闸"：
+
+```text
+带闸（当前代码）  ：变化行 **0** · Δ合计 **0**
+不带闸（对照实现）：变化行 **19** · Δ合计 **51**   ← 恰好等于目标域事件数
+```
+
+⇒ **闸有效**：喂全部历史不再改变任何一行的 revision；拿掉闸就会出现膨胀
+（Δ = 事件数 × 提交次数 ⇒ 历史 563 约等于 11 次提交的积累）。
+
+### 修完的门读数（相关门全部仍绿）
+
+```text
+pnpm m10:test                 EXIT 0 · verdict PASS（59/59）
+pnpm m10:long:verify          EXIT 0 · verdict PASS（断言 12/12 · 登记 2 条）← **盯 revision 的那道门**
+pnpm m10:scale:verify         EXIT 0 · verdict PASS（13/13）· 含 `rebuild` 对账（S6 分母非零）
+pnpm m10:e2e:verify           EXIT 0
+pnpm m10.1:agreement:verify   EXIT 0
+pnpm typecheck                EXIT 0
+```
+
+### ⚠️ `PG-G06` **仍然是 29/30** —— 我原来的判断错了，这里更正
+
+我原先说"改调用点 ⇒ 18 行差异消失 ⇒ 可以真绿"。**那是错的**。修完重跑：
+
+```text
+runId pg-migration-g06-20261013T113118Z = **29/30 · 1 FAIL · 0 notRun**
+FAIL 仍然是 `G06.1f`：18 行 `goal:` 的 `revision` 不同（Δ 与修之前**逐字相同**：563）
+原因：闸只堵住**未来**的膨胀，**不会**改写**历史**已经存下的值；
+      而 `G06.1f` 比的是"**恢复出来的行** vs **重建出来的行**" —— 前者带着历史污染值，
+      后者是全量重放算出来的干净值。
+```
+
+⚠️ 而且**不能**靠"迁移时顺手把投影重建一遍"来绕过：`PG-G05` 要求 **源与目标逐表内容相同**，
+在目标侧重重建会让目标 ≠ 源 ⇒ G05 立刻红。⇒ 这是一个**必须显式裁定**的岔路口。
+
+### 岔路口（**待用户裁定** · 这是本轮唯一悬着的决定）
+
+```text
+ⓑ 改契约：`G06.1f` 改成"两次独立重建互相一致（A' == B'）" + "恢复 vs 重建的差**有界且已归因**"
+   代价：动 **DESIGN FROZEN** 的验收契约；不动任何数据
+ⓒ 保持红：WP5 不 PASS ⇒ `PG-G10`/WP6 切换候选卡住
+ⓓ 修**源**数据：在真实库上受控重建一次 `goal:%` 投影（`rebuildGoalProjections`）→
+   取**新的** verified 快照 → 源与目标都带干净值 ⇒ G05 仍成立、`G06.1f` 真绿
+   代价：那是一次**生产数据写入**（删行重插，`updated_at` 也会变）⇒ 需**单独授权**，
+        且按单持有纪律要在核心停机窗口做；之后受影响的门要重跑、快照要重新基线化
+```
+
+**我的建议：ⓓ**（若你要的是"诚实的绿"）或 **ⓑ**（若不想动生产数据）。
+ⓓ 的收益是数据本身变正确（`revision` 重新成为"事件数的函数"）；ⓑ 的收益是不碰生产。
+
+### 仍未做（按建议延后）
+
+```text
+全仓消费者扫描：**没做** ⇒ 仍未证"有没有谁按 revision 分支"（即"有没有功能性后果"）。
+已证的只有：缺陷**静默**膨胀、且 `saveProjection` 的乐观并发**不会**因此报冲突
+（`expectedRevision` 取自同一事务内刚读到的行）。
+```
+
+---
+
+## 2026-10-13 PostgreSQL 迁移 WP5 追加 ②：`PG-G06` 投影与语义召回（**29/30 · 有一条真 FAIL**）+ **一次真实隔离事故**
+
+载体：[WP5 Handoff](post-lv2/PostgreSQL-Migration-WP5-Handoff.md) §3.7 / §4 / §6 ·
+事故记录 [`PG-ISO-01`](incidents/PG-ISO-01-G06-Kernel-Fallback-to-Production-PGlite.md)。
+runId：`pg-migration-g06-20261013T102521Z`。
+
+### 一、门读数：**28/29**（不是 PASS，也不是"没做"）
+
+```text
+pnpm postgresql:g06:verify   **28/29 · 0 失败以外的 1 条 FAIL · 0 notRun**
+typecheck                    0 错
+```
+
+**通过的部分**（G06.2–G06.5 + G06.1 的多数分支）：恢复确定性（同一份导出恢复两次逐行相同）·
+六个 **store 级**重建函数全部返回（用生产代码，不是我重写折叠）· 重建没写领域事件（470→470）·
+`updated_at` 排除范围精确（28 行全变，唯一没变的是没有 store 级重建的 `diagnostic-counter`）·
+A 库全程只读 · vector 版本差异显式记录（源 **0.8.0** → 目标 **0.8.7**）· 3 代/3 条记忆/5 行/dim 384 ·
+声明维度 == `vector_dims()` 实读维度 · 相同向量最近邻是它自己且距离≈0 · 距离 0 的组按**集合**恰好是 {探针} ·
+等距夹具两种 tie-break 顺序不同集合相同 · 编码器指纹 8 字段 A==B（含 `semantic-render@1`/`@2` **两个版本共存**）·
+向量逐字未变（没有"重新编码凑一致"）。
+
+### 二、★ 唯一的 FAIL：`goal:` 家族的 `revision` **不是事件流的函数**
+
+```text
+29 行投影里 18 行不同，**全部是 `goal:` 家族**（19 条里 18 条）
+逐列刻画（只报列名不报值）：
+  revision                                18 / 18   ← 主要差异
+  state_md5                                1 / 18   ← 只有一条（…:524617ab，差异在 state 的 goal 子对象里）
+  projection_type / reducer_version /
+  last_domain_event_sequence / last_domain_event_id ：全部相同
+```
+
+⇒ **重建折进了不同数量的目标事件，却停在同一事件、得出同一个状态。**
+
+### 二·归因（`G06.1m`，**已证不是迁移造成的**）
+
+同一差异在**源快照**上独立复现（不经 PG、不经迁移、不经本次恢复；用**真实代码**
+`rowToDomainEvent` + `GOAL_HANDLED_EVENT_TYPES` + `goalEventTargets` + `foldGoalRowsInMemory`）：
+
+```text
+源上目标域相关事件 = 51（GOAL_CREATED / GOAL_REVISED / GOAL_COMPLETED /
+                        COMMITMENT_ACCEPTED / COMMITMENT_FULFILLED）
+源上 19 行：**18 行「存的 revision > 折叠出来的 revision」· 0 行 < · Δ合计 563** · state 18/19 相同
+同一行举例：**存 52 / 折叠 4**
+⇒ 与迁移后的目标侧读数（18 行 · Δ563）**同量级同方向** ⇒ **产品缺陷**，不是迁移缺陷
+```
+
+### 二·根因：**生产目标写入器把「全部历史」喂给了增量折叠**（`F-WP5-10`）
+
+```text
+src/main.ts:1591-1597                       目标写入器 commit
+src/infrastructure/runtime/agreement-runner.ts:131/137 与 :206/209   约定桥的两处
+```
+
+三处都是同一形状：
+
+```ts
+const stored = (await domainEventsFor(db, characterId)).filter(   // ← 不带 afterSequence/limit
+  (event) => GOAL_DOMAIN_EVENT_TYPES.includes(event.type),        //   ⇒ **全部**目标域历史
+)
+await applyGoalRows(db, characterId, stored, now)                 // ← 而这是**增量**折叠
+```
+
+`applyGoalRows` 把**已存在的行**读进 cache（带着它当前的 `revision`），再把「你给的那批」折上去 ——
+把全部历史喂进去 ⇒ **每个历史事件每次提交都被重折一次** ⇒ `entry.revision += 1` 每次都加。
+
+⚠️ **这条本仓库早就记录过**：`scripts/m10-harness.ts:138-151`（`L-M10-35`）逐字写着
+
+```text
+  `applyGoalRows` 是**增量**折叠……把**全部历史**喂给它 ⇒ 每个事件被重复折一次
+  ⇒ `goal.revision` **膨胀**。
+  实测：200 轮轨迹里 32 个事件、32 次 `applyGoalRows` ⇒ revision **487**（而全量重放只有 **32**）。
+  **长轨迹门就是靠这个差异发现的**，而 `m10:e2e:verify` 当时**读不出**它 —— 因为它的检查里**没有一条看 revision**。
+```
+
+⇒ 当时修的是**夹具**（`m10-harness` 只喂 `fresh`）；**生产调用点三处一处都没修**。
+
+**后果（已证 / 未证分开）**
+
+```text
+已证：`revision` **不是事件流的函数**（它取决于**提交次数**，不是**事件数**）
+已证：一次 `rebuildGoalProjections` 会把它**改小**（18/19 行）⇒ 把 revision 当版本号的消费者会看到"版本回退"
+已证：每次提交做一次**全量重放**（O(全部目标域事件)）—— 轨迹越长越贵
+已证（否定一条担心）：`saveProjection` 的乐观并发**不会**因此报冲突
+      （`expectedRevision` 取自**同一事务内**刚读到的行）⇒ 缺陷**静默**膨胀、不报错
+未证：是否有消费者按 `revision` 分支（**没做**全仓消费者扫描）⇒ 不主张"有功能性后果"
+```
+
+**候选处置（需独立裁定 · 本轮不裁定）**
+
+```text
+ⓐ 三个生产调用点只喂**这一批**事件（`m10-harness` 已经这么做：按幂等键过滤 / `afterSequence`）
+ⓑ 存量修正：把 `goal:%` 行重建一次 —— 但会**改小** revision（那是一次**数据迁移**，需单独授权）
+ⓒ 或裁定"接受膨胀"，把"revision 不可重建"写进契约 —— 那要改的是**契约**，不是门
+⚠️ 不许做的：放宽 `G06.1f` 的判据去迁就现状（= 改量具让红灯变绿）
+```
+
+### 三、⚠️ 本包引入的一次真实隔离事故：`PG-ISO-01`（S2 · 内容未变已证）
+
+第一次把**真核心**对着 PG 目标启动时，连接串只设在了 `process.env.POSTGRES_URL`，
+而插件读 `runtime.getSetting("POSTGRES_URL")`（**不回落 process.env**）⇒ `postgresUrl` 是 `undefined`
+⇒ 插件建了一个 **PGlite** 适配器、`dataDir` 取 `.env` 的 `PGLITE_DATA_DIR=./data/pglite`
+⇒ **真实库被打开**，PGlite 启动往它写了集群级文件（`pg_control` / WAL 段 / `pg_xact` /
+`pg_subtrans` / `pg_multixact` / `pg_internal.init`×2 / `replorigin_checkpoint` / `postmaster.pid`，18:18:33）。
+
+**发现方式是门自己的身份核对**（`连上的数据库身份与期望不符：期望 lg_test_g06_b，实际 template1`
+—— `template1` 是 **PGlite 内嵌实例的库名**），拦在**任何迁移与业务写入之前**。
+
+```text
+影响评估（`scripts/postgresql/production-touch-assessment.ts`：源目录只被 cpSync，只在 %TEMP% 副本上打开）
+  54/54 张表的**规范化内容摘要**与 verified 参照快照**完全相同**
+  (路径,大小) 摘要 e46d8b39512ab9ab…（1269 文件 / 48 992 858 B）与事故前**逐字相同**
+  ⇒ 只发生**原地重写**，无文件增删、无大小变化（`base/` 下的表数据文件未被改）
+  可读性：在副本上读回全部 54 张表成功
+未证：干净关闭（该目录本就是陈旧 postmaster.pid 的不洁净状态，事故前后"不洁净程度"无从逐字比较）
+纪律：**不清现场**（未删 pid、未动 WAL、未改 owner、未迁移或恢复）—— `AUD-ISO-01` 先例
+同类先例：`AUD-ISO-01`（2026-10-08，"恢复测试误打开真实库"）
+```
+
+**三道防线（已落地在门内）**：
+
+```text
+① 连接串走 **runtime.settings**（`getSetting` 真正看的地方）—— 只设 process.env 不够
+② `PGLITE_DATA_DIR` 指到本次实验的独占临时目录（`G06.1j` 断言它 ≠ 真实库）—— 纵深防御
+③ ★ **`G06.1k` 把"真实库目录逐字未动"变成门内断言**（文件数 + (路径,大小) 摘要 + 最新 mtime）
+   —— 此前这是我**每轮收尾手工看**的一行，现在是**跑门就会验**的一条
+```
+
+### 四、F-WP5-06 … F-WP5-09（本轮新登记）
+
+```text
+F-WP5-06  ★★ **隔离意图未成立而真实库被打开**（`PG-ISO-01`，见上）。
+          根因一句话：**"设了环境变量"不等于"消费者看到了它"**。
+          ⇒ 纪律：跨后端的自动回退必须问"回退到哪"；回退默认值要指向**拒绝启动**，不是生产目录。
+
+F-WP5-07  `G06.1i` 第一版把 `psqlFromStdin` 的命令串也当成"A 库上的写"（它含 `-d <A>` 但不含 `-tAc`），
+          判据**靠运气**通过（关键词恰好没出现）⇒ 改成只对 `-tAc` 的命令判写、并断言
+          "非 -tAc 的命令恰好是那一次恢复"。
+
+F-WP5-08  `G06.2a` 第一版把 `readVectorVersion(DB_A)` 当成"源" —— 而 DB_A 是**恢复出来的 PG 目标**
+          （装了 0.8.7）⇒ 那一步是"目标 vs 目标"的**同义反复**，契约要的"来源 0.8.0 → 目标 0.8.7"
+          根本没被量到。修：源侧版本从**源快照**读（`openPgliteSnapshot` + `pg_extension`）。
+
+F-WP5-09  证据装配里 `observations.rebuild` 被**赋值两次**，后一次把先写的
+          `componentDiff` / `differingComponentHistogram` **静默覆盖**掉了 ⇒
+          第一次读证据时那两个字段是 `undefined`（差点以为"差异没被刻画出来"）。
+          修：把字段并进同一个对象字面量。⇒ 纪律：**同一路径的观测不要分散赋值**。
+```
+
+### 五、包内新登记的边界
+
+```text
+L-PGW5-08  见上（`goal:` 的 revision 不可重建 · **真缺陷未销账**）
+L-PGW5-09  `goal-fold@1` 版本串没变而重建结果不同 ⇒ 版本串**没有**覆盖"折叠语义可重建"这个性质
+L-PGW5-10  `diagnostic-counter` **没有** store 级重建函数 ⇒ 本门没重建它（28 行被重建，不是 29 行）
+L-PGW5-11  向量面只有 5 行 / 3 条记忆 / 3 代（`embeddings` 表 0 行、6 个 vector 列全 NULL）
+L-PGW5-12  `G06.4` 的等距场景是**合成夹具**（真实 5 行里没有并列，`G06.3a` 断言了探针哈希唯一）
+L-PGW5-13  `PG-ISO-01`：不主张"真实库一个字节都没变"（集群级文件被原地重写过）·
+           不主张"干净关闭已证"；有证据的是"用户数据与参照快照相同"
+```
+
+### 六、资源读数（契约 `S8`）：`pnpm postgresql:bench:verify` = **12/12**
+
+两侧 = **同一份快照**（PG 目标从它恢复 · PGlite 是它的副本；`B03` 断言同一条查询两边结果相同）。
+
+```text
+① 服务端执行时间（EXPLAIN ANALYZE 的 Execution Time；两侧同一判据，不含客户端开销）
+   8 条固定查询全部**亚毫秒**：PG p50 0.061–0.480 ms · PGlite p50 0.054–0.643 ms
+   形态差异（**不构成主张**）：Q6 向量最近邻 PG 0.362 vs PGlite 0.066（p50）；Q8 反过来 0.143 vs 0.415
+② 端到端往返（**含各自客户端开销，不互相比较**）
+   PG 侧用**同一个 psql 会话** `\timing on` 连跑 20 次（每题 20 个样本，`B06` 断言一个不少）
+   ⚠️ 若每条查询另起一个 `docker exec psql`，墙钟约 **86 ms** —— 那量的是**进程启动 + 连接**
+   ⇒ 本门把"服务端工作量"与"客户端往返"**分成两个读数**（否则就是"看起来在比数据库、其实在比起进程"）
+③ 资源与运维
+   PG 库 19 740 339 B · PGlite 目录 48 992 858 B（⚠️ 不是同一种计量对象 ⇒ 分列）
+   容器空闲 0.02% / 78.9 MiB  ⇒  **负载下 83.28% / 82.96 MiB** · 负载下连接数 **2**
+   PGlite 侧"内存" = 本门进程 RSS 350 MB（含 PGlite 实例）
+   **并发只读**：写入进行中连续读 4 秒 **24 次全部成功 · 0 失败**
+   **写入进行中的备份**：**231 ms · 11 127 245 B · exit 0**，期间提交 **129** 批
+⚠️ **不设性能目标、不判优**（计划 §5 逐字）：`B11` 是**结构性**断言 ——
+   读数的 JSON 里**不许**出现 faster / winner / speedup / improvement。
+   ⇒ 迁移的动机是**运维能力**（核心在线时可独立查询/备份/并发访问），**不是**时延。
+⚠️ 自证：源快照目录逐字未动 + **真实库目录逐字未动**（`B10`，`PG-ISO-01` 之后每道新门都带）。
+⚠️ **必须 serial**：建 `lg_test_bench` 并起一个真实写入进程。
+```
+
+**本轮新登记的缺陷**
+
+```text
+F-WP5-11  `bench` 第一版把复用脚本的表名"顺手改了"（`bench_probe`/`bench_control`），
+          而 `g07-writer.sh` 里写死的是 `online_backup_probe`/`g07_control` ⇒ 写入进程一启动就
+          `relation does not exist` ⇒ **一条 BATCH 都没产出** ⇒ `B08`/`B09` 红得对。
+          ⇒ 纪律：**复用别人的脚本时按它的接口照抄，不要顺手改名**。
+
+F-WP5-12  `docker stats --no-stream` 自身要约 **1 秒**，第一版把它放进紧循环 ⇒
+          3 秒窗口里只跑到 **2** 个只读样本（判据"样本太少"红得对）。
+          ⇒ 纪律：**别把慢量具放进紧循环**（负载下的容器读数采一次就够）。
+
+F-WP5-13  判据顺序错：`B07` 在 `observations.concurrency` 被赋值**之前**读它 ⇒
+          `Cannot read properties of undefined`。⇒ 纪律：**判据只在它依赖的观测落盘之后求值**
+          （与 `F-WP5-09` 同源：观测的装配顺序本身是缺陷来源）。
+```
+
+### 七、功能整链与回归（`PG-G08`）：**20/20 断言全过 · 2 项具名未运行 ⇒ 不报 PASS**
+
+`pnpm postgresql:g08:verify` = **20/20 · 0 失败 · 2 notRun**（`measured_count = 20`，退出码 **1** ——
+那是"缺证据拒收"，**不是**"断言红了"）。同一个 PG 目标上**起两次真核心**（`initDatabase` + `initKernel`）。
+
+```text
+场景 A 记忆增改撤回（走真事件溯源，读回用真 store）
+  增   `MEMORY_CREATED` → 真 store `getActiveByCanonicalKey` 读回 active
+  幂等 同一事件再折一次 ⇒ `created:false`（投影不重复叠加）
+  改   `MEMORY_SUPERSEDED` ⇒ 旧行 `superseded` 且 `supersededBy` 可追溯
+  撤回 `MEMORY_RETRACTED` ⇒ 该行不再是 active
+场景 B 通知
+  `repeat_mode='until_reply'` 真的落库（**跨重启续发靠这一列**）
+  同 `occurrenceKey` 第二次 ⇒ `created:false`（同一次机会只产生一个外发尝试）
+  `deferOccurrence` 对 reminder **具名拒绝** `occurrence_defer_not_care`；对 care 成功
+  `pendingCareDeferrals`：还压着 **1** 条 / 到点后 **0** 条
+场景 C 重启续跑（同一个目标起第二次核心）
+  记忆逐行一致 · 领域事件数**不增**（重启不重复写入）· 投影摘要不变 ·
+  **水位 12 行摘要不变** · 通知意图/实例跨重启存活 ·
+  **跨重启**同键占用仍 `created:false` ⇒ 重启不会重复外发
+场景 D 断连恢复
+  关库后**旧句柄查询必须失败**（否则"关库"是空话）· 重连后数据仍在
+场景 E 外部发送在测试中受控
+  0 投递通道 · 0 QQ 进程 · 0 外发尝试 · 读数里无真实联系人字段
+  ⇒ 没有任何测试消息会发向真实联系人
+未运行（具名）
+  g08.6 后台消费者长跑（真实 tick 循环 + 在飞任务）· g08.7 QQ / Live2D 双入口路由
+```
+
+**本门自己踩的两个坑**
+
+```text
+F-WP5-14  ★ **场景级联**：第一版把记忆、通知、关库放在**同一个** try 里 ⇒ 通知抛错后
+          "关库"与"关库前后比对"根本没执行 ⇒ **9 条断言一起红，其中 8 条没有信息量**
+          （它们只是在报"上一个场景没跑完"）。
+          ⇒ 修：每场景 `isolated(label, fn)` 独立兜底 + "关库前读数/断连"两步**无论成败都跑**。
+            同一份代码、只改隔离方式 ⇒ 20/20。
+          ⇒ 纪律：**一个场景的失败不许吃掉别的场景的读数**（否则红的是量具，不是被测物）。
+
+F-WP5-15  契约细节漏了：`kind:'reminder'` 的 `createIntent` **必须**给 `sourceRefs`
+          （失败关闭「明确提醒必须有**原请求来源**」），`kind:'care'` 反过来**不许**给。
+          ⇒ 纪律：**调生产 API 前先读它的失败关闭条件**，不要靠报错反推。
+```
+
+### 八、本轮**未跑** `m4.5:ci`（具名原因）`PG-G06` 有一条**真 FAIL** 且未裁定 ⇒ WP5 **不是**交付候选，而计划 §5 逐字要求
+"WP5 / 交付候选必须运行 `pnpm m4.5:ci` 并退出 0"。本轮跑的是**与该改动相关的那几道门**：
+`gates:run --lane postgresql` + `typecheck`。⇒ **不是"忘了跑"，是"按规矩不跑"**。

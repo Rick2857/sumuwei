@@ -224,6 +224,23 @@ export const OFFLINE_GATES: readonly GateSpec[] = [
     why: "isolateDatabase('m4-isolation', {keep:true}) + 自己的证据目录（第 21 行附近）。",
   },
   {
+    id: 'postgresql:g01:verify',
+    title: 'PG-G01 配置与隔离（PostgreSQL 后端选择 / 错配置与错目标失败关闭）',
+    argv: tsx('scripts/postgresql-g01-verify.ts'),
+    entry: 'scripts/postgresql-g01-verify.ts',
+    /*
+     * 资源填写依据（逐条核过）：
+     *   · **不打开任何数据库**：主体是纯函数断言；4 个子进程用 `mkdtempSync` 的临时目录
+     *     + 注入的假 `registerPlugin`（`initDatabase` 只走到"注册插件"就抛）。
+     *   · **不碰真实库**：子进程里的 `.env` 是自造的 fixture；`PRODUCTION_DB_DIR` 只被
+     *     当作"应当被拒的字符串"使用，从不打开。
+     *   · 不占固定端口、不改写 git 工作树、不写任何证据文件（只往 stdout 打报告）。
+     *   · 三个"真 PG 实例"用例**不在本门里**（如实报 NOT RUN）⇒ 不依赖任何外部服务。
+     */
+    resources: { ...SAFE_PURE },
+    why: '纯函数 + 临时目录子进程；无数据库、无端口、无证据落盘（见本条 why 的逐条核对）。',
+  },
+  {
     id: 'm4:restore:verify',
     title: 'M4 快照/恢复',
     argv: tsx('scripts/verify-m4-restore.ts'),
@@ -1668,8 +1685,245 @@ export const OFFLINE_SPECIALTY_IDS: readonly string[] = [
   'm5:test', 'm5:verify', 'm5:e2e:verify',
 ]
 
+// ===========================================================================
+// PostgreSQL 迁移（WP1 起的 PG 门）
+// ===========================================================================
+/**
+ * ⚠️ **有意不并入 `offline` lane**（同 `desktop-control` lane 的先例）：
+ * 那条 lane 的声明与 `pnpm m4.5:ci` **逐条等价**，而 `postgresql:g02:verify`
+ * **需要**一个在跑的隔离 PG 实例（Docker + `lg-postgresql-trial` + 凭据文件）。
+ * 把它塞进 offline lane 等于让本仓库的核心离线 CI **依赖 Docker 在跑** ——
+ * 那是另一件事，不该顺手发生。
+ *
+ * `postgresql:g01:verify` **不在这里**：它是纯函数 + 临时目录子进程，不需要任何实例
+ * ⇒ 它留在 `OFFLINE_GATES` 里（因此被核心 CI 覆盖）。
+ *
+ * 调用：`pnpm gates:run --lane postgresql`
+ */
+export const POSTGRESQL_GATES: readonly GateSpec[] = [
+  {
+    id: 'postgresql:g08:verify',
+    title: 'WP5 功能整链与回归（记忆增改撤回 · 认知恢复 · 通知 · 重启续跑 · 外部发送受控）',
+    argv: tsx('scripts/postgresql-g08-verify.ts'),
+    entry: 'scripts/postgresql-g08-verify.ts',
+    /*
+     * 资源填写依据（逐条核过）：
+     *   · **需要**在跑的隔离 PG 实例 + 凭据文件 + verified 来源快照 + 导出运行时；
+     *     任一缺失 ⇒ **非零退出**并具名报 notRun。
+     *   · 它建**一个**测试库（`lg_test_g08`，从快照恢复），在**同一个**目标上
+     *     起**两次**真核心（`initDatabase` + `initKernel`，与装配根同一条路）：
+     *     第一次跑真实写入路径（记忆增/改/撤回走 `appendDomainEvent` + `applyMemoryEvent`；
+     *     通知走 `createIntent` / `reserveOccurrence` / `deferOccurrence` / `pendingCareDeferrals`），
+     *     关库（并断言旧句柄真的用不了），第二次再起 ⇒ 断言续跑（事件数不增、水位/投影摘要不变、
+     *     记忆状态逐行一致、同键占用仍 `created:false`）。
+     *   · **外部发送在测试中受控**：从不构造投递通道、不起 QQ 进程；`G08.5a/5b` 是结构性断言。
+     *   · 自建自删测试库；**真实库目录指纹前后比对**（`PG-ISO-01` 之后每道新门都带）。
+     *   · 它会**再起一个核心**（第二条连接 + 内核装配）⇒ 与其他 PG 门共用实例，**必须 serial**。
+     */
+    resources: { parallel: 'serial' },
+    why:
+      '需要隔离 PG 实例 + verified 快照 + 导出运行时；建 lg_test_g08 并在同一目标上起两次真核心；' +
+      '走真实事件溯源/通知 store 写入路径；关库后断言旧句柄失效；外部发送结构性受控；自建自删；必须 serial。',
+  },
+  {
+    id: 'postgresql:bench:verify',
+    title: 'WP5 资源读数（S8：服务端执行时间 / 端到端往返 / 连接数 / CPU·内存 / 磁盘 / 备份耗时 · 两侧分列不判优）',
+    argv: tsx('scripts/postgresql-bench-verify.ts'),
+    entry: 'scripts/postgresql-bench-verify.ts',
+    /*
+     * 资源填写依据（逐条核过）：
+     *   · **需要**在跑的隔离 PG 实例 + 凭据文件 + verified 来源快照 + 导出运行时；
+     *     任一缺失 ⇒ **非零退出**并具名报 notRun。
+     *   · 它建**一个**测试库（`lg_test_bench`，从快照恢复）+ 打开**同一份快照**的 PGlite 副本
+     *     ⇒ 两侧是"同一个库的两份"（`B03` 断言两侧同一条查询结果相同才继续）。
+     *   · 它复用 `PG-G07` 已验证的**写入进程**（`scripts/postgresql/g07-writer.sh`）做
+     *     "写入进行中的并发只读"与"写入进行中的备份耗时"。
+     *   · ⚠️ **它不设性能目标、不判优**（计划 §5 逐字"未设性能收益目标"）：`B11` 结构性断言
+     *     读数里**不许**出现 faster/winner/speedup 之类的判优字段。
+     *   · 自建自删测试库；**真实库目录指纹前后比对**（`PG-ISO-01` 之后每道新门都带）。
+     *   · **必须 serial**：与其他 PG 门共用同一个实例（`L-PGW2-03`），且它会起写入进程。
+     */
+    resources: { parallel: 'serial' },
+    why:
+      '需要隔离 PG 实例 + verified 快照 + 导出运行时；建 lg_test_bench 并与同一快照的 PGlite 副本对照；' +
+      '复用 g07-writer 做并发只读与在线备份耗时；**不设性能目标、不判优**；自建自删；必须 serial。',
+  },
+  {
+    id: 'postgresql:g04:verify',
+    title: 'PG-G04 SQL/仓储兼容（真 PG：JSON/null · bigint 边界 · RETURNING · 唯一/部分索引 · 幂等 · 乐观冲突 · 事务原子性 · 四仓储真实执行）',
+    argv: tsx('scripts/postgresql-g04-verify.ts'),
+    entry: 'scripts/postgresql-g04-verify.ts',
+    /*
+     * 资源填写依据（逐条核过）：
+     *   · **需要**在跑的隔离 PG 实例 + 凭据文件 + verified 来源快照 + 导出运行时；
+     *     任一缺失 ⇒ **非零退出**并具名报 notRun。
+     *   · 它建**一个**测试库（`lg_test_g04`，从 verified 快照恢复）并在上面起**一次**真核心
+     *     （`initDatabase` + `initKernel`，与装配根同一条路）。
+     *   · 判据分七组：JSON/null（含 null 与缺键可区分）· bigint 边界（**只主张 SQL/文本层**，
+     *     并如实记录 JS number 会丢）· `RETURNING` · 唯一索引与**部分**唯一索引（含谓词不命中不拦）·
+     *     幂等（事件键 / 任务键 / 已处理操作表）· 乐观冲突（错的 expectedRevision ⇒ `revision_conflict`
+     *     且**没写进去**）· 事务原子性（事务内撞主键 ⇒ 整体回滚 0 行）· 四个仓储真实执行
+     *     （Event / Conversation / Memory / Job）。
+     *   · 自建自删测试库；**真实库目录指纹前后比对**（`PG-ISO-01` 之后每道新门都带）。
+     *   · 它起一个核心并建库 ⇒ 与其他 PG 门共用实例，**必须 serial**。
+     */
+    resources: { parallel: 'serial' },
+    why:
+      '需要隔离 PG 实例 + verified 快照 + 导出运行时；建 lg_test_g04 并起一次真核心；' +
+      '七组 SQL/仓储判据（含部分唯一索引与事务回滚）；自建自删；真实库指纹前后比对；必须 serial。',
+  },
+  {
+    id: 'postgresql:g10:verify',
+    title: 'PG-G10 切换就绪（只读审查：G01…09 全 PASS · run 归属 · 恢复演练 · WP6 四份文档完整）',
+    argv: tsx('scripts/postgresql-g10-verify.ts'),
+    entry: 'scripts/postgresql-g10-verify.ts',
+    /*
+     * 资源填写依据（逐条核过）：
+     *   · 它是**只读聚合器**：**不连数据库、不跑别的门、不改任何东西** —— 只读
+     *     `artifacts/post-lv2/postgresql-migration/` 下**已落盘**的证据 + WP6 的四份文档。
+     *   · ⇒ 它**不需要** PG 实例/凭据/快照；缺的是**上游门的证据** ⇒ 那种情况下它具名报 notRun。
+     *   · ⚠️ 选档按 `runId` **字典序**（不看 mtime —— 仓库既有纪律 `TD-23`）。
+     *   · ⚠️ **必须最后跑**：它读的就是其他门刚写的证据 ⇒ `serial` 且依赖全部 PG 门。
+     */
+    resources: { parallel: 'serial' },
+    why:
+      '只读聚合器：读已落盘证据 + WP6 四份文档，不连库、不跑门；按 runId 选档（不看 mtime）；' +
+      '必须在上游门之后跑。',
+  },
+  {
+    id: 'postgresql:g02:verify',
+    title: 'PG-G02 schema 与权限（真 PG：从零可运行 / 权限边界 / 并发迁移 / 回滚）',
+    argv: tsx('scripts/postgresql-g02-verify.ts'),
+    entry: 'scripts/postgresql-g02-verify.ts',
+    /*
+     * 资源填写依据（逐条核过）：
+     *   · **需要**一个在跑的隔离 PG 实例（容器 `lg-postgresql-trial`）与它的凭据文件；
+     *     拿不到时本门**非零退出**并如实报 `notRun` —— 它不会"绿着跳过"。
+     *     （这一条是实测修出来的：第一版在实例不可达时以 0 退出，那是个假绿。）
+     *   · 它**自建自删**自己的测试库（`lg_test_g02` / `lg_test_g02_race`），不污染别的门。
+     *   · 不碰真实库 `data/pglite`：全程只连 127.0.0.1:55432 的隔离实例。
+     *   · **必须 serial**：`L-PGW2-03` 记的"同时跑两道 PG 门会互相影响"
+     *     （实例长期存在，门之间靠库名隔离）⇒ 不许与别的 PG 门并行。
+     *   · 不写证据文件（只往 stdout 打报告）。
+     */
+    resources: { parallel: 'serial' },
+    why: '需要隔离 PG 实例（拿不到则非零退出 + 具名 notRun）；自建自删 lg_test_g02*；不碰真实库；必须 serial（L-PGW2-03）。',
+  },
+  {
+    id: 'postgresql:g03:verify',
+    title: 'PG-G03 生命周期与写入资格（真 PG + 两个真实 OS 进程：第二核心拒绝 / 锁丢失检测 / 服务器重启）',
+    argv: tsx('scripts/postgresql-g03-verify.ts'),
+    entry: 'scripts/postgresql-g03-verify.ts',
+    /*
+     * 资源填写依据（逐条核过）：
+     *   · **需要**在跑的隔离 PG 实例 + 凭据文件；拿不到时**非零退出**并具名报 notRun。
+     *   · 它**起多个真实 OS 进程**（`qualification-probe.ts`）—— 这是计划 §5 对
+     *     `PG-G03` 的逐字要求（"真 PG + 两个 OS 进程"）；同进程模拟证明不了跨进程资格。
+     *   · 它会**终止**自己那条专用连接（`pg_terminate_backend`）来测"锁连接丢失"。
+     *     终止条件被限制在 `usename = 'lg_migrate'`，即本门自己的测试账号。
+     *   · ⚠️ **它还会 `docker restart` 这个容器**（测 `G03.6`"服务器重启 ⇒ 资格重新建立"）。
+     *     因此：① 它必须 serial（会打断别的 PG 门）；② 它**无论断言成败都等实例回到健康**
+     *     （`waitForHealthy`），不把实例留在停着的状态；③ 重启后它会断言
+     *     "另一个进程可以取得资格"，以证明旧锁真的随会话消失。
+     *   · 自建自删 `lg_test_g03`；不碰真实库 `data/pglite`。
+     *   · 不写证据文件。
+     */
+    resources: { parallel: 'serial' },
+    why: '需要隔离 PG 实例 + 多个真实 OS 进程；会终止自己的 lg_migrate 会话并**重启容器**（故必须 serial，且无论成败都要等实例回到健康）；自建自删 lg_test_g03。',
+  },
+  {
+    id: 'postgresql:g05:verify',
+    title: 'PG-G05 迁移完整性（全库逐表规范化内容摘要 + 主题面 + 真数据四条具名负控 + 重新恢复）',
+    argv: tsx('scripts/postgresql-g05-verify.ts'),
+    entry: 'scripts/postgresql-g05-verify.ts',
+    /*
+     * 资源填写依据（逐条核过）：
+     *   · **需要**在跑的隔离 PG 实例 + 凭据文件 + 一个 verified 的 PGlite 来源快照
+     *     **以及**导出工具的独立运行时。任一缺失 ⇒ **非零退出**并具名报 notRun。
+     *   · 它读**源副本**（`openPgliteSnapshot`：复制一次、打开一次、读多表，自证源目录未动），
+     *     并把同一份快照导出后恢复进一个**新空库**再逐表比较（54 张表 / 4261 行）。
+     *   · 它自建自删一个测试库（`lg_test_g05`），**无论断言成败都清理**。
+     *   · 负控是**真数据**上的改动（删一行 / 改主键 / 改归因 / 改向量 / 回退水位 / 改无主键表的一行），
+     *     之后**重新从同一份导出恢复一次**并再比一遍 ⇒ 不需要额外的回滚机制。
+     *   · 不碰真实库 `data/pglite`；不写任何东西到源目录。
+     *   · **必须 serial**：与其他 PG 门共用同一个实例（`L-PGW2-03`）。
+     */
+    resources: { parallel: 'serial' },
+    why:
+      '需要隔离 PG 实例 + verified 快照 + 导出运行时（缺任一则非零退出 + 具名 notRun）；' +
+      '读源副本（自证源目录未动）并与从同一快照恢复的新空库逐表比较；自建自删 lg_test_g05；必须 serial。',
+  },
+  {
+    id: 'postgresql:g06:verify',
+    title: 'PG-G06 投影与语义召回（六个 store 级重建 A==B / 向量代与维度 / 固定查询 ID / 等距按集合 / 编码器指纹不变）',
+    argv: tsx('scripts/postgresql-g06-verify.ts'),
+    entry: 'scripts/postgresql-g06-verify.ts',
+    /*
+     * 资源填写依据（逐条核过）：
+     *   · **需要**在跑的隔离 PG 实例 + 凭据文件 + verified 来源快照 + 导出运行时。
+     *     任一缺失 ⇒ **非零退出**并具名报 notRun（不"绿着跳过"）。
+     *   · 它建**两个**测试库：A（**只读**，只做 SELECT）与 B（启动核心 + 六个 store 级重建）。
+     *     ⚠️ 它是本仓库里**第一个**把真核心（`initKernel`）**对着 PostgreSQL 目标**启动的门
+     *     （走 `isolateDatabase(..., { postgres: { url } })` 的隔离判据：目标必须是 `lg_test_` 前缀）。
+     *   · 它**自建自删**两个测试库，且**无论断言成败都清理**。
+     *   · 不碰真实库 `data/pglite`；不写任何东西到源目录。
+     *   · **必须 serial**：与其他 PG 门共用同一个实例（`L-PGW2-03`），且它会持有连接池。
+     */
+    resources: { parallel: 'serial' },
+    why:
+      '需要隔离 PG 实例 + verified 快照 + 导出运行时；建两个测试库（A 只读 / B 起核心做六个 store 级重建）；' +
+      '**真核心对着 PostgreSQL 目标启动**（隔离判据要求 lg_test_ 前缀）；自建自删；必须 serial。',
+  },
+  {
+    id: 'postgresql:g07:verify',
+    title: 'PG-G07 在线备份恢复（并发写入中备份 / 新空库恢复 / 篡改与截断具名拒收 / 库外资产 manifest）',
+    argv: tsx('scripts/postgresql-g07-verify.ts'),
+    entry: 'scripts/postgresql-g07-verify.ts',
+    /*
+     * 资源填写依据（逐条核过）：
+     *   · **需要**在跑的隔离 PG 实例 + 凭据文件 + 一个 verified 的 PGlite 来源快照
+     *     **以及**导出工具的独立运行时（`artifacts/post-lv2/local/pg-migration/export-runtime`）。
+     *     任一缺失 ⇒ **非零退出**并具名报 notRun（不"绿着跳过"）。
+     *   · 它起**一个真实的并发写入进程**（`docker exec … sh /opt/lg/g07-writer.sh`，
+     *     即另一个 OS 进程）在被备份的库上持续写，然后**不停任何东西**做在线 `pg_dump` ——
+     *     这是契约 `G07.1` 的逐字要求（"核心活动时备份成功（不停止核心）"）。
+     *     ⚠️ 那**不是**真实认知核心；真实核心的在线备份读数属 WP7/WP8。
+     *   · 它自建自删**两个**测试库（`lg_test_g07_src` / `lg_test_g07_dst`），
+     *     且**无论断言成败都清理**（否则下一道门会撞名）。
+     *   · 备份本体（含私人历史）与逐文件资产清单落 `artifacts/post-lv2/local/`（gitignore，**不进仓库**）；
+     *     进仓库的只有清单（表名/行数/摘要）与资产汇总。
+     *   · 不碰真实库 `data/pglite`：只读 `data/` 下登记的资产根算摘要，不写。
+     *   · **必须 serial**：与其他 PG 门共用同一个实例（`L-PGW2-03`）。
+     */
+    resources: { parallel: 'serial' },
+    why:
+      '需要隔离 PG 实例 + verified 快照 + 导出运行时（缺任一则非零退出 + 具名 notRun）；' +
+      '起真实并发写入进程做在线备份；自建自删 lg_test_g07_src/dst；备份本体与逐文件清单只进 local/；必须 serial。',
+  },
+  {
+    id: 'postgresql:g09:verify',
+    title: 'PG-G09 量具有效性（规范化比较器 · 三段式 + 真跨驱动）',
+    argv: tsx('scripts/postgresql-g09-verify.ts'),
+    entry: 'scripts/postgresql-g09-verify.ts',
+    /*
+     * 资源填写依据（逐条核过）：
+     *   · **需要**隔离 PG 实例 + 凭据文件，**并且需要**一个 verified 的 PGlite 来源快照
+     *     （缺省用 WP0 读过的那个；可用 `LG_PG_SOURCE_SNAPSHOT` 指定）。
+     *     三者任一缺失 ⇒ **非零退出**并具名报 notRun（不"绿着跳过"）。
+     *   · 它只**读副本**：`readPgliteTable()` 先在 `%TEMP%` 做一次性副本再打开，
+     *     并自证"源目录前后摘要逐字相同"；拒绝 `--from` 指向真实库 `data/pglite`。
+     *   · 自建自删 `lg_test_g09`；不碰真实库。
+     *   · **必须 serial**：与其他 PG 门共用同一个实例（`L-PGW2-03`）。
+     *   · 不写证据文件（只往 stdout 打报告）。
+     */
+    resources: { parallel: 'serial' },
+    why: '需要隔离 PG 实例 + 一个 verified PGlite 来源快照（只读副本，自证源目录未动）；自建自删 lg_test_g09；必须 serial。',
+  },
+]
+
 export const ALL_GATES: readonly GateSpec[] = [
   ...OFFLINE_GATES,
+  ...POSTGRESQL_GATES,
   ...SUMMARY_GATES,
   ...TD_GATES,
   ...M9_GATES,
@@ -1689,6 +1943,17 @@ export const ALL_GATES: readonly GateSpec[] = [
 ]
 
 export const LANES: readonly Lane[] = [
+  {
+    id: 'postgresql',
+    title: 'PostgreSQL 迁移（真 PG 实例上的门）',
+    gateIds: POSTGRESQL_GATES.map((gate) => gate.id),
+    note:
+      'PG-G02 需要**一个在跑的隔离 PG 实例**（Docker + `lg-postgresql-trial` + 凭据文件）。' +
+      '**有意不并入 `offline` lane**（那条 lane 与 `pnpm m4.5:ci` 逐条等价，而核心离线 CI 不该依赖 Docker 在跑）。' +
+      '拿不到实例时本门**非零退出**并具名报 notRun —— 不"绿着跳过"。' +
+      '⚠️ 实例是长期存在的，门之间靠库名隔离（`lg_test_<门>`）⇒ 本 lane 内的门必须 serial。' +
+      '调用：`pnpm gates:run --lane postgresql`。',
+  },
   { id: 'm11.1', title: 'M11.1 离线控制', gateIds: M111_GATES.map(gate => gate.id),
     note: 'Only implemented offline controls. Formal semantic/behavior/short/long models require explicit test-model execution and frozen batch identities; never automatically repeated by fast.' },
   {

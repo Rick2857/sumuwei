@@ -612,7 +612,22 @@
     "qq:start": "cmd /d /c scripts\\qq\\start.cmd",
     "qq:status": "tsx scripts/qq/status.ts",
     "ci:offline": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/public-ci.ps1",
-    "db:init": "tsx scripts/public-db-init.ts"
+    "db:init": "tsx scripts/public-db-init.ts",
+    "postgresql:g09:verify": "tsx scripts/postgresql-g09-verify.ts",
+    "postgresql:live:smoke": "tsx scripts/postgresql-live-smoke.ts",
+    "postgresql:g02:verify": "tsx scripts/postgresql-g02-verify.ts",
+    "postgresql:g03:verify": "tsx scripts/postgresql-g03-verify.ts",
+    "postgresql:bench:verify": "tsx scripts/postgresql-bench-verify.ts",
+    "postgresql:g04:verify": "tsx scripts/postgresql-g04-verify.ts",
+    "postgresql:g08:verify": "tsx scripts/postgresql-g08-verify.ts",
+    "postgresql:g06:verify": "tsx scripts/postgresql-g06-verify.ts",
+    "postgresql:g01:verify": "tsx scripts/postgresql-g01-verify.ts",
+    "postgresql:p02:verify": "tsx scripts/postgresql-p02-verify.ts",
+    "postgresql:g10:verify": "tsx scripts/postgresql-g10-verify.ts",
+    "postgresql:goal-rebuild:apply": "tsx scripts/postgresql-goal-rebuild-apply.ts",
+    "postgresql:g05:verify": "tsx scripts/postgresql-g05-verify.ts",
+    "postgresql:cutover:apply": "tsx scripts/postgresql-cutover-apply.ts",
+    "postgresql:g07:verify": "tsx scripts/postgresql-g07-verify.ts"
   },
   "dependencies": {
     "@elizaos/core": "1.7.2",

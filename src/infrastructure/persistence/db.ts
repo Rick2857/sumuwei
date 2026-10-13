@@ -28,6 +28,12 @@ import { sql } from 'drizzle-orm'
 
 import { KernelError, type Timestamp } from '../../kernel/contracts/index.ts'
 import { MIGRATIONS, assertMigrationsWellFormed, latestSchemaVersion } from './migrations.ts'
+import {
+  databaseIdentityError,
+  verifyDatabaseIdentityReading,
+  type DatabaseIdentityExpectation,
+  type DatabaseIdentityReading,
+} from './database-backend.ts'
 
 /** plugin-sql 暴露的底层句柄（接口里没有，这是本项目唯一需要断言的地方） */
 export interface RawDb {
@@ -262,6 +268,68 @@ export async function inTransaction<T>(
 ): Promise<T> {
   if (typeof db.transaction !== 'function') return work(db)
   return db.transaction(work)
+}
+
+// ---------------------------------------------------------------------------
+// PostgreSQL 目标身份核对（WP1 / ADR-132 `D02`、`INV-DB-09` 设计）
+// ---------------------------------------------------------------------------
+
+/**
+ * 读回**实际**连接身份。全部来自 SQL，不来自配置。
+ *
+ * ⚠️ PGlite（嵌入式）与真 PostgreSQL 都能回答这几条；差别只在
+ *    `inet_server_addr()` / `inet_server_port()` 在嵌入式下可能为空。
+ *    因此这里**不**把"读不到"当成"错误"，而是**如实记 null**，
+ *    由调用方的期望值决定它算不算不符（失败关闭在期望那一侧，不在这里猜）。
+ */
+export async function readDatabaseIdentity(db: RawDb): Promise<DatabaseIdentityReading> {
+  const row = firstRow<{
+    database: unknown
+    user: unknown
+    addr: unknown
+    port: unknown
+    version: unknown
+  }>(
+    await exec(
+      db,
+      sql`select current_database() as database,
+                 current_user       as user,
+                 inet_server_addr()::text as addr,
+                 inet_server_port()::int  as port,
+                 version()          as version`,
+      '读回数据库身份'
+    )
+  )
+  const asText = (v: unknown): string | undefined =>
+    v === null || v === undefined ? undefined : String(v)
+  const port = row?.port
+  return {
+    database: asText(row?.database),
+    user: asText(row?.user),
+    serverAddr: asText(row?.addr),
+    serverPort: port === null || port === undefined ? undefined : Number(port),
+    serverVersion: asText(row?.version),
+  }
+}
+
+/**
+ * 连接后核对身份，不符则**抛** `KernelError(persistence_error / db_identity_mismatch)`。
+ *
+ * 调用位置是刻意的：在 `registerPlugin` 之后（那时才有句柄）、
+ * 在 `runPluginMigrations()` **之前** —— 也就是"插件迁移、建档和任何业务写入之前"。
+ *
+ * ⚠️ 期望值的形状见 `DatabaseIdentityExpectation`：**未给的维度不判**。
+ *    一条期望都不给时判不符（`ok=false`）⇒ 会抛。这是有意的：
+ *    身份核对必须有东西可核，否则它只是一句好听的话。
+ */
+export async function verifyDatabaseIdentity(
+  db: RawDb,
+  expectation: DatabaseIdentityExpectation
+): Promise<DatabaseIdentityReading> {
+  const reading = await readDatabaseIdentity(db)
+  const verdict = verifyDatabaseIdentityReading(reading, expectation)
+  if (!verdict.ok) throw databaseIdentityError(verdict)
+  return reading
 }
 
 export const nowTs = (): Timestamp => Date.now()

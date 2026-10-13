@@ -54,6 +54,22 @@ import {
   type ShutdownHandle,
 } from './infrastructure/persistence/runtime-shutdown.ts'
 /*
+ * WP3 / ADR-132 `D05`：**单认知执行者资格**。
+ *
+ * 计划 §3.2 逐字："同角色首期只有一个认知执行者。PG advisory lock 可用于拒绝第二核心；
+ * 读取/备份不争抢该写入资格。" 本模块是那条资格的唯一实现。
+ *
+ * ⚠️ 它是**纯追加**：`CHARACTER_DB_BACKEND` 未设（= PGlite）时
+ *    `dedicatedPoolOf()` 返回 undefined（嵌入式客户端没有 `connect`）
+ *    ⇒ 根本不尝试取得资格 ⇒ 既有行为逐字不变。
+ */
+import {
+  acquireSingleCoreQualification,
+  dedicatedPoolOf,
+  singleCoreDenialMessage,
+  type SingleCoreQualification,
+} from './infrastructure/persistence/single-core-qualification.ts'
+/*
  * INC-01 WP4（`AT4.1`–`AT4.5`）：**生产打开的唯一状态机**。
  *
  * `pnpm chat`（真实库）现在必须先拿租约、再做 pre-open verified snapshot，
@@ -985,6 +1001,23 @@ async function buildRuntime(userName: string): Promise<AgentRuntime> {
     ...(process.env.OPENAI_EMBEDDING_API_KEY
       ? { OPENAI_EMBEDDING_API_KEY: process.env.OPENAI_EMBEDDING_API_KEY }
       : {}),
+    /*
+     * ⚠️ **PostgreSQL 迁移（WP7/WP8，2026-10-13）**：上面那句注释对本条同样成立 ——
+     *    插件的**适配器创建**读的是 `runtime.getSetting('POSTGRES_URL')`，它**不回落** `process.env`。
+     *    ⇒ 不在这里播种，`.env` 里写了 PG 后端也**没用**：插件会回退成 **PGlite 适配器**、
+     *      去开 `PGLITE_DATA_DIR`（那就是**真实库**），而仓库自己的身份核对期望的是 PG 库
+     *      ⇒ **核心起不来**（实测：`期望 sumuwei，实际 template1`），
+     *      而且在失败之前**已经打开了真实库**（`PG-ISO-01` 的同一形态，第二次踩到）。
+     *    ⚠️ 只在环境里**真的有**这些键时才播种 ⇒ 纯 PGlite 档**逐字节不受影响**。
+     */
+    ...(process.env.POSTGRES_URL ? { POSTGRES_URL: process.env.POSTGRES_URL } : {}),
+    ...(process.env.CHARACTER_DB_BACKEND ? { CHARACTER_DB_BACKEND: process.env.CHARACTER_DB_BACKEND } : {}),
+    ...(process.env.PGLITE_DATA_DIR ? { PGLITE_DATA_DIR: process.env.PGLITE_DATA_DIR } : {}),
+    ...(process.env.PGLITE_SNAPSHOT_DIR ? { PGLITE_SNAPSHOT_DIR: process.env.PGLITE_SNAPSHOT_DIR } : {}),
+    ...(process.env.LG_PG_EXPECT_DATABASE ? { LG_PG_EXPECT_DATABASE: process.env.LG_PG_EXPECT_DATABASE } : {}),
+    ...(process.env.LG_PG_EXPECT_DATABASE_PREFIX
+      ? { LG_PG_EXPECT_DATABASE_PREFIX: process.env.LG_PG_EXPECT_DATABASE_PREFIX }
+      : {}),
   }
 
   const runtime = new AgentRuntime({
@@ -1048,6 +1081,54 @@ async function buildRuntime(userName: string): Promise<AgentRuntime> {
       throw new Error('initDatabase 没有返回读数：拒绝把"没有库"当成"库就绪"')
     }
     const { adapterName } = ready
+
+    /*
+     * =======================================================================
+     *  WP3 / ADR-132 `D05`：取得**单认知执行者资格**（在开库之后、状态引导之前）
+     * =======================================================================
+     * 为什么在这个位置：
+     *   · **之后** —— 资格锁挂在连接池上，池要等 `initDatabase` 才存在；
+     *   · **之前于状态引导** —— 任何业务写入（含状态引导那一条 `state_transition`）
+     *     都不该由一个没有写入资格的进程做。
+     *
+     * 三条纪律（计划 §3.2 逐字）：
+     *   ① 拿不到就**具名拒绝**并**拒绝启动** —— 不等待、不重试、不"试着跑跑看"；
+     *   ② 只读与备份连接**不参与**这个锁（本函数不碰它们）；
+     *   ③ 丢失资格由**可观测事件**判定 ⇒ 撤销后走既有有序停机链（停止接收新轮次）。
+     *
+     * ⚠️ 纯追加：PGlite 后端下 `dedicatedPoolOf()` 返回 undefined（嵌入式客户端没有
+     *    `connect`）⇒ 直接跳过，既有行为**逐字不变**。
+     */
+    const qualificationPool = dedicatedPoolOf(runtime)
+    if (qualificationPool !== undefined) {
+      const qualification = await acquireSingleCoreQualification({
+        pool: qualificationPool,
+        characterId: ids.characterId,
+        generation: 1,
+        onInvalidated: (reason) => {
+          logger.error(
+            `[qualification] **写入资格丢失**（${reason}）：停止接收新轮次、取消未提交工作、保留已提交事实。` +
+              `\n  绝不"再试一次拿锁"，也不另开一个核心碰运气（ADR-132 D05）。`
+          )
+          // 有序停机（与 sentinel 同一个 shutdown 链）。未建好时只记日志 ——
+          // 那种情况只可能出现在"取得资格之后、收尾句柄建好之前"这一小段窗口。
+          if (stopAfterQualificationLoss !== undefined) stopAfterQualificationLoss()
+          else logger.error('[qualification] 收尾句柄尚未就绪 ⇒ 只记日志（本窗口极短）')
+        },
+      })
+      singleCoreQualification = qualification
+      if (!qualification.acquired) {
+        throw new KernelError(
+          'persistence_error',
+          qualification.denial ?? 'lock_not_acquired',
+          singleCoreDenialMessage(qualification.denial ?? 'lock_not_acquired', ids.characterId)
+        )
+      }
+      logger.info(
+        `[qualification] 本进程是唯一认知执行者（lockId=${qualification.lockId}，` +
+          `backendPid=${qualification.backendPid}）`
+      )
+    }
 
     // 状态建表必须等迁移之后（插件的 init 早于插件迁移执行）
     //
@@ -7405,6 +7486,26 @@ async function main(): Promise<void> {
           )
         }
       }
+      /*
+       * WP3 / `D05`：释放**单认知执行者资格**。
+       *
+       * 放在 `afterRun`（收尾读数**已经定稿**之后）而不是收尾路径里 ——
+       * 与上面 sidecar / INC-01 那条同一个理由：这是"额外的动作"，
+       * **抛出也不改变退出码**。放不掉锁不该让整次收尾判成失败：
+       * 连接即将释放，session 级 advisory lock 会随会话消失（PG 语义）。
+       */
+      if (singleCoreQualification !== undefined) {
+        try {
+          await singleCoreQualification.release()
+          logger.info('[qualification] 收尾：已释放写入资格（session 锁随连接释放）')
+        } catch (error) {
+          logger.info(
+            `[qualification] 收尾：释放资格时出错（不影响退出码，锁随会话消失）：${
+              error instanceof Error ? error.message : String(error)
+            }`
+          )
+        }
+      }
       if (productionOpen === undefined) return
       const result = await productionOpen.finish({ closed: reading.closed, detail: reading.note, afterClose: true })
       logger.info(
@@ -7414,6 +7515,19 @@ async function main(): Promise<void> {
     },
   })
   const shutdown = (): Promise<unknown> => runtimeShutdown!.shutdown()
+  /*
+   * 现在收尾句柄存在了 ⇒ 把"资格丢失"的有序停机入口接上（`D05`）。
+   * 接的是**同一个** `shutdown()`，不另发明一条收尾路径。
+   */
+  stopAfterQualificationLoss = (): void => {
+    void shutdown().catch((error: unknown) => {
+      logger.error(
+        `[qualification] 资格丢失后的有序停机**失败**：${
+          error instanceof Error ? error.message : String(error)
+        }`
+      )
+    })
+  }
   let signalShutdownStarted = false
   const onShutdownSignal = (signal: NodeJS.Signals): void => {
     if (signalShutdownStarted) return
@@ -8364,6 +8478,34 @@ async function closeSemanticEncoderForExit(): Promise<void> {
  * （副本/沙箱/只读命令），因此没有 post-close 快照、也没有租约要放。
  */
 let productionOpen: ProductionOpenHandle | undefined
+
+/**
+ * 本进程持有的**单认知执行者资格**（WP3 / ADR-132 `D05`）。
+ *
+ * 计划 §3.2 逐字："同角色首期只有一个认知执行者。PG advisory lock 可用于拒绝第二核心；
+ * 读取/备份不争抢该写入资格。"
+ *
+ * ```text
+ *   undefined      ⇒ 本次没有取得资格（PGlite 后端 / 未开库 / 只读命令）—— **如实的**
+ *   acquired=true  ⇒ 本进程是唯一认知执行者
+ *   acquired=false ⇒ 已具名拒绝（调用方据此拒绝启动）
+ * ```
+ *
+ * 放在模块级的原因与 `runtimeShutdown` / `productionOpen` 相同：
+ * 取得发生在 `buildRuntime()` 里，而释放发生在**收尾路径**（`afterRun`）里。
+ */
+let singleCoreQualification: SingleCoreQualification | undefined
+
+/**
+ * 写入资格**丢失**时的有序停机入口。
+ *
+ * `D05` 逐字："撤销资格后：停止接收新轮次、取消未提交工作、保留已提交事实。"
+ * ⇒ 这里接的是**既有的有序停机链**（与 sentinel 同一个 `shutdown()`），
+ *   而不是另发明一套"停止接收"的开关 —— 那会变成第二条收尾路径。
+ *
+ * 它在 `runtimeShutdown` 建好之后才被赋值；在那之前丢失资格只记日志（见下面的回调）。
+ */
+let stopAfterQualificationLoss: (() => void) | undefined
 
 /**
  * 进程退出前 flush 遥测缓冲。

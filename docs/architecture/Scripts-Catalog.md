@@ -18,18 +18,19 @@
 
 | 类别 | 条目数 |
 |---|---:|
-| 已登记门 | 194 |
+| 已登记门 | 205 |
 | 汇总/链入口 | 17 |
 | 文档入口 | 24 |
-| 内部 | 368 |
-| **合计** | **603** |
+| 内部 | 371 |
+| **合计** | **617** |
 
-`scripts/` 下**没有任何 pnpm 入口引用**的脚本文件：**245 个**（见文末）。
+`scripts/` 下**没有任何 pnpm 入口引用**的脚本文件：**265 个**（见文末）。
 
 ## 每条 lane 的入口命令
 
 | lane | 入口 | 说明 |
 |---|---|---|
+| `postgresql` | — | PostgreSQL 迁移（真 PG 实例上的门） |
 | `m11.1` | `pnpm m11.1:gates` | M11.1 离线控制 |
 | `desktop-control` | `pnpm desktop-control:verify` · `pnpm desktop-control:probe` | ADR-106 桌面查看与操作（离线夹具 + 实机只读探针） |
 | `productivity` | — | 第二批（productivity）与浏览器 sidecar 的门 |
@@ -363,6 +364,12 @@
 
 **内部（2）**：`phoenix:down` · `phoenix:up`
 
+### `postgresql`（14 条 · **有同名 lane**）
+
+**已登记门（11）**：`postgresql:bench:verify` · `postgresql:g01:verify` · `postgresql:g02:verify` · `postgresql:g03:verify` · `postgresql:g04:verify` · `postgresql:g05:verify` · `postgresql:g06:verify` · `postgresql:g07:verify` · `postgresql:g08:verify` · `postgresql:g09:verify` · `postgresql:g10:verify`
+
+**内部（3）**：`postgresql:cutover:apply` · `postgresql:goal-rebuild:apply` · `postgresql:live:smoke`
+
 ### `postlv2`（88 条 · **有同名 lane**）
 
 **入口**：
@@ -606,6 +613,26 @@
 - `scripts/m9.6-stats.ts`
 - `scripts/memory-coverage-evidence.ts`
 - `scripts/model-stream-length-readback.ts`
+- `scripts/postgresql-cutover-probe.ts`
+- `scripts/postgresql/backup.ts`
+- `scripts/postgresql/column-encoding.ts`
+- `scripts/postgresql/credentials.ts`
+- `scripts/postgresql/external-assets.ts`
+- `scripts/postgresql/goal-fold-idempotency-probe.ts`
+- `scripts/postgresql/goal-revision-probe.ts`
+- `scripts/postgresql/init-probe.ts`
+- `scripts/postgresql/inventory-probe.ts`
+- `scripts/postgresql/inventory.ts`
+- `scripts/postgresql/pg-exec.ts`
+- `scripts/postgresql/pg-target-reader.ts`
+- `scripts/postgresql/pglite-dump.ts`
+- `scripts/postgresql/pglite-reader.ts`
+- `scripts/postgresql/production-fingerprint.ts`
+- `scripts/postgresql/production-touch-assessment.ts`
+- `scripts/postgresql/projection-probe.ts`
+- `scripts/postgresql/qualification-probe.ts`
+- `scripts/postgresql/row-digest.ts`
+- `scripts/postgresql/second-target-probe.ts`
 - `scripts/postlv2_appearance_client.js`
 - `scripts/postlv2_cosyvoice.py`
 - `scripts/postlv2_expression_client.js`

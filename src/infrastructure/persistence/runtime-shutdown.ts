@@ -184,6 +184,21 @@ export function createShutdown(deps: ShutdownDeps): ShutdownHandle {
 interface ClosableDbClient {
   close?: () => Promise<void>
   closed?: boolean
+  /**
+   * `pg.Pool`（node-postgres 的 `pg-pool`）：**只在所有 client 都释放之后**才置 true。
+   *
+   * 源码依据（`pg-pool@3.14.0` 的 `_pulseQueue`）：`this.ending` 在 `end()` 被调用时立刻置 true；
+   * 而 `this.ended` 只在 `this._clients.length === 0` 那一支里才置 true。
+   * ⇒ `ended` 才是"池真的空了"，`ending` 只是"正在关"。
+   */
+  ended?: boolean
+  /**
+   * `pg.Pool`：`end()` 被调用后**立刻**置 true = **关闭进行中**。
+   *
+   * ⚠️ 刻意把它读出来**只是**为了能显式地**不**用它当"已关闭"的判据 ——
+   *    那正是计划 §3.2 警告的"仅凭管理器预先设置的 closed 标记宣布关闭成功"。
+   */
+  ending?: boolean
 }
 
 interface RawAdapter {
@@ -256,16 +271,46 @@ export async function closeDatabaseConnection(runtime: unknown): Promise<void> {
 /**
  * 问"数据库关干净了吗"。
  *
- * ⚠️ 失败关闭：**问不到 `closed` 就报 false**（而不是"close 没抛就算关好"）。
+ * ⚠️ 失败关闭：**问不到 `closed`/`ended` 就报 false**（而不是"close 没抛就算关好"）。
  * 这一条是刻意选的：本次事故的教训正是"看起来完成了，其实没有"。
+ *
+ * ============================================================================
+ *  `F-WP2-01`（2026-10-13 真 PG 实测修）：PostgreSQL 分支
+ * ============================================================================
+ * 旧实现只认 PGlite 的形状（`connection.closed` / `adapter.closed`）。而 PostgreSQL 下：
+ *
+ * ```text
+ *   connection = adapter.manager.getConnection() = pg.Pool
+ *   pg.Pool **没有** `.closed`（`pg-pool` 全文 `this.closed` 命中 0）
+ *   PostgresConnectionManager 暴露的是 isClosed()（方法）与 _closed（私有）
+ *   ⇒ 两个分支都取不到 ⇒ 落到 return false
+ * ```
+ *
+ * 实测后果（`artifacts/post-lv2/postgresql-migration/pg-migration-wp2-20261013T130636/
+ * real-postgres-init.json`）：池**真的**关了（`pg_stat_activity` 里 `lg_migrate` 会话数 = 0），
+ * 而本函数返回 `false` ⇒ **假阴性**。方向是安全的（失败关闭），但"关闭是问出来的"
+ * 这句在 PG 上答不出来。
+ *
+ * **修法用的是 `pool.ended`，不是 `pool.ending`、也不是管理器的 `_closed`**：
+ *   · `ended`   —— 只在所有 client 释放之后才 true ⇒ 这才是"关干净了"
+ *   · `ending`  —— `end()` 一调用就 true ⇒ 拿它当"已关闭"会得到**假阳性**
+ *   · `_closed` —— `PostgresConnectionManager.close()` 里**先置标记再 await pool.end()**
+ *                  ⇒ 同样会在"关还没完成"时报已关闭（ADR-132 `D06` 明确不许这么用）
  */
 export function isDatabaseClosed(runtime: unknown): boolean {
   const adapter = adapterOf(runtime)
   if (adapter === undefined) return true // 没有连接 ⇒ 没有"没关的连接"
 
   const connection = connectionOf(runtime)
+  // ① PGlite：客户端自己的 closed（既有判据，逐字保留）
   if (connection !== undefined && typeof connection.closed === 'boolean') return connection.closed
+  // ② PostgreSQL：pg.Pool 的 ended（只在池空之后为 true）。
+  //    ⚠️ 顺序在 ① 之后是刻意的：PGlite 客户端**没有** ended，pg.Pool **没有** closed，
+  //       两个分支互不干扰。
+  if (connection !== undefined && typeof connection.ended === 'boolean') return connection.ended
+  // ③ 兜底：adapter 自己的 closed（既有判据，逐字保留）
   if (typeof adapter.closed === 'boolean') return adapter.closed
+  // ④ 问不到任何"已关闭"的凭证 ⇒ 失败关闭
   return false
 }
 

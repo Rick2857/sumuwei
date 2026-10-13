@@ -440,6 +440,26 @@
 六、出问题了怎么办
 --------------------------------------------------------
 
+★ 先看这一条：她的数据库换成了 PostgreSQL（2026-10-13 起）
+   → 以前她的数据放在一个文件夹里（data\pglite，程序自己带着数据库）。
+     现在换成了一台**独立的 PostgreSQL**，跑在 Docker 里。
+   → **所以：Docker Desktop 必须开着，容器 lg-postgresql-trial 必须在跑。**
+     检查一下（会看到 healthy）：
+         docker ps
+     → 看不到它 / 不是 healthy：先把 Docker Desktop 打开，等它起来再启动她。
+       容器不在跑的时候她会报数据库连不上——那不是数据坏了。
+   → 她的数据现在在这个库里：**sumuwei**
+   → 想留个底（备份）：
+         docker exec lg-postgresql-trial pg_dump -h 127.0.0.1 -U lg_migrate -d sumuwei --no-comments > 备份.sql
+   → 想换回以前那套（**回滚**）：把 .env 里下面这三行删掉即可，数据一直还在
+     data\pglite 里（这次切换**没有改动**那个文件夹）：
+         CHARACTER_DB_BACKEND=postgres
+         POSTGRES_URL=postgresql://...
+         LG_PG_EXPECT_DATABASE=sumuwei
+   → 以前那套"已验证快照 + 恢复"（本页末尾「数据库坏了怎么办」）**仍然有效**，
+     它管的是 data\pglite 那一份——也就是回滚路线。
+   → 无论哪种情况：**不要删库重建**（原因见本页末尾那一节）。
+
 报错「缺少 OPENAI_API_KEY」
    → .env 里的密钥是空的或写错了
      用记事本打开 .env 填进去

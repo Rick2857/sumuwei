@@ -24,8 +24,21 @@ import {
   applyKernelMigrations,
   getRawDb,
   pendingMigrations,
+  verifyDatabaseIdentity,
 } from '../infrastructure/persistence/db.ts'
+import {
+  databaseAccessDecision,
+  databaseBackendEnvironmentFrom,
+  databaseIdentityExpectationFrom,
+  databaseStartupDenialMessage,
+  postgresTargetGuard,
+  redactPostgresUrl,
+  resolveDatabaseBackend,
+  type DatabaseAccessDecision,
+  type DatabaseBackendResolution,
+} from '../infrastructure/persistence/database-backend.ts'
 import { hasPreopenToken } from '../infrastructure/persistence/production-open-guard.ts'
+import { closeDatabaseConnection } from '../infrastructure/persistence/runtime-shutdown.ts'
 
 /**
  * 允许主程序（真实对话/查看）使用生产库。
@@ -216,17 +229,61 @@ export function assertDatabaseAccessAllowed(
     envDirectory = dirname(envDirectory)
   }
   loadEnvironment({ path: join(envDirectory, '.env'), quiet: true })
+
+  const resolution = resolveDatabaseBackend(databaseBackendEnvironmentFrom())
   const dir = process.env.PGLITE_DATA_DIR
-  const decision = productionOpenDecision({
+  const decision = databaseAccessDecisionFor({
     dataDir: dir,
     allowFlag: process.env.PROJECT_LG_ALLOW_PRODUCTION_DB === '1',
     isolated: dir !== undefined && !isProductionDir(dir)
       && process.env.PROJECT_LG_SANDBOX !== undefined
       && resolve(process.env.PROJECT_LG_SANDBOX) === resolve(dir),
     tokenPresent: dir !== undefined && tokenLookup(dir),
+    resolution,
   })
   if (decision.allowed) return
+  if (decision.backendDenial !== undefined) {
+    throw new KernelError(
+      'persistence_error',
+      decision.backendDenial,
+      databaseStartupDenialMessage(decision.backendDenial, {
+        resolution,
+        redactedTarget:
+          resolution.postgresUrl === undefined || resolution.postgresUrl === ''
+            ? undefined
+            : redactPostgresUrl(resolution.postgresUrl),
+      })
+    )
+  }
   throw new Error(productionOpenDenialMessage(decision.denial ?? 'missing_production_allowance', dir ?? ''))
+}
+
+/**
+ * "这次开库该不该被拦"的**纯函数**（WP1 的加入点）。
+ *
+ * 它把**两类**判据并起来，且保留各自的具名拒绝 —— 合并逻辑本体在
+ * `databaseAccessDecision()`（`database-backend.ts`，纯逻辑模块，可单独测），
+ * 这里只负责**算出** PGlite 目录闸的结论（那需要 `productionOpenDecision`）。
+ *
+ * ⚠️ **不设** `CHARACTER_DB_BACKEND` 时 `resolution.problems` 为空、
+ *    `backend='pglite'` ⇒ 本函数**逐字**退化成原来的那条分支。
+ */
+export function databaseAccessDecisionFor(input: {
+  dataDir: string | undefined
+  allowFlag: boolean
+  isolated: boolean
+  tokenPresent: boolean
+  resolution: DatabaseBackendResolution
+}): DatabaseAccessDecision {
+  return databaseAccessDecision({
+    resolution: input.resolution,
+    pgliteDecision: productionOpenDecision({
+      dataDir: input.dataDir,
+      allowFlag: input.allowFlag,
+      isolated: input.isolated,
+      tokenPresent: input.tokenPresent,
+    }),
+  })
 }
 
 export interface DbReady {
@@ -243,6 +300,24 @@ export interface DbReady {
    * （主程序、诊断脚本、测试）拿到的库都是同一个 schema。
    */
   kernelSchemaVersion: number
+  /**
+   * 本次实际使用的后端与**读回**的身份（WP1）。
+   *
+   * `backend` 来自配置解析，`identity` 来自连接后的 SQL 读回 ——
+   * 两者分开记是刻意的：只有"配置说 postgres"而读回说 PGlite 的情形
+   * 才需要被看见，把它们合成一个字段就看不见了。
+   */
+  backend: DatabaseBackendResolution['backend']
+  identity: DbIdentityReading | undefined
+}
+
+/** 连接后读回的身份（`db.ts` 的形状，这里只做透传，避免两处定义漂移） */
+export type DbIdentityReading = {
+  database: string | undefined
+  user: string | undefined
+  serverAddr: string | undefined
+  serverPort: number | undefined
+  serverVersion: string | undefined
 }
 
 /** plugin-sql 暴露的非公开但稳定存在的底层句柄 */
@@ -252,12 +327,113 @@ interface RawDbAdapter {
   getDatabase?: () => { execute: (query: unknown) => Promise<unknown> } | undefined
 }
 
+/**
+ * 本进程**已经成功打开过**的 PostgreSQL 目标（URL 原文）。
+ *
+ * 只用于 `postgresTargetGuard` 判"是不是换了目标"（它内部按规范化三元组比）。
+ * 从未打开过 PostgreSQL ⇒ `undefined` ⇒ 守卫放行（首次打开）。
+ *
+ * ⚠️ 刻意只记 URL 而**不**记别的：它是"同进程第二个目标"这条判据的**唯一**状态，
+ *    没有它就只能"读配置猜"，而配置与"实际连上的是谁"是两回事。
+ */
+let openedPostgresTarget: string | undefined
+
+/**
+ * 开库 —— **对外的唯一入口**。
+ *
+ * ============================================================================
+ *  `F-WP2-02`（2026-10-13 真 PG 实测修）：初始化失败必须**回收连接池**
+ * ============================================================================
+ * `registerPlugin(sqlPlugin)` 这一步**就已经**建好了连接池
+ * （PostgreSQL 是 `pg.Pool`，min=2；PGlite 是嵌入式客户端）。此后到成功返回之间的
+ * **任何**异常都会把池留在那里没人关：
+ *
+ * ```text
+ * 实测（runId pg-migration-wp2-20261013T130636）：
+ *   把 LG_PG_EXPECT_DATABASE 故意写错 ⇒ 身份核对抛 db_identity_mismatch（正确）
+ *   ⇒ 探针进程 **14 分钟没有退出**（PID 仍在）
+ *   ⇒ pg_stat_activity 里 lg_migrate 有 **1 个 idle/Client 会话**（池握着连接等客户端）
+ *   ⇒ 强制结束后会话立刻归 0（证明连接是"进程活着时被池持有"的）
+ * ```
+ *
+ * 为什么严重：生产上"初始化失败"会变成**挂住**而不是**快速失败** ——
+ * supervisor 看到的是"活着但不干活"的进程，共存/自动重启链会把挂住当正常运行；
+ * 而计划 §1 要求"初始化失败…有可审计结果"。
+ *
+ * ⚠️ PGlite 分支**没有**这个症状（嵌入式客户端不持有撑住事件循环的独立连接）
+ *    ⇒ 这是**换库才暴露**的缺陷，与 ADR-132 `D06`/§3.2 的预判一致。
+ */
 export async function initDatabase(
+  runtime: AgentRuntime,
+  sqlPlugin: Plugin
+): Promise<DbReady> {
+  try {
+    return await initDatabaseInner(runtime, sqlPlugin)
+  } catch (error) {
+    await reclaimAfterInitFailure(runtime, error)
+    throw error
+  }
+}
+
+/**
+ * 初始化失败后回收本进程的连接池。
+ *
+ * 两条纪律：
+ *   ① **不覆盖**原始错误 —— 原错误才是可诊断的那一个，回收失败只是附注。
+ *   ② **不假装回收成功** —— 回收本身失败就如实记 error，不吞。
+ *
+ * `closeDatabaseConnection()` 在没有 adapter 时是**安全 no-op**（AT3.3），
+ * 所以"`assertDatabaseAccessAllowed()` 就抛了"这条路径调它也是安全的。
+ */
+async function reclaimAfterInitFailure(runtime: unknown, error: unknown): Promise<void> {
+  const firstLine = (value: unknown): string =>
+    (value instanceof Error ? value.message : String(value)).split('\n')[0] ?? ''
+  try {
+    await closeDatabaseConnection(runtime)
+    logger.warn(`[db] 初始化失败，已回收本进程连接池（数据库服务不受影响）：${firstLine(error)}`)
+  } catch (reclaimError) {
+    logger.error(
+      `[db] 初始化失败后回收连接池**也失败**（进程可能因此挂住）：${firstLine(reclaimError)}` +
+        `（原始失败：${firstLine(error)}）`
+    )
+  }
+}
+
+/** 正常路径。**不要**直接调用它 —— 走 `initDatabase()`（它负责失败回收）。 */
+async function initDatabaseInner(
   runtime: AgentRuntime,
   sqlPlugin: Plugin
 ): Promise<DbReady> {
   // 写保护闸：放在最前面，任何实验都要先过这一关
   assertDatabaseAccessAllowed()
+
+  const resolution = resolveDatabaseBackend(databaseBackendEnvironmentFrom())
+
+  // -------------------------------------------------------------------------
+  // "同进程第二个 PostgreSQL 目标"守卫（`PG-G01` 的 G01.7）
+  // -------------------------------------------------------------------------
+  // ⚠️ 必须在 `registerPlugin` **之前**判：那一步才是"创建/复用连接池"发生的地方。
+  //    放到它后面就等于"先把 B 的查询发到 A 的池上，再回头说目标不对"。
+  //
+  // 为什么必须拒绝：plugin-sql 的池全局键是 `default:pg`（**不含地址**）
+  // ⇒ 同进程换目标会复用旧池。计划 §3.2 的首期裁定是"隔离库用独立进程"。
+  // ⚠️ 纯追加：PGlite 后端下 resolution.postgresUrl 为 undefined ⇒ 整段跳过。
+  if (resolution.backend === 'postgres' && resolution.postgresUrl !== undefined) {
+    const guard = postgresTargetGuard({
+      alreadyOpened: openedPostgresTarget,
+      requested: resolution.postgresUrl,
+    })
+    if (!guard.allowed) {
+      throw new KernelError(
+        'persistence_error',
+        guard.denial ?? 'second_postgres_target_in_process',
+        databaseStartupDenialMessage(guard.denial ?? 'second_postgres_target_in_process', {
+          resolution,
+          redactedTarget: redactPostgresUrl(resolution.postgresUrl),
+        })
+      )
+    }
+  }
 
   await runtime.registerPlugin(sqlPlugin)
 
@@ -269,6 +445,47 @@ export async function initDatabase(
     )
   }
   const adapterName = adapter.constructor?.name ?? 'unknown-adapter'
+
+  // -------------------------------------------------------------------------
+  // 目标身份核对（WP1）—— **必须在插件迁移之前**
+  // -------------------------------------------------------------------------
+  // INC-01 的教训：保护要落在"打开"这一步之前，而不是事后检查。
+  // 这里能拿到句柄（registerPlugin 之后），但**还没有**跑 runPluginMigrations()，
+  // 因此这是"插件迁移、建档和任何业务写入之前"的最后一个位置。
+  //
+  // ⚠️ 与既有保护的分工：
+  //   · PGlite：目录闸 + 租约 + pre-open token（`productionOpenDecision`，逐字不变）
+  //   · PostgreSQL：**身份**（database / user / 部署身份），因为 PG 没有"目录"可租约
+  // 期望值未配置时 `databaseIdentityExpectationFrom()` 返回空对象 ⇒
+  // `verifyDatabaseIdentityReading()` 判不符 ⇒ 抛。这是**有意**的：
+  // 换到 PG 却不说什么身份算对，等于没有核对。
+  let identity: DbIdentityReading | undefined
+  const expectEnv = databaseIdentityExpectationFrom()
+  const hasExpectation = Object.keys(expectEnv).length > 0
+  if (resolution.backend === 'postgres' && !hasExpectation) {
+    throw new KernelError(
+      'persistence_error',
+      'db_identity_expectation_missing',
+      '拒绝：后端是 postgres，但没有给出期望的数据库身份（身份核对没有东西可核）。\n' +
+        '\n' +
+        '请在环境里给出至少一项（`.env`）：\n' +
+        '  LG_PG_EXPECT_DATABASE=<database 名>\n' +
+        '  LG_PG_EXPECT_USER=<运行账号，可用逗号给多个>\n' +
+        '  LG_PG_EXPECT_DATABASE_PREFIX=<测试库前缀，如 lg_test_>\n' +
+        '  LG_PG_EXPECT_USER_PREFIX=<账号前缀>\n' +
+        '\n' +
+        '（本次没有改动任何数据。）'
+    )
+  }
+
+  const kernelDbEarly = getRawDb(runtime)
+  if (hasExpectation) {
+    identity = await verifyDatabaseIdentity(kernelDbEarly, expectEnv)
+    logger.info(
+      `[db] 后端 ${resolution.backend}，身份核对通过：` +
+        `database=${identity.database ?? '(未知)'} user=${identity.user ?? '(未知)'}`
+    )
+  }
 
   // 关键：先建表，再让 initialize() 去查表
   await runtime.runPluginMigrations()
@@ -295,7 +512,7 @@ export async function initDatabase(
   //
   // ⚠️ 但"跑不跑"由调用方显式决定：见 `allowKernelMigration()` 的说明。
   //    临时/沙箱库不设防（它是一次性的）；**真实库**必须显式放行。
-  const kernelDb = getRawDb(runtime)
+  const kernelDb = kernelDbEarly
   const pending = await pendingMigrations(kernelDb)
 
   if (
@@ -316,7 +533,17 @@ export async function initDatabase(
     )
   }
 
-  return { adapterName, tables, kernelSchemaVersion: migration.toVersion }
+  // -------------------------------------------------------------------------
+  // 记下"本进程已打开过这个 PostgreSQL 目标"
+  // -------------------------------------------------------------------------
+  // ⚠️ 放在**成功返回之前**（而不是开库成功那一刻）：只有整条初始化走完，
+  //    才算"这个目标被本进程用过了"。中途失败的目标不该占用这一格 ——
+  //    否则"失败后换一个目标重试"会被自己的守卫挡住。
+  if (resolution.backend === 'postgres' && resolution.postgresUrl !== undefined) {
+    openedPostgresTarget = resolution.postgresUrl
+  }
+
+  return { adapterName, tables, kernelSchemaVersion: migration.toVersion, backend: resolution.backend, identity }
 }
 
 async function listTables(adapter: RawDbAdapter): Promise<string[]> {

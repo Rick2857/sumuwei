@@ -42,9 +42,19 @@
  *  纯函数脚本（如 verify-decay.ts）不碰数据库，无需调用。
  */
 
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
+
+import { KernelError } from '../kernel/contracts/index.ts'
+import {
+  databaseBackendEnvironmentFrom,
+  databaseStartupDenialMessage,
+  parseDatabaseTarget,
+  postgresIsolationDecision,
+  redactPostgresUrl,
+  resolveDatabaseBackend,
+} from '../infrastructure/persistence/database-backend.ts'
 
 /** 真实对话库位置（相对项目根目录） */
 export const PRODUCTION_DB_DIR = resolve('data/pglite')
@@ -62,9 +72,26 @@ export function isProductionDir(dir: string): boolean {
 }
 
 export interface SandboxInfo {
-  /** 本次运行独占的数据目录 */
+  /**
+   * 本次运行独占的目录。
+   *
+   * ⚠️ 两种后端下它的**含义不同**（类型保持 `string` 是刻意的：它是纯追加改动，
+   * 30+ 个既有调用方一行都不用改）：
+   *   · `backend === 'pglite'`   ⇒ 这就是本次实验的**数据库目录**
+   *   · `backend === 'postgres'` ⇒ 这只是本次实验的**诊断产物落盘目录**
+   *      （PostgreSQL 的隔离依据是"连的是哪个库"，见 `postgresTarget`）
+   */
   dir: string
   label: string
+  /**
+   * 本次运行实际使用的后端（WP1）。
+   *
+   * ⚠️ 判"隔离开没开"时**必须**先看这个字段：
+   * 只看 `dir` 是不是真实库目录，在 PG 后端下会**照样通过**（守的是空气）。
+   */
+  backend: 'pglite' | 'postgres'
+  /** 本次运行使用的测试库目标（PostgreSQL 分支；**已脱敏**） */
+  postgresTarget?: string
 }
 
 let current: SandboxInfo | undefined
@@ -73,14 +100,30 @@ let current: SandboxInfo | undefined
 let isolationCounter = 0
 
 /**
- * 建立一次性数据库副本。
+ * 建立一次性数据库副本（PGlite）或指向测试库（PostgreSQL）。
+ *
+ * ============================================================================
+ *  ⚠️ WP1：PostgreSQL 后端下**默认失败关闭**
+ * ============================================================================
+ * 本函数只能隔离 **PGlite 的数据目录**。PostgreSQL 是独立服务，"换个目录"
+ * 这件事不存在 —— 换的只能是**连哪个库**。
+ *
+ * 于是有两种做法，本仓库选后者：
+ *
+ *   ✗ 「后端是 postgres 也照样往下跑」⇒ 继承到生产 `POSTGRES_URL` 的实验脚本
+ *      会连上生产库，而它自己的隔离断言（读 `PGLITE_DATA_DIR`）**照样通过** ——
+ *      这正是 INC-01 那一类"看起来隔离了"的形状。
+ *   ✓ 「没给测试目标就拒绝」⇒ 要跑 PG 实验，必须在调用处**显式**给出测试库目标。
  *
  * @param label   脚本标识，出现在临时目录名里，便于排查
  * @param options.runId 固定运行标识（同一 id 会复用目录，用于需要跨进程续跑的实验）
+ * @param options.postgres 显式给出的测试库目标（`{ url }`）。给错目标会被拒：
+ *                 ① 解析不了 ⇒ 拒；② 等于生产目标 ⇒ 拒；③ database 名不带测试前缀 ⇒ 拒。
+ *                 测试前缀缺省 `lg_test_`，可用 `LG_TEST_DATABASE_PREFIX` 覆盖。
  */
 export function isolateDatabase(
   label: string,
-  options: { runId?: string; keep?: boolean } = {}
+  options: { runId?: string; keep?: boolean; postgres?: { url: string } } = {}
 ): SandboxInfo {
   isolationCounter += 1
   // ⚠️ 目录名必须**每次调用都不同**：
@@ -91,6 +134,57 @@ export function isolateDatabase(
   const runId = options.runId ?? `${Date.now()}-${isolationCounter}`
   const dir = join(tmpdir(), `project-lg-exp-${label}-${runId}`)
 
+  // -------------------------------------------------------------------------
+  // ① PostgreSQL 分支（WP1）
+  // -------------------------------------------------------------------------
+  const resolution = resolveDatabaseBackend(databaseBackendEnvironmentFrom())
+  if (resolution.backend === 'postgres') {
+    const decision = postgresIsolationDecision({
+      postgresUrl: options.postgres?.url,
+      productionTarget: process.env.LG_PRODUCTION_POSTGRES_URL,
+      testDatabasePrefix: process.env.LG_TEST_DATABASE_PREFIX,
+    })
+    if (!decision.allowed) {
+      const url = options.postgres?.url
+      throw new KernelError(
+        'persistence_error',
+        decision.denial ?? 'postgres_isolation_not_provided',
+        databaseStartupDenialMessage(decision.denial ?? 'postgres_isolation_not_provided', {
+          resolution,
+          ...(url !== undefined && url.trim() !== ''
+            ? { redactedTarget: redactPostgresUrl(url) }
+            : {}),
+        })
+      )
+    }
+
+    const url = options.postgres!.url
+    process.env.POSTGRES_URL = url
+    process.env.PROJECT_LG_SANDBOX = dir // 审计标记：仍设，但**不**再是"隔离已成立"的依据
+
+    // 仍然建一个独占目录：只用于落盘诊断产物（`sandboxPath`）。
+    // ⚠️ 它**不是**数据库目录 —— PostgreSQL 的数据在服务端，应用这边没有目录可隔离。
+    mkdirSync(dir, { recursive: true })
+
+    current = {
+      dir,
+      label,
+      backend: 'postgres',
+      postgresTarget: redactPostgresUrl(url),
+    }
+
+    console.log(
+      `[sandbox] 本次实验已隔离（PostgreSQL）\n` +
+        `[sandbox]   实验库 : ${current.postgresTarget}\n` +
+        `[sandbox]   生产库 : data/pglite（PGlite，本次不会被写入）\n` +
+        `[sandbox]   ⚠️ 隔离依据是"目标是测试库"，不是目录`
+    )
+    return current
+  }
+
+  // -------------------------------------------------------------------------
+  // ② PGlite 分支：既有行为逐字保留
+  // -------------------------------------------------------------------------
   // 硬约束：绝不允许指向真实库
   if (isProductionDir(dir)) {
     throw new Error(`拒绝运行：实验目录 ${dir} 与真实库 ${PRODUCTION_DB_DIR} 重叠`)
@@ -99,7 +193,7 @@ export function isolateDatabase(
   process.env.PGLITE_DATA_DIR = dir
   process.env.PROJECT_LG_SANDBOX = dir
 
-  current = { dir, label }
+  current = { dir, label, backend: 'pglite' }
 
   console.log(
     `[sandbox] 本次实验已隔离\n` +
@@ -135,8 +229,36 @@ export function cleanupSandbox(dir: string): void {
 /**
  * 运行期守卫。会写库的实验在自己的写操作前可以再调一次，
  * 防止隔离被绕过（例如环境变量被外部覆盖）。
+ *
+ * ⚠️ WP1：**两条分支的判据不同**（这是刻意的）。
+ *   · PGlite：读 `PGLITE_DATA_DIR` 是不是真实库目录
+ *   · PostgreSQL：读 `POSTGRES_URL` 的目标三元组是不是生产目标 / 带不带测试前缀
+ *
+ * 旧实现只看 `PGLITE_DATA_DIR` —— 在 PG 后端下那个变量仍然存在（`.env` 里就有），
+ * 于是它会**照样通过**。这就是"守的是空气"的形状。
  */
 export function assertIsolated(): void {
+  const resolution = resolveDatabaseBackend(databaseBackendEnvironmentFrom())
+
+  if (resolution.backend === 'postgres') {
+    const decision = postgresIsolationDecision({
+      postgresUrl: resolution.postgresUrl,
+      productionTarget: process.env.LG_PRODUCTION_POSTGRES_URL,
+      testDatabasePrefix: process.env.LG_TEST_DATABASE_PREFIX,
+    })
+    if (decision.allowed) return
+    throw new KernelError(
+      'persistence_error',
+      decision.denial ?? 'postgres_isolation_not_provided',
+      databaseStartupDenialMessage(decision.denial ?? 'postgres_isolation_not_provided', {
+        resolution,
+        ...(resolution.postgresUrl !== undefined && resolution.postgresUrl !== ''
+          ? { redactedTarget: redactPostgresUrl(resolution.postgresUrl) }
+          : {}),
+      })
+    )
+  }
+
   const dir = process.env.PGLITE_DATA_DIR
   if (!dir) {
     throw new Error(
@@ -159,6 +281,37 @@ export function sandboxInfo(): SandboxInfo | undefined {
 // ---------------------------------------------------------------------------
 // 进程级数据库单例
 // ---------------------------------------------------------------------------
+
+/**
+ * 关闭一批 PostgreSQL 连接池管理的**纯函数**（WP1）。
+ *
+ * 抽出来的理由与 `src/db/index.ts` 的其他纯函数相同：**这是唯一能把它测全的办法**。
+ * 「旧实现只 clear 不 close」这个缺陷在真环境里不可见（PG 分支从未走过），
+ * 但它是可判定的 —— 只要让"关没关"变成一个可观察的返回值。
+ *
+ * @returns `closed` 成功关闭数 · `failed` 失败数 · `skipped` 没有 close 方法的项数
+ */
+export async function closePostgresPoolManagers(
+  managers: Map<string, unknown>
+): Promise<{ closed: number; failed: number; skipped: number }> {
+  let closed = 0
+  let failed = 0
+  let skipped = 0
+  for (const manager of managers.values()) {
+    const candidate = manager as { close?: () => Promise<void> | void } | null | undefined
+    if (typeof candidate?.close !== 'function') {
+      skipped += 1
+      continue
+    }
+    try {
+      await candidate.close()
+      closed += 1
+    } catch {
+      failed += 1
+    }
+  }
+  return { closed, failed, skipped }
+}
 
 /**
  * `@elizaos/plugin-sql` 把 PGlite 客户端缓存在 **`globalThis` 上的进程级单例**里：
@@ -204,21 +357,64 @@ export function pluginSqlSingletons(): PluginSqlSingletonBag | undefined {
  *
  * 必须**先关**再删：PGlite 是嵌入式 Postgres，进程内同时打开两个数据目录
  * 会各自持有自己的 wal / postmaster 状态；不关就换目录会让旧的连接悬空。
+ * PostgreSQL 侧同理：`clear()` 只清 Map 的**引用**，池里的连接仍在 ——
+ * 那就是"换库了但旧连接还在写旧目标"的形状，也正是计划 §3.2 点名禁止的。
  *
- * @returns 是否真的清掉了一个现存单例
+ * ============================================================================
+ *  ⚠️ WP1 修掉的两个既有真缺陷（`D12`）
+ * ============================================================================
+ * 缺陷①：旧实现 `bag.postgresConnectionManagers?.clear()`
+ *         **只清引用、不调 `close()`** ⇒ PG 池悬挂。
+ *         现在先逐个 `await close()`，关不掉的照实统计（不假装关好了）。
+ * 缺陷②：旧实现开头 `if (!bag?.pgLiteClientManager) return false`
+ *         ⇒ 在"只有 PG 池、没有 PGlite 管理器"的进程里**整个函数早退**，
+ *           连缺陷①那一行都到不了（PG 分支从未走过，所以今天无症状）。
+ *         现在两个分支分开判断，互不短路。
+ *
+ * @returns 是否真的处理掉了一个现存单例（PGlite 管理器**或**任一 PG 池）
  */
 export async function resetPluginSqlConnection(): Promise<boolean> {
   const bag = pluginSqlSingletons()
-  if (!bag?.pgLiteClientManager) return false
+  if (bag === undefined) return false
 
-  try {
-    await bag.pgLiteClientManager.close?.()
-  } catch {
-    /* 关不掉也要继续清，否则下一个场景会拿到坏连接 */
+  let touched = false
+
+  // -------------------------------------------------------------------------
+  // ① PGlite 管理器
+  // -------------------------------------------------------------------------
+  const pglite = bag.pgLiteClientManager
+  if (pglite !== undefined) {
+    try {
+      await pglite.close?.()
+    } catch {
+      /* 关不掉也要继续清，否则下一个场景会拿到坏连接 */
+    }
+    delete bag.pgLiteClientManager
+    touched = true
   }
-  delete bag.pgLiteClientManager
-  bag.postgresConnectionManagers?.clear()
-  return true
+
+  // -------------------------------------------------------------------------
+  // ② PostgreSQL 连接池（**缺陷① 的修法：先 close，再 clear**）
+  // -------------------------------------------------------------------------
+  // ⚠️ 这里**不**用"关不掉就跳过"的写法：关失败只是记下来，
+  //    但引用仍然必须清掉，否则下一次 `createDatabaseAdapter()` 会拿到
+  //    同一个已 `_closed` 的 manager（上游会重建，但我们要清干净）。
+  const managers = bag.postgresConnectionManagers
+  if (managers !== undefined && managers.size > 0) {
+    const outcome = await closePostgresPoolManagers(managers)
+    managers.clear()
+    touched = true
+    if (outcome.failed > 0) {
+      // 如实告知：清掉了引用，但**没有**证明全部关干净。
+      // 调用方（门/诊断脚本）应当据此判红，而不是把它当成功。
+      console.warn(
+        `[sandbox] resetPluginSqlConnection：${outcome.failed} 个 PostgreSQL 池关闭失败；` +
+          '引用已清除，但**不能**据此认为连接已释放。'
+      )
+    }
+  }
+
+  return touched
 }
 
 /**
@@ -231,6 +427,41 @@ export async function resetPluginSqlConnection(): Promise<boolean> {
 export async function assertConnectedToSandbox(db: {
   execute: (query: unknown) => Promise<unknown>
 }): Promise<void> {
+  const resolution = resolveDatabaseBackend(databaseBackendEnvironmentFrom())
+
+  // -------------------------------------------------------------------------
+  // PostgreSQL：能直接问"我连的是哪个库"（PGlite 问不到目录，PG 问得到库名）
+  // -------------------------------------------------------------------------
+  if (resolution.backend === 'postgres') {
+    const expected = parseDatabaseTarget(resolution.postgresUrl ?? '')?.database
+    if (expected === undefined || expected === '') {
+      throw new KernelError(
+        'persistence_error',
+        'postgres_isolation_not_provided',
+        '断言失败：后端是 postgres，但连接串里读不出 database 名，无法证明连的是隔离库。'
+      )
+    }
+    const { sql } = await import('drizzle-orm')
+    const result = await db.execute(sql`select current_database() as database`)
+    const rows = ((result as { rows?: { database?: unknown }[] })?.rows ?? []) as {
+      database?: unknown
+    }[]
+    const actual = rows[0]?.database === undefined ? undefined : String(rows[0].database)
+    if (actual !== expected) {
+      throw new KernelError(
+        'persistence_error',
+        'db_identity_mismatch',
+        `断言失败：当前连接的实际 database 与隔离目标不符。\n` +
+          `  期望：${expected}\n  实际：${actual ?? '(读不到)'}\n` +
+          '（很可能复用了进程内上一个连接池；见 resetPluginSqlConnection()。）'
+      )
+    }
+    return
+  }
+
+  // -------------------------------------------------------------------------
+  // PGlite：既有行为逐字保留
+  // -------------------------------------------------------------------------
   const expected = process.env.PGLITE_DATA_DIR
   if (!expected) return
 
@@ -255,6 +486,7 @@ export async function assertConnectedToSandbox(db: {
 
 /** 生成一个本次运行独占的临时文件路径（用于落盘诊断产物） */
 export function sandboxPath(name: string): string {
-  const base = current?.dir ?? mkdtempSync(join(tmpdir(), 'project-lg-exp-unknown-'))
+  const base =
+    current?.dir ?? mkdtempSync(join(tmpdir(), 'project-lg-exp-unknown-'))
   return join(base, name)
 }

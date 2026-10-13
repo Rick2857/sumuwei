@@ -1,6 +1,6 @@
 # Public distribution boundaries
 
-This checkout starts a new Git history. It includes the selected working-tree source changes, not only the original HEAD. The owner selected the public title 苏沐薇 and the repository name `sumuwei`. Historical documents retain the development codename Project LG.
+The initial public release started a separate Git history. The 2026-10-13 update continues that public history from `7aaba6496d2ebb0f13183cfa5d2b718b5e7903c0`; it does not import the private development history. It includes selected working-tree PostgreSQL changes, not only the original development HEAD, while preserving public-only safeguards, licensing, and dependency pins. The owner selected the public title 苏沐薇 and the repository name `sumuwei`. Historical documents retain the development codename Project LG.
 
 The public copy excludes all historical `artifacts/`, production databases, environment files, generated presentations/PDFs, temporary folders, third-party runtime installations and private media. Only two 1px image fixtures are bundled as binary files.
 
@@ -13,3 +13,7 @@ Historical design documents and milestone reports are retained as technical back
 Apache-2.0 applies to the Su Muwei (sumuwei) source distribution. It does not authorize redistribution of external models or avatars. See the root NOTICE and THIRD_PARTY_NOTICES.md.
 
 The pinned Handlebars patch is a distribution-only dependency change. Remaining registry advisories and the actual verification results are recorded separately once checks complete.
+
+The PostgreSQL source, trial Compose/SQL tools and migration documents are included. The developer's credentials, database, dump/snapshot files and production activation records remain excluded. The private checkout's repository-registration document is not copied because it describes a different Git history. PostgreSQL integration and production-operation scripts require the operator's own explicit environment; public offline CI does not reuse the developer's running PostgreSQL or model accounts. Multi-user QQ groups, the management UI and the zero-failure refusal policy are planned work, not capabilities certified by this source update.
+
+This update publishes the source snapshot selected before validation. Later additions to the shared development checkout's in-progress multi-user design drafts are excluded; they are not silently mixed into the verified PostgreSQL update.

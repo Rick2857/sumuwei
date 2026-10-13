@@ -476,6 +476,105 @@ export const AFFECTED_RULES: readonly AffectedRule[] = [
   { what: 'pnpm 依赖覆盖配置', match: ['pnpm-workspace.yaml'], gates: [], global: true },
   { what: '数据库环境加载保护', match: ['src/db/index.ts', 'scripts/postlv2-database-env-verify.ts'],
     gates: ['postlv2:database-env:verify'] },
+  /*
+   * PostgreSQL 迁移（WP1）的两条规则。
+   *
+   * ⚠️ 为什么必须登记（同型先例：QQ 主动联系、浏览器全工具档）：
+   *    `src/dev/sandbox.ts` 被 **253 个**脚本使用，而 PG 后端下"隔离"的判据
+   *    整个换了地方（目录 → 目标三元组）。不登记 ⇒ 改了这条保护**一道门都不跑**
+   *    是**结构上可能**的，而这正是最难事后发现的一类。
+   */
+  { what: 'PostgreSQL 后端选择与身份核对',
+    match: ['src/infrastructure/persistence/database-backend.ts', 'src/infrastructure/persistence/db.ts',
+      'scripts/postgresql-g01-verify.ts'],
+    gates: ['postgresql:g01:verify', 'm3:migrate-gate', 'postlv2:database-env:verify'] },
+  { what: '实验隔离（PGlite 目录 / PostgreSQL 目标）',
+    match: ['src/dev/sandbox.ts'],
+    gates: ['postgresql:g01:verify', 'm4:isolation:verify', 'm3:migrate-gate', 'postlv2:database-env:verify'] },
+  /*
+   * PostgreSQL 服务/账号/建库工具（WP2）与 schema 权限门（WP2/WP3）。
+   *
+   * ⚠️ 为什么必须登记：`scripts/postgresql/**` 里装的是**权限边界本身**
+   *    （四账号分离、建库授权重放、compose 的 loopback/digest 固定）。
+   *    改了它们而不跑 PG-G02 ⇒ "权限边界被改松了却没有任何门红"是结构上可能的。
+   */
+  { what: 'PostgreSQL 服务/账号/建库工具与 schema 权限门',
+    match: ['scripts/postgresql/**', 'scripts/postgresql-g02-verify.ts'],
+    gates: ['postgresql:g01:verify', 'postgresql:g02:verify'] },
+  /*
+   * 迁移完整性的**量具**（WP4）：规范化比较器 + 只读 PGlite 读取器。
+   *
+   * ⚠️ 为什么必须登记：后面所有"源与目标一致"的结论都经它产出。
+   *    改了它而不跑 PG-G09 ⇒ "比较器悄悄变得不再能发现问题"是结构上可能的，
+   *    而那会让**所有**完整性结论一起失效（假绿的最大来源）。
+   */
+  { what: '迁移完整性量具（规范化比较器 + 只读 PGlite 读取器）',
+    match: ['scripts/postgresql/row-digest.ts', 'scripts/postgresql/pglite-reader.ts', 'scripts/postgresql-g09-verify.ts'],
+    gates: ['postgresql:g09:verify'] },
+  /*
+   * 在线备份 / 恢复 / 库外资产（WP4 的 `G07`）。
+   *
+   * ⚠️ 为什么必须登记：这三个模块一起决定"备份能不能恢复、损坏能不能被拒收"。
+   *    改了它们而不跑 PG-G07 ⇒ "篡改/截断的备份被当成好的"或"库外资产没被清单覆盖"
+   *    这类问题可以**结构上**发生，而它们全都是**到了要恢复那天才发现**的形状。
+   */
+  { what: '在线备份与拒收链 + 库外资产清单 + 对象完整清单（PG-G07）',
+    match: ['scripts/postgresql/backup.ts', 'scripts/postgresql/external-assets.ts', 'scripts/postgresql/inventory.ts',
+      'scripts/postgresql/pg-exec.ts', 'scripts/postgresql/g07-writer.sh', 'scripts/postgresql-g07-verify.ts'],
+    gates: ['postgresql:g07:verify'] },
+  /*
+   * 全库逐表比较（WP5 的 `G05`）。
+   *
+   * ⚠️ 为什么必须登记：这一组文件决定"整库数据一致"这个结论。其中
+   *    `column-encoding.ts` 是**两侧共用**的编码判据 —— 它错一次，
+   *    `G05` 会在"看起来在比数据、其实在比驱动的编码"上给出结论。
+   */
+  { what: '全库逐表比较：两侧编码判据 + 目标读取器 + 源多表会话（PG-G05）',
+    match: ['scripts/postgresql/column-encoding.ts', 'scripts/postgresql/pg-target-reader.ts',
+      'scripts/postgresql/pglite-reader.ts', 'scripts/postgresql/inventory-probe.ts', 'scripts/postgresql-g05-verify.ts'],
+    gates: ['postgresql:g05:verify', 'postgresql:g09:verify'] },
+  /*
+   * 投影与语义召回（WP5 的 `G06`）。
+   *
+   * ⚠️ 为什么必须登记：这道门是"**投影是缓存而不是事实本体**"这条铁律在 PG 上的可执行证明。
+   *    它依赖**六个 store 级重建函数**与 `character_projections` 的键形状 ——
+   *    改了其中任何一个而不跑 PG-G06 ⇒ "重建不再等于恢复出来的投影"是结构上可能的。
+   */
+  { what: '投影重建与语义召回（六个 store 级重建 + 向量/编码器读数，PG-G06）',
+    match: ['scripts/postgresql/projection-probe.ts', 'scripts/postgresql-g06-verify.ts'],
+    gates: ['postgresql:g06:verify'] },
+  /*
+   * 资源读数（WP5 的 `S8`）与"真实库有没有被动过"的评估量具。
+   *
+   * ⚠️ 为什么必须登记：这两件东西是**运维决策的输入**（迁移的动机是运维能力，
+   *    不是延迟数字）。改了测量/评估口径而不跑它们 ⇒ "读数悄悄变得不可比"是可能的。
+   */
+  { what: '资源读数（S8）与真实库触碰评估量具',
+    match: ['scripts/postgresql-bench-verify.ts', 'scripts/postgresql/production-touch-assessment.ts'],
+    gates: ['postgresql:bench:verify'] },
+  { what: '功能整链与回归（记忆增改撤回 · 通知 · 重启续跑，PG-G08）',
+    match: ['scripts/postgresql-g08-verify.ts'],
+    gates: ['postgresql:g08:verify'] },
+  /*
+   * 有限真模型 smoke（WP5 的最后一项交付）。
+   *
+   * ⚠️ 它是 **live 门**（要 `.env.test` + `pnpm with-test-model`）⇒ **不进** offline lane；
+   *    但按改动面**必须**被带出来：改了 smoke 或改了"来源选择"的实现而不跑它，
+   *    "真模型那条路还通不通"就没人量了。
+   */
+  { what: '有限真模型 smoke（隔离 PG + 真模型一次调用）',
+    match: ['scripts/postgresql-live-smoke.ts', 'scripts/live-smoke-source.ts'],
+    gates: ['postgresql:live:smoke'] },
+  /*
+   * 单认知执行者资格（WP3 / ADR-132 `D05`）。
+   *
+   * ⚠️ 为什么必须登记：这个模块是"同一角色只有一个认知执行者"的**唯一**实现。
+   *    改了它而不跑 PG-G03 ⇒ "第二个核心不再被拒"是结构上可能的，
+   *    而那是一条**并发写**级别的安全问题（不是显示问题）。
+   */
+  { what: '单认知执行者资格（D05：专用连接 + advisory lock + 可观测失效）',
+    match: ['src/infrastructure/persistence/single-core-qualification.ts', 'scripts/postgresql-g03-verify.ts'],
+    gates: ['postgresql:g03:verify'] },
   { what: 'OSS 借鉴：播放/中断控制与少量相关记忆注入',
     match: ['scripts/postlv2_speech_client.js', 'scripts/postlv2_voice_control.py', 'scripts/postlv2_vtuber_runtime.py',
       'scripts/postlv2-expression-frontend.py', 'scripts/postlv2-voice-control-verify.py', 'scripts/postlv2-oss-mechanisms-verify.ts',

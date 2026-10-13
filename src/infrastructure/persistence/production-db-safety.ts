@@ -55,6 +55,15 @@ export const OPERATION_KINDS = [
   'manual_snapshot',
   'restore',
   'affect_semantic_activate',
+  /*
+   * PostgreSQL 迁移线（2026-10-13）追加：**受控重建目标投影**。
+   *
+   * 为什么必须**追加一个新类别**而不是复用 `migrate`：这次操作**不是** schema 迁移，
+   * 它是对**投影行**的一次有界重写（删行重插，`goal:%` 19 行）。枚举存在的意义就是
+   * 让 owner record 里"这次打开干了什么"是**真话**；复用 `migrate` 会让审计面撒谎。
+   * ⚠️ 追加不回写（与 M8.5 那次同一条纪律）：既有值一个字节都不动。
+   */
+  'goal_projection_rebuild',
 ] as const
 export type OperationKind = (typeof OPERATION_KINDS)[number]
 
