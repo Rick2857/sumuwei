@@ -1,0 +1,16 @@
+{
+  "name": "lg-omni-realtime-prototype",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.13.0" },
+  "scripts": {
+    "start": "node server.mjs",
+    "live": "node server.mjs --live",
+    "lg": "node lg-server.mjs",
+    "smoke:lg": "node lg-smoke.mjs",
+    "smoke:cancel": "node lg-cancel-smoke.mjs",
+    "smoke:live": "node live-smoke.mjs",
+    "test": "node --test test.mjs test-lg.mjs"
+  },
+  "dependencies": { "ws": "8.22.0" }
+}

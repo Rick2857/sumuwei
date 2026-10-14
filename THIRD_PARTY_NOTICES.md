@@ -4,6 +4,8 @@ Su Muwei (sumuwei; formerly Project LG) source and documentation are distributed
 
 The JavaScript dependency versions and transitive package graph are recorded in `pnpm-lock.yaml`. The distribution uses packages including ElizaOS, PGlite, Drizzle ORM, Mozilla Readability, Tesseract.js, InkJS, Math.js, rss-parser, Croner, and Promptfoo. Their copyright and license files are supplied by their respective packages when installed.
 
+Optional `tools/avatar-3d` and `experiments/omni-realtime` dependencies have separate package-lock.json files: Three.js 0.180.0, three-vrm 3.5.5 and ws 8.22.0 retain their MIT licenses. Playwright is an optional test dependency under Apache-2.0. No dependency runtime files are bundled. The explicit example downloader fetches a pinned VRM Public License 1.0 model for local use; that model is not part of the source distribution. Aoba/other VRM assets require their own applicable terms, independently of these library licenses.
+
 Python integration manifests pin optional MCP/OCR/desktop packages. Consult each installed package's own license before redistribution. Project-local workflow instructions under `resources/workflow-skills/` are part of this source distribution; references to external projects do not include those projects' runtime installations.
 
 The following optional external assets and applications are **not bundled**:

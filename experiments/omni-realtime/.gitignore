@@ -1,0 +1,5 @@
+node_modules/
+.env.local
+.lg-core.local.env
+evidence.local.json
+live-runs/

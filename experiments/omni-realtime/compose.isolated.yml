@@ -1,0 +1,28 @@
+name: lg-omni-isolated
+services:
+  postgres:
+    image: pgvector/pgvector@sha256:ac08538c6f8b9904c33c8224c5e5706dbe760aca29db1d096972b4052c22a75d
+    container_name: lg-omni-isolated-pg
+    restart: 'no'
+    ports: ['127.0.0.1:55434:5432']
+    environment:
+      POSTGRES_USER: ${LG_PG_BOOTSTRAP_USER:?required}
+      POSTGRES_PASSWORD: ${LG_PG_BOOTSTRAP_PASSWORD:?required}
+      POSTGRES_DB: ${LG_PG_BOOTSTRAP_DB:?required}
+      POSTGRES_INITDB_ARGS: '--data-checksums'
+      LG_PG_MIGRATE_PASSWORD: ${LG_PG_MIGRATE_PASSWORD:?required}
+      LG_PG_RUNTIME_PASSWORD: ${LG_PG_RUNTIME_PASSWORD:?required}
+      LG_PG_READONLY_PASSWORD: ${LG_PG_READONLY_PASSWORD:?required}
+      LG_PG_TEST_PASSWORD: ${LG_PG_TEST_PASSWORD:?required}
+    volumes:
+      - lg-omni-isolated-data:/var/lib/postgresql/data
+      - ../../scripts/postgresql/init:/docker-entrypoint-initdb.d:ro
+      - ../../scripts/postgresql:/opt/lg:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 2s
+      timeout: 3s
+      retries: 20
+volumes:
+  lg-omni-isolated-data:
+    name: lg-omni-isolated-data

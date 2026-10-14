@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>苏沐薇 · 3D 预览</title><link rel="icon" href="data:,"><link rel="stylesheet" href="/style.css">
+  <script type="importmap">{"imports":{"three":"/vendor/three/build/three.module.js","three/addons/":"/vendor/three/examples/jsm/","@pixiv/three-vrm":"/vendor/vrm.js"}}</script>
+</head>
+<body>
+  <header><a class="brand" href="/">LG <span>/ 苏沐薇</span></a><span class="badge">独立预览 · 未连接聊天</span></header>
+  <main>
+    <section class="stage" aria-label="3D 角色预览">
+      <div class="stage-heading"><p class="eyebrow">A NEW DIMENSION</p><h1>换个角度，见面。</h1><p>拖动旋转视角，滚轮调整距离。</p></div>
+      <div id="viewport"></div><div class="stage-footer"><span id="model-label">准备示例模型…</span><span>3D / VRM</span></div>
+    </section>
+    <aside>
+      <p class="eyebrow">AVATAR STUDIO</p><h2>让她动起来</h2><p class="intro">先挑选形象，再试试声音和小动作。</p>
+      <section class="control-group"><h3>01 <span>形象</span></h3><label class="hint" for="model-select">本机模型</label><select id="model-select" class="file-button" disabled></select><label class="file-button" for="model-file">导入 VRM 模型 <span>↗</span></label><input id="model-file" type="file" accept=".vrm"><p class="hint">支持切换本机模型，也可导入自己的 VRM 文件。</p></section>
+      <section data-preview class="control-group"><h3>02 <span>表达</span></h3><div class="cue-grid" aria-label="表达方式"><button data-cue="natural" aria-pressed="true">自然</button><button data-cue="reassuring" aria-pressed="false">安慰 · 点头</button><button data-cue="playful" aria-pressed="false">俏皮 · 歪头</button><button data-cue="surprised" aria-pressed="false">惊讶</button><button data-cue="firm" aria-pressed="false">坚定</button><button data-cue="subdued" aria-pressed="false">低落</button></div></section>
+      <section data-preview class="control-group"><h3>03 <span>声音与口型</span></h3><label class="file-button secondary" for="audio-file">选择本地语音 <span>＋</span></label><input id="audio-file" type="file" accept="audio/*"><p class="hint" id="audio-label">未选择语音时，播放一段口型测试音。</p><button id="play" class="primary" disabled>播放并表演 <span>▷</span></button></section>
+      <section id="chat-group" class="control-group" hidden><h3>02 <span>聊天</span></h3><div id="chat-log" role="log" aria-live="polite"></div><form id="chat-form"><label class="hint" for="chat-input">对苏沐薇说</label><textarea id="chat-input" rows="3" maxlength="4000" required></textarea><button class="primary" type="submit">发送</button></form><button id="microphone" class="stop" aria-pressed="false">点击说话</button></section>
+      <button id="interrupt" class="stop" disabled>打断并复位</button>
+      <div class="status" role="status" aria-live="polite"><i id="status-dot"></i><span id="status-text">正在加载…</span></div>
+      <p class="footnote">此页面用于验证 3D 呈现，不会产生对话或写入记忆。</p>
+    </aside>
+  </main>
+  <script type="module" src="/main.js"></script>
+</body>
+</html>

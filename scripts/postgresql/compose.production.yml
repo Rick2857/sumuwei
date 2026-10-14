@@ -1,0 +1,30 @@
+name: lg-postgresql-production
+services:
+  postgres:
+    image: pgvector/pgvector@sha256:ac08538c6f8b9904c33c8224c5e5706dbe760aca29db1d096972b4052c22a75d
+    container_name: lg-postgresql-production
+    restart: "no"
+    ports:
+      - "127.0.0.1:55432:5432"
+    environment:
+      POSTGRES_USER: ${LG_PG_BOOTSTRAP_USER:-lg_bootstrap}
+      POSTGRES_PASSWORD: ${LG_PG_BOOTSTRAP_PASSWORD:?required}
+      POSTGRES_DB: ${LG_PG_BOOTSTRAP_DB:-lg_trial}
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+      LG_PG_MIGRATE_PASSWORD: ${LG_PG_MIGRATE_PASSWORD:?required}
+      LG_PG_RUNTIME_PASSWORD: ${LG_PG_RUNTIME_PASSWORD:?required}
+      LG_PG_READONLY_PASSWORD: ${LG_PG_READONLY_PASSWORD:?required}
+      LG_PG_TEST_PASSWORD: ${LG_PG_TEST_PASSWORD:?required}
+    volumes:
+      - production-data:/var/lib/postgresql/data
+      - ./init:/docker-entrypoint-initdb.d:ro
+      - .:/opt/lg:ro
+    command: [postgres, -c, fsync=on, -c, synchronous_commit=on, -c, log_connections=on, -c, log_disconnections=on]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U ${LG_PG_BOOTSTRAP_USER:-lg_bootstrap} -d ${LG_PG_BOOTSTRAP_DB:-lg_trial}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+volumes:
+  production-data:
+    name: lg-omni-production-data

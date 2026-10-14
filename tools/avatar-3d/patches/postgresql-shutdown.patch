@@ -1,0 +1,100 @@
+diff --git a/src/main.ts b/src/main.ts
+index e5278444..6033c62a 100644
+--- a/src/main.ts
++++ b/src/main.ts
+@@ -47,6 +47,7 @@ import { isProductionDir } from './dev/sandbox.ts'
+  */
+ import {
+   closeDatabaseConnection,
++  beforeDatabaseClose,
+   createRuntimeShutdown,
+   isDatabaseClosed,
+   shutdownExitCode,
+@@ -1106,6 +1107,7 @@ async function buildRuntime(userName: string): Promise<AgentRuntime> {
+         characterId: ids.characterId,
+         generation: 1,
+         onInvalidated: (reason) => {
++          if (reason === 'client_released') return // Normal shutdown, not a lost session.
+           logger.error(
+             `[qualification] **写入资格丢失**（${reason}）：停止接收新轮次、取消未提交工作、保留已提交事实。` +
+               `\n  绝不"再试一次拿锁"，也不另开一个核心碰运气（ADR-132 D05）。`
+@@ -1117,6 +1119,12 @@ async function buildRuntime(userName: string): Promise<AgentRuntime> {
+         },
+       })
+       singleCoreQualification = qualification
++      beforeDatabaseClose(runtime, async () => {
++        // ChatSession.close() also closes the adapter. All close paths must release this client.
++        stopAfterQualificationLoss = undefined
++        await qualification.release()
++        logger.info('[qualification] 收尾：服务停止后、关连接池前已释放资格连接')
++      })
+       if (!qualification.acquired) {
+         throw new KernelError(
+           'persistence_error',
+@@ -7486,26 +7494,6 @@ async function main(): Promise<void> {
+           )
+         }
+       }
+-      /*
+-       * WP3 / `D05`：释放**单认知执行者资格**。
+-       *
+-       * 放在 `afterRun`（收尾读数**已经定稿**之后）而不是收尾路径里 ——
+-       * 与上面 sidecar / INC-01 那条同一个理由：这是"额外的动作"，
+-       * **抛出也不改变退出码**。放不掉锁不该让整次收尾判成失败：
+-       * 连接即将释放，session 级 advisory lock 会随会话消失（PG 语义）。
+-       */
+-      if (singleCoreQualification !== undefined) {
+-        try {
+-          await singleCoreQualification.release()
+-          logger.info('[qualification] 收尾：已释放写入资格（session 锁随连接释放）')
+-        } catch (error) {
+-          logger.info(
+-            `[qualification] 收尾：释放资格时出错（不影响退出码，锁随会话消失）：${
+-              error instanceof Error ? error.message : String(error)
+-            }`
+-          )
+-        }
+-      }
+       if (productionOpen === undefined) return
+       const result = await productionOpen.finish({ closed: reading.closed, detail: reading.note, afterClose: true })
+       logger.info(
+
+diff --git a/src/infrastructure/persistence/runtime-shutdown.ts b/src/infrastructure/persistence/runtime-shutdown.ts
+index 1944103d..fe42f478 100644
+--- a/src/infrastructure/persistence/runtime-shutdown.ts
++++ b/src/infrastructure/persistence/runtime-shutdown.ts
+@@ -240,6 +240,13 @@ function connectionOf(runtime: unknown): ClosableDbClient | undefined {
+  * 关闭顺序：先走 **adapter 自己的 `close()`**（plugin-sql 的受支持路径，
+  * 它会顺带处理 manager 的状态），失败再退到连接对象自己的 `close()`。
+  */
++const closePreparations = new WeakMap<object, () => Promise<void>>()
++
++/** Return dedicated clients before any caller asks the adapter to end its pool. */
++export function beforeDatabaseClose(runtime: object, prepare: () => Promise<void>): void {
++  closePreparations.set(runtime, prepare)
++}
++
+ export async function closeDatabaseConnection(runtime: unknown): Promise<void> {
+   const adapter = adapterOf(runtime)
+   if (adapter === undefined) return
+@@ -257,13 +264,19 @@ export async function closeDatabaseConnection(runtime: unknown): Promise<void> {
+   if (closers.length === 0) return
+
+   let firstError: unknown
++  let preparationError: unknown
++  const prepare = closePreparations.get(runtime as object)
++  closePreparations.delete(runtime as object)
++  try { await prepare?.() } catch (error) { preparationError = error }
+   for (const close of closers) {
+     try {
+       await close()
+-      return
+     } catch (error) {
+       firstError ??= error
++      continue
+     }
++    if (preparationError !== undefined) throw preparationError
++    return
+   }
+   throw firstError
+ }

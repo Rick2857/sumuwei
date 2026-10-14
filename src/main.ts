@@ -48,6 +48,7 @@ import { isProductionDir } from './dev/sandbox.ts'
 import {
   closeDatabaseConnection,
   createRuntimeShutdown,
+  beforeDatabaseClose,
   isDatabaseClosed,
   shutdownExitCode,
   stopRuntimeServices,
@@ -422,6 +423,7 @@ import { createActionRequest } from './kernel/action/action-request.ts'
  */
 import { KernelError, makeConversationEventId } from './kernel/contracts/ids.ts'
 import { ChatStreamError } from './providers/chat-stream.ts'
+import { nativeVoiceReplyPortFor } from './infrastructure/model/native-voice-reply.ts'
 import { CheckedSpeechStream, type CheckedSpeechSegment } from './kernel/app/bridge/streaming-speech.ts'
 /* ADR-098：提前检索的**具名**归因豁免（唯一的调用点是 `prepareLookup`） */
 import { attestActionInitiatorFromNamedExemption } from './kernel/contracts/attribution.ts'
@@ -1106,6 +1108,7 @@ async function buildRuntime(userName: string): Promise<AgentRuntime> {
         characterId: ids.characterId,
         generation: 1,
         onInvalidated: (reason) => {
+          if (reason === 'client_released') return
           logger.error(
             `[qualification] **写入资格丢失**（${reason}）：停止接收新轮次、取消未提交工作、保留已提交事实。` +
               `\n  绝不"再试一次拿锁"，也不另开一个核心碰运气（ADR-132 D05）。`
@@ -1117,6 +1120,10 @@ async function buildRuntime(userName: string): Promise<AgentRuntime> {
         },
       })
       singleCoreQualification = qualification
+      beforeDatabaseClose(runtime, async () => {
+        stopAfterQualificationLoss = undefined
+        await qualification.release()
+      })
       if (!qualification.acquired) {
         throw new KernelError(
           'persistence_error',
@@ -1486,7 +1493,7 @@ class ChatSession {
     }
   ) {
     this.runtime = runtime
-    this.shutdown = options.shutdown ?? createRuntimeShutdown(runtime)
+    this.shutdown = options.shutdown ?? runtimeShutdown ?? createRuntimeShutdown(runtime)
     this.userName = userName
     this.dryRun = options.dryRun ?? false
     this.kernel = options.kernel
@@ -1754,7 +1761,7 @@ class ChatSession {
       identity: this.kernel.identitySnapshot,
       recorder,
       conversationSequence: () => this.conversationSequence,
-      modelProfile: MODEL_ID,
+      modelProfile: nativeVoiceReplyPortFor(this.entryKey)?.model ?? MODEL_ID,
       recentLimit: CONVERSATION_LENGTH,
       slowPathEnabled: this.flags.slowPathEnabled,
       telemetry: this.telemetry,
@@ -4531,7 +4538,16 @@ class ChatSession {
       ...(incoming?.externalEvidenceInContext !== undefined ? { externalEvidenceInContext: incoming.externalEvidenceInContext } : {}),
       ...(incoming?.turnContentInContext !== undefined ? { turnContentInContext: incoming.turnContentInContext } : {}),
     }
-    const speechStream = streaming !== undefined && incoming?.userEvent !== undefined && incoming.assistantSequence !== undefined
+    const nativeVoice = nativeVoiceReplyPortFor(this.entryKey)
+    if (nativeVoice !== undefined && (!useCompiler || incoming?.userEvent === undefined || incoming.assistantSequence === undefined)) {
+      throw new KernelError('validation_error', 'native_voice_requires_formal_turn', '原生语音必须经正式 LG 轮次')
+    }
+    const nativeIdentity = nativeVoice === undefined ? undefined : {
+      replyId: String(makeConversationEventId(incoming!.userEvent!.characterId, incoming!.userEvent!.conversationId, incoming!.assistantSequence!)),
+      traceId: String(incoming!.traceId),
+      ...(streaming?.signal === undefined ? {} : { signal: streaming.signal }),
+    }
+    const speechStream = nativeVoice === undefined && streaming !== undefined && incoming?.userEvent !== undefined && incoming.assistantSequence !== undefined
       && this.flags.expressiveSpeechEnabled
       ? new CheckedSpeechStream({
           replyId: String(makeConversationEventId(incoming.userEvent.characterId, incoming.userEvent.conversationId, incoming.assistantSequence)),
@@ -4544,7 +4560,9 @@ class ChatSession {
     try {
       streaming?.signal?.throwIfAborted()
       streaming?.onModelStart?.()
-      call = await callModelText(this.runtime, prompt, {
+      call = nativeVoice !== undefined
+        ? await nativeVoice.generate({ prompt, ...nativeIdentity! })
+        : await callModelText(this.runtime, prompt, {
         ...(modelImages?.length ? { images: modelImages } : {}),
         /*
          * ★ 2026-10-10：主回复的 `max_tokens` 从 flags 来（缺省 4096 = 与改动前逐字相同）。
@@ -4562,7 +4580,12 @@ class ChatSession {
       })
       if (speechStream !== undefined) streamed = speechStream.finish(call.text)
     } catch (error) {
-      if (speechStream === undefined) throw error
+      if (speechStream === undefined) {
+        if (nativeVoice !== undefined && incoming !== undefined && this.gateway !== undefined) {
+          await this.gateway.failTurn(incoming, new Error(streaming?.signal?.aborted ? 'native_voice_cancelled' : 'native_voice_failed'))
+        }
+        throw error
+      }
       if (speechStream.segments.length === 0) {
         /*
          * ======================================================================
@@ -4645,7 +4668,7 @@ class ChatSession {
     /* ⚠️ 阶段点：**模型调用之前**的那一段到此为止（状态推进） */
     const stateMs = Date.now() - phaseAt.state
     phaseAt.guards = Date.now()
-    const expressionDraft = streamed === undefined && useCompiler && this.flags.expressiveSpeechEnabled
+    const expressionDraft = nativeVoice === undefined && streamed === undefined && useCompiler && this.flags.expressiveSpeechEnabled
       ? decodeExpressiveSpeech(call.text)
       : undefined
     const modelSeconds = (call.durationMs / 1000).toFixed(1)
@@ -4755,7 +4778,27 @@ class ChatSession {
      *    改名会制造一次"看着安全、其实漏掉一处"的大面积改动。
      *    `replyText` 从这一行起**就是**判定绑定之后的正文。
      */
-    const replyText = finalReplyText
+    let replyText = finalReplyText
+    if (nativeVoice !== undefined) {
+      try {
+        streaming?.signal?.throwIfAborted()
+        const checkedText = withoutAppendices(finalReplyText, [guardChain.evidenceAppendix, guardChain.turnContent.appendix])
+        if (checkedText.trim() !== call.text.trim()) {
+          const correction = await nativeVoice.correct({ prompt, ...nativeIdentity!, checkedText })
+          const correctionGuard = runReplyGuardChain({ replyText: correction.text, ...guardFacts })
+          if (withoutAppendices(correctionGuard.replyText, [correctionGuard.evidenceAppendix, correctionGuard.turnContent.appendix]).trim() !== correction.text.trim()) {
+            throw new Error('native_voice_correction_rejected')
+          }
+          // Native audio may already be heard: retain the original utterance and the actual correction.
+          replyText = [call.text, `[更正] ${correction.text}`, guardChain.evidenceAppendix, guardChain.turnContent.appendix]
+            .filter(Boolean).join('\n\n')
+        }
+        streaming?.signal?.throwIfAborted()
+      } catch (error) {
+        if (incoming !== undefined && this.gateway !== undefined) await this.gateway.failTurn(incoming, new Error('native_voice_correction_failed'))
+        throw error
+      }
+    }
     if (needReply.replaced) {
       logger.warn(`[search-need] 判定结论=${needReply.state} ⇒ 回复里的"查证成功"口吻已顶替为如实句`)
     }
@@ -7481,26 +7524,6 @@ async function main(): Promise<void> {
         } catch (error) {
           logger.info(
             `[browser-sidecar] 收尾：关掉 sidecar 时出错（不影响退出码）：${
-              error instanceof Error ? error.message : String(error)
-            }`
-          )
-        }
-      }
-      /*
-       * WP3 / `D05`：释放**单认知执行者资格**。
-       *
-       * 放在 `afterRun`（收尾读数**已经定稿**之后）而不是收尾路径里 ——
-       * 与上面 sidecar / INC-01 那条同一个理由：这是"额外的动作"，
-       * **抛出也不改变退出码**。放不掉锁不该让整次收尾判成失败：
-       * 连接即将释放，session 级 advisory lock 会随会话消失（PG 语义）。
-       */
-      if (singleCoreQualification !== undefined) {
-        try {
-          await singleCoreQualification.release()
-          logger.info('[qualification] 收尾：已释放写入资格（session 锁随连接释放）')
-        } catch (error) {
-          logger.info(
-            `[qualification] 收尾：释放资格时出错（不影响退出码，锁随会话消失）：${
               error instanceof Error ? error.message : String(error)
             }`
           )

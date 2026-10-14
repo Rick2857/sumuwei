@@ -1,5 +1,7 @@
 # Public distribution boundaries
 
+The 2026-10-14 update continues public main `3d3d34273206b09b3cb23db24dc9676667c2e026`. It exports selected committed 3D/Omni source and related core hooks, not the shared checkout's in-progress multi-user work. The public launcher runs this checkout's own source/configuration; it does not include or require the private activated-release manifest. The public production volume example uses a separate `lg-omni-production-data` name and never includes the original recovery candidate or production data. Source publication is not public production activation.
+
 The initial public release started a separate Git history. The 2026-10-13 update continues that public history from `7aaba6496d2ebb0f13183cfa5d2b718b5e7903c0`; it does not import the private development history. It includes selected working-tree PostgreSQL changes, not only the original development HEAD, while preserving public-only safeguards, licensing, and dependency pins. The owner selected the public title 苏沐薇 and the repository name `sumuwei`. Historical documents retain the development codename Project LG.
 
 The public copy excludes all historical `artifacts/`, production databases, environment files, generated presentations/PDFs, temporary folders, third-party runtime installations and private media. Only two 1px image fixtures are bundled as binary files.

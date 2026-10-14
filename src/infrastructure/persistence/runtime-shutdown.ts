@@ -240,6 +240,19 @@ function connectionOf(runtime: unknown): ClosableDbClient | undefined {
  * 关闭顺序：先走 **adapter 自己的 `close()`**（plugin-sql 的受支持路径，
  * 它会顺带处理 manager 的状态），失败再退到连接对象自己的 `close()`。
  */
+const closePreparations = new WeakMap<object, () => Promise<void>>()
+
+/** Return dedicated clients before any caller closes the adapter pool. */
+export function beforeDatabaseClose(runtime: object, prepare: () => Promise<void>): void {
+  closePreparations.set(runtime, prepare)
+}
+
+async function prepareDatabaseClose(runtime: unknown): Promise<void> {
+  const prepare = closePreparations.get(runtime as object)
+  closePreparations.delete(runtime as object)
+  await prepare?.()
+}
+
 export async function closeDatabaseConnection(runtime: unknown): Promise<void> {
   const adapter = adapterOf(runtime)
   if (adapter === undefined) return
@@ -257,13 +270,17 @@ export async function closeDatabaseConnection(runtime: unknown): Promise<void> {
   if (closers.length === 0) return
 
   let firstError: unknown
+  let preparationError: unknown
+  try { await prepareDatabaseClose(runtime) } catch (error) { preparationError = error }
   for (const close of closers) {
     try {
       await close()
-      return
     } catch (error) {
       firstError ??= error
+      continue
     }
+    if (preparationError !== undefined) throw preparationError
+    return
   }
   throw firstError
 }
@@ -322,6 +339,7 @@ export function isDatabaseClosed(runtime: unknown): boolean {
  * WP3 门 §3-1 会扫真实 opener 里有没有别的地方"只 stop 不 close"。
  */
 export async function stopRuntimeServices(runtime: unknown): Promise<void> {
+  await prepareDatabaseClose(runtime)
   const candidate = runtime as { stop?: () => Promise<void> }
   if (typeof candidate.stop === 'function') await candidate.stop()
 }
@@ -329,10 +347,10 @@ export async function stopRuntimeServices(runtime: unknown): Promise<void> {
 /** 把 `AgentRuntime` 接成收尾 helper（生产唯一入口） */
 export function createRuntimeShutdown(
   runtime: unknown,
-  options: { afterRun?: (reading: ShutdownReading) => Promise<void> | void } = {}
+  options: { beforeStop?: () => Promise<void>; afterRun?: (reading: ShutdownReading) => Promise<void> | void } = {}
 ): ShutdownHandle {
   return createShutdown({
-    stop: async () => await stopRuntimeServices(runtime),
+    stop: async () => { await options.beforeStop?.(); await stopRuntimeServices(runtime) },
     close: async () => await closeDatabaseConnection(runtime),
     isClosed: () => isDatabaseClosed(runtime),
     ...(options.afterRun !== undefined ? { afterRun: options.afterRun } : {}),

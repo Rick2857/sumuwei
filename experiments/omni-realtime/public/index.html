@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LG · Omni 独立语音原型</title>
+<style>
+  :root { color-scheme: dark; font: 16px/1.6 system-ui, sans-serif; background: #11151d; color: #e6ecf5; }
+  body { max-width: 1060px; margin: 0 auto; padding: 36px 22px; }
+  h1 { font-size: 27px; margin: 0 0 8px; } h2 { font-size: 18px; margin: 0 0 12px; }
+  p { margin: 8px 0; } .muted { color: #aebbcf; } .notice { border-left: 3px solid #d8b66a; padding-left: 14px; }
+  section { border: 1px solid #303b4d; background: #19212e; border-radius: 12px; padding: 20px; margin-top: 20px; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  button, input { font: inherit; border: 1px solid #4f6079; border-radius: 7px; padding: 8px 13px; }
+  button { background: #26374c; color: #eef3fa; cursor: pointer; } button:disabled { opacity: .45; cursor: default; }
+  button:focus-visible, input:focus-visible { outline: 2px solid #98bbff; outline-offset: 2px; }
+  #interrupt { background: #683c3e; } input { min-width: 180px; flex: 1; background: #111923; color: inherit; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  #transcript { min-height: 130px; max-height: 350px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+  #log { max-height: 230px; overflow: auto; font: 12px/1.6 ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+  #meter { width: 100%; } .tag { background: #30445c; padding: 3px 10px; border-radius: 20px; }
+  @media(max-width:700px) { .grid { grid-template-columns: 1fr; } body { padding: 22px 14px; } }
+</style>
+<h1>Omni 独立语音原型</h1>
+<p class="muted">先验证听、说、打断与纠正，再接入 LG 和 3D。</p>
+<p class="notice" id="scope">离线模式：返回预设字幕与提示音，不进行语音识别或真实语音合成，不连接 LG 数据库。</p>
+<section id="avatar-section" hidden><div id="viewport" style="height:520px"></div><p id="avatar-status" role="status">正在加载 Aoba…</p></section>
+<section>
+  <div class="row"><span class="tag" id="status" role="status">未连接</span><span id="mode" class="muted">检查本地服务中…</span></div>
+  <div class="row" style="margin-top:14px">
+    <button id="connect">连接测试</button><button id="mic" disabled>开启麦克风</button>
+    <button id="interrupt" disabled>立即打断</button><button id="disconnect" disabled>断开连接</button>
+  </div>
+  <label for="meter">麦克风电平</label><meter id="meter" min="0" max="0.15" value="0"></meter>
+  <p class="muted">麦克风默认关闭，只在点击后申请权限。建议戴耳机测试，减少扬声器回声引起的误打断。</p>
+</section>
+<section>
+  <h2>测试场景</h2>
+  <div class="row">
+    <button data-demo="mixed" disabled>中英文混合</button>
+    <button data-demo="correction" disabled>模拟写入失败后纠正</button>
+    <button data-demo="late" disabled>长回复与迟到音频</button>
+  </div>
+  <form id="text-form" class="row" style="margin-top:14px">
+    <label for="text">测试文本</label><input id="text" maxlength="2000" value="请解释 GitHub Actions、CI 和 WebSocket。">
+    <button id="submit" disabled>发送文本</button>
+  </form>
+  <p class="muted">离线场景的声音均为提示音。可在播放中打断；模拟服务会故意再发旧音频，检查是否被丢弃。</p>
+</section>
+<div class="grid">
+  <section><h2>字幕</h2><div id="transcript" aria-live="polite"></div></section>
+  <section><h2>本次测量</h2><div id="metrics">尚无测量</div><button id="export" style="margin-top:14px">导出本地诊断</button>
+    <p class="muted">记录事件、排队时间和停播命令耗时，不导出音频或字幕正文。排队时间不等于真人听到声音的时刻。</p></section>
+</div>
+<section><h2>事件记录</h2><div id="log"></div></section>
+<script type="module" src="/app.mjs"></script>
+</html>

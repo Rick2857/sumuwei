@@ -1,0 +1,4 @@
+node_modules/
+public/models/*.vrm
+public/models/local.json
+evidence/local/

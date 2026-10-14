@@ -1,0 +1,23 @@
+{
+  "name": "lg-avatar-3d-preview",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "sample": "node fetch-sample.mjs",
+    "check": "node --check server.mjs && node --check public/main.js && node --check public/avatar.js && node --check public/playback.js && node --check public/live.js && node --check snapshot-runtime.mjs && node --check patch-pg-shutdown.mjs && node --check test/pg-session.mjs && node --check test/start-pg.mjs && node --check test/microphone.mjs && node --check test/pg-shutdown.mjs",
+    "test": "node --test test/*.test.mjs",
+    "test:browser": "node test/browser.mjs"
+  },
+  "dependencies": {
+    "@pixiv/three-vrm": "3.5.5",
+    "three": "0.180.0"
+  },
+  "devDependencies": {
+    "playwright": "1.56.1"
+  }
+}

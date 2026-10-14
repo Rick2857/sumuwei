@@ -17,5 +17,21 @@ jobs:
         run: npm install --global pnpm@12.4.1
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Install optional voice and 3D test dependencies
+        run: |
+          npm --prefix experiments/omni-realtime ci --ignore-scripts --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm --prefix tools/avatar-3d ci --ignore-scripts --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Voice and 3D offline checks
+        run: |
+          npm --prefix experiments/omni-realtime test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm --prefix tools/avatar-3d run check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm --prefix tools/avatar-3d test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pnpm exec tsc -p experiments/omni-realtime/tsconfig.json --noEmit
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Typecheck and offline regression
         run: pnpm ci:offline
