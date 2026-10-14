@@ -101,6 +101,14 @@ export interface BridgeSubmitRequest {
    * ⚠️ 可选：没有它 ⇒ 判据不成立 ⇒ 一律走提醒（失败关闭，不猜）。
    */
   utteranceKey?: string
+  /**
+   * `ADR-139` `D01`：这一轮的**入站平台事实**（可选）。
+   *
+   * ⚠️ 缺席 = 逐字旧行为；出现但形状非法 ⇒ `validate()` 具名拒绝整轮（`D04`）。
+   * ⚠️ 它**不是**授权，也**不能**选入口（`D02`）。
+   */
+  platformFacts?: BridgeInboundPlatformFacts
+  groupContext?: readonly BridgeGroupContextLine[]
 }
 
 export interface BridgeSubmitResult {
@@ -161,7 +169,21 @@ export interface TurnBridgeHost {
    *
    * 实现必须与 `src/main.ts` 的轮次链**同一套**（同一批守卫、同一个编译器）。
    */
-  runTurn(input: { userText: string; requestId: string; images?: readonly ImageInput[]; onSpeechSegment?: (segment: CheckedSpeechSegment) => void }): Promise<HostTurnResult>
+  runTurn(input: {
+    userText: string
+    requestId: string
+    images?: readonly ImageInput[]
+    onSpeechSegment?: (segment: CheckedSpeechSegment) => void
+    /**
+     * ★ U1 / `WP2b-2b`（`ADR-139` `D01`）：**本轮入站平台事实** —— 可选。
+     *
+     * ⚠️ 它**不是**身份，是**证据**：由 host（装配层，进程内）用 `resolveInboundTurnScope`
+     *   结合绑定清单 / 群白名单解析出本轮作用域。桥只负责**原样转交**，自己**不**解析。
+     * ⚠️ 缺席 ⇒ 不传 ⇒ host 那一层不解析 ⇒ 逐字旧行为（会话级作用域）。
+     */
+    platformFacts?: BridgeInboundPlatformFacts
+    groupContext?: readonly BridgeGroupContextLine[]
+  }): Promise<HostTurnResult>
   /**
    * 请求取消一轮（后 Lv2 · `L-PL2-04`）。
    *
@@ -606,6 +628,13 @@ export class TurnBridge {
         userText: request.userText,
         requestId: request.requestId,
         ...(request.images !== undefined ? { images: request.images } : {}),
+        /*
+         * ★ U1 / `ADR-139` `D01`：本轮的入站平台事实**原样转交**给 host（装配层去解析）。
+         * ⚠️ 缺席 ⇒ 不加这个键 ⇒ host 不解析 ⇒ 逐字旧行为。
+         * ⚠️ 形状已由 `validate()` 判过（`:2534` 那一格）；这里**不重复判**。
+         */
+        ...(request.platformFacts !== undefined ? { platformFacts: request.platformFacts } : {}),
+        ...(request.groupContext !== undefined ? { groupContext: request.groupContext } : {}),
         ...(request.streamSpeech && this.outputSink !== undefined ? {
           onSpeechSegment: (speech: CheckedSpeechSegment) => this.outputSink?.({
             kind: 'SPEECH_SEGMENT', requestId: request.requestId, outcome: 'generated', speech,
@@ -683,6 +712,22 @@ export class TurnBridge {
     if (typeof text !== 'string') return 'bridge_bad_user_text'
     if (text.trim() === '') return 'bridge_empty_user_text'
     if (text.length > this.maxUserTextLength) return 'bridge_user_text_too_long'
+    /*
+     * `ADR-139` `D04`：**只**校验 `platformFacts` 这一格。
+     * ⚠️ 缺席 ⇒ 直接跳过（逐字旧行为）；非法 ⇒ **整轮具名拒绝**（不是"取能认的字段、忽略其余"）。
+     */
+    const facts = (request as { platformFacts?: unknown }).platformFacts
+    if (facts !== undefined) {
+      const problem = platformFactsProblems(facts)
+      if (problem !== undefined) return problem
+    }
+    if (request.groupContext !== undefined) {
+      if (request.platformFacts?.messageType !== 'group' || !Array.isArray(request.groupContext)
+        || request.groupContext.length > 20 || request.groupContext.some(line => !line ||
+          typeof line.senderId !== 'string' || !/^[1-9]\d{4,19}$/.test(line.senderId) ||
+          typeof line.text !== 'string' || line.text.length > 1000 || !Number.isFinite(line.at))
+        || request.groupContext.reduce((sum, line) => sum + line.text.length, 0) > 6000) return 'invalid_group_context'
+    }
     return imageInputShapeError(request.images)
   }
 
@@ -1410,6 +1455,60 @@ export interface BridgeCancelRequest {
   reason?: string
 }
 
+/**
+ * 入站**平台事实**（闭集）—— `ADR-139` `D01`（用户 2026-10-14 裁定 `R-139-1` = ①）。
+ *
+ * ```text
+ * 它回答"这一轮的**真实发言者**是谁"，**不**回答"谁被授权"：
+ * 授权仍由 `evaluateScopeAccess`（契约层）判，载荷永远只是事实（`INV-PL2-08` 不冲突）。
+ * ⚠️ 它**不能**用来选入口：入口仍由端口 / `--qq-private` 绑定（`ADR-109` `D02`）；
+ *    核心拿到它之后必须与**会话已绑定的入口**交叉核对（`ADR-139` `D02`）。
+ * ```
+ */
+export interface BridgeGroupContextLine { readonly senderId: string; readonly text: string; readonly at: number }
+
+export interface BridgeInboundPlatformFacts {
+  readonly transport: 'qq'
+  /** 机器人自己的平台账号（来自包，非自报） */
+  readonly selfId: string
+  /** **真实发言者**的平台账号 */
+  readonly senderUserId: string
+  readonly messageType: 'private' | 'group'
+  /** 仅 `messageType === 'group'` 时允许出现（`ADR-139` `D01`） */
+  readonly groupId?: string
+}
+
+/** 闭集字段名（多一个键整条作废） */
+const PLATFORM_FACTS_KEYS: readonly string[] = ['transport', 'selfId', 'senderUserId', 'messageType', 'groupId']
+
+/**
+ * 平台事实的**形状判据**（纯函数）。返回**具名**理由码；`undefined` = 合法。
+ *
+ * ⚠️ `ADR-139` `D04`（用户裁定 `R-139-2` = ①）：**只**严格校验这一格。
+ *    其它未知字段**照旧容忍** —— 今天的桥本来就容忍未知字段（2026-10-14 实测），
+ *    把"容忍"改成"拒绝"是一次**未被要求的收紧**，会把既有外壳变成回归。
+ */
+export function platformFactsProblems(value: unknown): string | undefined {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return 'bridge_bad_platform_facts'
+  const record = value as Record<string, unknown>
+  for (const key of Object.keys(record)) {
+    if (!PLATFORM_FACTS_KEYS.includes(key)) return 'bridge_bad_platform_facts_key'
+  }
+  if (record.transport !== 'qq') return 'bridge_bad_platform_facts_transport'
+  if (typeof record.selfId !== 'string' || record.selfId.trim() === '') return 'bridge_bad_platform_facts_self'
+  if (typeof record.senderUserId !== 'string' || record.senderUserId.trim() === '') {
+    return 'bridge_bad_platform_facts_sender'
+  }
+  const messageType = record.messageType
+  if (messageType !== 'private' && messageType !== 'group') return 'bridge_bad_platform_facts_message_type'
+  const groupId = record.groupId
+  if (messageType === 'private' && groupId !== undefined) return 'bridge_bad_platform_facts_group'
+  if (messageType === 'group' && (typeof groupId !== 'string' || groupId.trim() === '')) {
+    return 'bridge_bad_platform_facts_group'
+  }
+  return undefined
+}
+
 export interface BridgeWireRequest {
   images?: readonly ImageInput[]
   kind: BridgeMessageKind
@@ -1443,6 +1542,9 @@ export interface BridgeWireRequest {
   deliveryStatus?: BridgeQqDeliveryStatus
   /** `REPORT_QQ_DELIVERY` 可选：平台的 `messageId`（**只有** `api_accepted` 时允许有） */
   messageId?: string
+  /** `SUBMIT_TURN` 可选：这一轮的**入站平台事实**（`ADR-139` `D01`；缺席 = 逐字旧行为） */
+  platformFacts?: BridgeInboundPlatformFacts
+  groupContext?: readonly BridgeGroupContextLine[]
   /** `REPORT_QQ_DELIVERY` 可选：回执来自第几次尝试（诊断用） */
   attempt?: number
 }
@@ -2457,11 +2559,20 @@ export async function handleBridgeMessage(
   const userText = (message as { userText?: unknown }).userText
   /* `P3` 中途纠正：把外壳给的**开口键**原样转交（没有就省略 ⇒ 判据不成立 ⇒ 只提醒） */
   const submitUtteranceKey = (message as { utteranceKey?: unknown }).utteranceKey
+  /*
+   * `ADR-139` `D01`：平台事实**原样转交**给 `submit`（形状由 `validate()` 判；这里不重复判）。
+   * ⚠️ 缺席 ⇒ **不加这个键**（`D03`：逐字旧行为）。
+   */
+  const submitPlatformFacts = (message as { platformFacts?: unknown }).platformFacts
   const result = await bridge.submit({
     requestId: normalizedRequestId,
     userText: typeof userText === 'string' ? userText : '',
     streamSpeech: (message as { streamSpeech?: unknown }).streamSpeech === true,
     ...('images' in message ? { images: (message as BridgeWireRequest).images } : {}),
+    ...(submitPlatformFacts === undefined
+      ? {}
+      : { platformFacts: submitPlatformFacts as BridgeInboundPlatformFacts }),
+    ...((message as BridgeWireRequest).groupContext === undefined ? {} : { groupContext: (message as BridgeWireRequest).groupContext }),
     ...(typeof submitUtteranceKey === 'string' && submitUtteranceKey !== ''
       ? { utteranceKey: submitUtteranceKey }
       : {}),

@@ -303,6 +303,7 @@ export interface AffectSemanticWorkerTickInput {
   readonly characterId: CharacterId
   /** 唯一 active user（M8-D11 口径） */
   readonly activeUserId: string
+  readonly allowedUserIds?: readonly string[]
   readonly mode: AffectSemanticMode
   readonly now?: number
   /** shutdown 信号（透传给模型调用；中止 ⇒ 传输 timeout ⇒ 可重试路径） */
@@ -312,7 +313,7 @@ export interface AffectSemanticWorkerTickInput {
 /** 单事件资格判定（复用唯一实现；trustedOrigin 走受信读数派生——ADR-043 DR-6） */
 function sourceQualified(
   event: ConversationEvent,
-  policy: { activeUserId: string; cutoverSequence: number | null }
+  policy: { activeUserId: string; allowedUserIds?: readonly string[]; cutoverSequence: number | null }
 ): boolean {
   if (event.type !== 'user_message') return false
   const view = processorEventViewOf(event)
@@ -362,6 +363,7 @@ export async function runAffectSemanticWorkerTick(
   }
   const policy = {
     activeUserId: input.activeUserId,
+    allowedUserIds: input.allowedUserIds,
     cutoverSequence: state.cutoverSequence,
   }
 

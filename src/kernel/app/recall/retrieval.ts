@@ -108,6 +108,8 @@ export function createMemoryRecallService(
       text: request.query.text,
       ...(request.memoryKinds !== undefined ? { memoryKinds: request.memoryKinds } : {}),
       timeScope: request.timeScope,
+      /* U1 / ADR-138：作用域三元组透传（缺省 ⇒ 字段不出现 ⇒ 行为一字不变） */
+      ...(request.scope !== undefined ? { scope: request.scope } : {}),
       limit: request.candidateLimit,
       /* M9.5 / WP6（D25）：策略版本透传给适配器；缺省 ⇒ 字段不出现 ⇒ 现状不变 */
       ...(request.retrievalPolicyVersion !== undefined
@@ -173,6 +175,7 @@ function toCandidate(hit: MemoryRetrievalHit, broken: ReadonlySet<string>): Reca
   const slot = slotOfRecord(record)
   return {
     memoryId: record.id,
+    ...(hit.authorization === undefined ? {} : { authorization: hit.authorization }),
     owner: record.owner,
     type: record.type,
     status: record.status,

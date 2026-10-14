@@ -54,6 +54,7 @@ import {
 } from '../../kernel/contracts/belief.ts'
 import type { RawDb } from './db.ts'
 import { inTransaction } from './db.ts'
+import { sourceRootsVisible } from './read-scope.ts'
 import {
   deleteProjection,
   domainEventsFor,
@@ -81,7 +82,8 @@ export async function getBelief(
   characterId: CharacterId,
   beliefId: string,
 ): Promise<CharacterProjection<BeliefState> | undefined> {
-  return getProjection<BeliefState>(db, characterId, beliefRowKeyOf(beliefId))
+  const row = await getProjection<BeliefState>(db, characterId, beliefRowKeyOf(beliefId))
+  return row !== undefined && await sourceRootsVisible(db, row.state.evidenceRootIds.map(String)) ? row : undefined
 }
 
 /** 读取证据累计行（键 = beliefEvidenceProjectionTypeOf 的产出） */
@@ -121,6 +123,7 @@ export async function listActiveBeliefs(
     if (type.startsWith('belief:evidence:')) continue
     const state = row.state as BeliefState | undefined
     if (state === undefined || state.status !== 'active') continue
+    if (!await sourceRootsVisible(db, state.evidenceRootIds.map(String))) continue
     out.push(state)
   }
   return out
@@ -148,6 +151,7 @@ export async function listBeliefsByStatus(
     if (type.startsWith('belief:evidence:')) continue
     const state = row.state as BeliefState | undefined
     if (state === undefined || !wanted.has(String(state.status))) continue
+    if (!await sourceRootsVisible(db, state.evidenceRootIds.map(String))) continue
     out.push(state)
   }
   return out

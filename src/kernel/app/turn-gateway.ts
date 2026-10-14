@@ -39,6 +39,7 @@ import {
   newTraceId,
   singleSpeechOutput,
   type CharacterDefinition,
+  type ScopeContext,
   type CharacterId,
   type CharacterIntent,
   type CharacterOutput,
@@ -370,6 +371,18 @@ export interface TurnGatewayOptions {
   /** 本轮对应的稳定用户身份（进 Trace；不是 SessionId） */
   userId?: string
   /**
+   * **U1 / `ADR-138`（`G18`）：本轮的作用域三元组**（谁 · 什么用途 · 哪个空间）——**可选**。
+   *
+   * ```text
+   * 它会被原样带进召回请求（`RecallRequest.scope`）⇒ 装配层注入的授权器据此过滤候选。
+   * ⚠️ 不传 = 字段不出现 = **与接线前逐字相同**（与 `commitmentFactRows` 同一条先例：
+   *    用可选选项实现，而不是去扩 M5 的端口契约）。
+   * ⚠️ 它必须由**装配层**给出（`resolveEntryScope(...)` 的结果），
+   *    **不许**来自请求载荷/模型输出 —— `parseRecallRequest` 会拒绝载荷里的 `scope`。
+   * ```
+   */
+  scope?: ScopeContext
+  /**
    * **M10.1 / ADR-086 `D08`/`D09`**：**约定与结清**事实块的只读端口。
    *
    * ```text
@@ -692,6 +705,19 @@ export interface BeliefSectionBuildResult {
 }
 
 export interface CompileTurnInput {
+  /**
+   * **U1 / `ADR-138`（`G18`）：本轮的作用域三元组**（谁 · 什么用途 · 哪个空间）——**可选**。
+   *
+   * ```text
+   * 为什么需要**每轮**的（而 `TurnGatewayOptions.scope` 只有每网关的）：
+   *   入口维度共享会话（`CHARACTER_ENTRY_SCOPED_CONVERSATIONS`）⇒ **一个 QQ 会话服务多个用户**，
+   *   私有入口还行，**群**更是"一个会话、多个说话人"。
+   *   ⇒ 每轮的"谁在问"只能随**这一轮**进来；本轮给了就以本轮为准，
+   *     没给才回落到 `TurnGatewayOptions.scope`（缺省 ⇒ 字段不出现 ⇒ 与接线前逐字相同）。
+   * ⚠️ 由装配层在进程内给出（`resolveEntryScope(...)`），**不许**来自请求载荷。
+   * ```
+   */
+  scope?: ScopeContext
   images?: readonly CheckedImageInput[]
   loadImage?: (ref: string) => Promise<CheckedImageInput | undefined>
   runReminderTurn?: (recent: readonly ConversationLine[], withdrawn?: Pick<WithdrawnSetResult, 'ok' | 'withdrawnEventIds'>) => Promise<ReminderTurnResult>
@@ -1690,6 +1716,8 @@ export class TurnGateway {
       currentInput: turnContext.currentInput,
       ...(input.turn.userEvent !== undefined ? { eventId: input.turn.userEvent.id } : {}),
       ...(withdrawnForRecall !== undefined ? { withdrawn: withdrawnForRecall } : {}),
+      /* U1 / ADR-138：**本轮**的作用域（装配层给；缺省 ⇒ 回落网关选项） */
+      ...(input.scope !== undefined ? { scope: input.scope } : {}),
     })
     const recallOutcome = recallStep.status === 'ran' ? recallStep.outcome : undefined
     /* ⚠️ 装配段的耗时读数（`P4` 后的时延修复）：M5 召回是"20 秒"的头号嫌疑 */
@@ -2955,6 +2983,8 @@ export class TurnGateway {
     currentInput: string
     eventId?: ConversationEventId
     withdrawn?: Pick<WithdrawnSetResult, 'ok' | 'withdrawnEventIds'>
+    /** U1 / ADR-138：**本轮**的作用域（优先于网关选项上的那个） */
+    scope?: ScopeContext
   }): Promise<
     | { status: 'ran'; outcome: RecallTurnOutcome }
     | { status: 'not_searched'; cause: 'port_not_wired' | 'flag_off' | 'no_user_id' }
@@ -2984,6 +3014,11 @@ export class TurnGateway {
        */
       intent: 'current_fact',
       contextBudget: { memoryTokens: budget.memoryTokens },
+      /* U1 / ADR-138：本轮作用域（**本轮优先**，其次网关选项；都没有 ⇒ 字段不出现 ⇒ 逐字不变） */
+      ...(() => {
+        const scope = input.scope ?? this.options.scope
+        return scope !== undefined ? { scope } : {}
+      })(),
       /* M9.5 / WP6（D25）：缺省不出现该字段 ⇒ legacy 行为逐字不变 */
       ...(this.options.recallPolicyVersion !== undefined
         ? { retrievalPolicyVersion: this.options.recallPolicyVersion }

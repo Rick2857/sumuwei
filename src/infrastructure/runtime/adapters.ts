@@ -35,8 +35,10 @@ import {
   effectiveRelationship,
   renderRelationshipGuidance,
   RELATIONSHIP_ORIGIN_PROPOSAL_TYPE,
+  type RelationshipOriginKind,
   type RelationshipOriginPayload,
 } from '../../kernel/contracts/relationship.ts'
+import { NEW_USER_INITIAL_RELATIONSHIP } from '../../kernel/contracts/scope.ts'
 import {
   effectiveAffect,
   renderAffectGuidance,
@@ -59,6 +61,9 @@ import {
   listBeliefsByStatus,
 } from '../persistence/belief-store.ts'
 import { createNativeMemoryStore } from '../persistence/memory-store.ts'
+import { currentReadScope } from '../persistence/read-scope.ts'
+import { sql } from 'drizzle-orm'
+import { exec } from '../persistence/db.ts'
 import { domainEventsFor } from '../persistence/event-store.ts'
 import { getWatermark, listJobs } from '../persistence/job-store.ts'
 import {
@@ -154,13 +159,18 @@ export async function recentContextLinesFrom(
     limit: options.limit,
     ...(options.conversationId === undefined ? {} : { conversationId: options.conversationId }),
   })
+  const names = new Map<string, string>()
+  if (currentReadScope()?.context.room.kind === 'group') {
+    const rows = await exec(db, sql`select user_id, display_name from user_identities`, 'group speaker names')
+    rows.forEach(row => names.set(String(row.user_id), String(row.display_name ?? row.user_id)))
+  }
   return events.map((event) => ({
     id: event.id,
     createdAt: event.createdAt,
     sequence: event.sequence,
     speaker:
       event.actorType === 'user'
-        ? options.userName
+        ? names.get(String(event.actorId)) ?? options.userName
         : event.actorType === 'character'
           ? options.characterName
           : '系统',
@@ -373,20 +383,43 @@ export async function renderRelationshipSection(
 }
 
 /**
- * 启动时播种 RELATIONSHIP_ORIGIN（用户授权基线，ADR-064 U-M7-02）。
+ * 一次 ORIGIN 播种的"来源与值"。
  *
- * 幂等：已有投影（或已处理过播种操作）⇒ no-op。走**完整放行链**
- * （提案 → Validator → applyAcceptedEvents），不绕过任何一环——
- * 基线也是域事件，也要有账本与幂等键。
- *
- * ⚠️ 只在 `CHARACTER_RELATIONSHIP_CONTEXT_ENABLED` 打开时由 main.ts 调用
- *    （缺省 off：首次打开会写一条 ORIGIN 域事件，属激活行为，先例 ADR-048）。
+ * ⚠️ **一处实现**：原主人设定基线（`SETTING_BASELINE`）与新用户起始值
+ * （`NEW_USER_BASELINE`，U1/WP3 `ADR-136`）**共用同一条放行链与幂等**，
+ * 只在这份 spec 上分叉 —— 否则两条播种路径迟早会漂移（"两个装配会漂移"的老教训）。
  */
-export async function seedRelationshipOrigin(
+interface RelationshipOriginSeedSpec {
+  readonly trust: number
+  readonly closeness: number
+  readonly originKind: RelationshipOriginKind
+  readonly basis: string
+  /** 成功时的人读理由（既有调用点的读数逐字保留） */
+  readonly seededReason: string
+}
+
+/** 原主人设定基线（ADR-064 U-M7-02）：0.85 / 0.60，来自"十几年共同长大"的角色设定 */
+const RELATIONSHIP_OWNER_SEED_SPEC: RelationshipOriginSeedSpec = {
+  trust: 0.85,
+  closeness: 0.6,
+  originKind: 'SETTING_BASELINE',
+  basis:
+    '用户授权的角色设定基线（ADR-064 U-M7-02：从小一起长大、对我很信赖 → trust 0.85；' +
+    '同校、日常能见面 → closeness 0.60，刻意不拉满）',
+  seededReason: 'ORIGIN 建档完成（SETTING_BASELINE 0.85/0.60）',
+}
+
+/**
+ * 播种一条 RELATIONSHIP_ORIGIN（提案 → Validator → applyAcceptedEvents，**不绕任何一环**）。
+ *
+ * 幂等：已有投影 ⇒ no-op。被放行口拒绝 ⇒ **不播种**（失败关闭），如实报告理由。
+ */
+async function applyRelationshipOriginSeed(
   runtime: AgentRuntime,
   characterId: string,
   userId: string,
-  now: number = Date.now()
+  spec: RelationshipOriginSeedSpec,
+  now: number
 ): Promise<{ seeded: boolean; reason: string }> {
   const db = getDb(runtime)
   const cid = asCharacterId(characterId)
@@ -418,12 +451,10 @@ export async function seedRelationshipOrigin(
   const payload: RelationshipOriginPayload = {
     key: { owner: asEntityId(characterId), target: userId as never },
     targetKind: 'user',
-    trust: 0.85,
-    closeness: 0.6,
-    originKind: 'SETTING_BASELINE',
-    basis:
-      '用户授权的角色设定基线（ADR-064 U-M7-02：从小一起长大、对我很信赖 → trust 0.85；' +
-      '同校、日常能见面 → closeness 0.60，刻意不拉满）',
+    trust: spec.trust,
+    closeness: spec.closeness,
+    originKind: spec.originKind,
+    basis: spec.basis,
   }
   const proposal = createProposal({
     characterId: cid,
@@ -447,7 +478,61 @@ export async function seedRelationshipOrigin(
     [relationshipReducerFor(entityRef('character', asEntityId(characterId)), target)],
     now
   )
-  return { seeded: true, reason: 'ORIGIN 建档完成（SETTING_BASELINE 0.85/0.60）' }
+  return { seeded: true, reason: spec.seededReason }
+}
+
+/**
+ * 启动时播种**原主人**的 RELATIONSHIP_ORIGIN（用户授权基线，ADR-064 U-M7-02）。
+ *
+ * ⚠️ 只在 `CHARACTER_RELATIONSHIP_CONTEXT_ENABLED` 打开时由 main.ts 调用
+ *    （缺省 off：首次打开会写一条 ORIGIN 域事件，属激活行为，先例 ADR-048）。
+ * ✅ U1/WP3 的引入**没有**改这条路径的行为：它只是把 spec 提到外面（值/理由逐字相同）。
+ */
+export async function seedRelationshipOrigin(
+  runtime: AgentRuntime,
+  characterId: string,
+  userId: string,
+  now: number = Date.now()
+): Promise<{ seeded: boolean; reason: string }> {
+  return applyRelationshipOriginSeed(runtime, characterId, userId, RELATIONSHIP_OWNER_SEED_SPEC, now)
+}
+
+/**
+ * 播种**新用户**首次建档的起始关系（U1 / WP3；`ADR-136` **方案 A**，2026-10-14 原主人裁定）。
+ *
+ * ```text
+ * 值      = NEW_USER_INITIAL_RELATIONSHIP（0.2 / 0.2，一处定义）
+ * 来源种类 = NEW_USER_BASELINE —— **既不是** SETTING_BASELINE（用户授权的设定），
+ *            **也不是** INTERACTION_DERIVED（首见没有任何互动证据）
+ * 时机     = 首次**幂等建档成功**时（`R-WP3-3`）
+ * ```
+ *
+ * ⚠️ 它**不**继承原主人的 0.85/0.60，也**不**重置任何既有关系（幂等：已有投影 ⇒ no-op）。
+ * ⚠️ 接线（谁在什么时候调它）属 U1-WP2b-2b；本函数只是**能力**，不在生产链路上被调用。
+ */
+export async function seedRelationshipOriginForNewUser(
+  runtime: AgentRuntime,
+  characterId: string,
+  userId: string,
+  now: number = Date.now()
+): Promise<{ seeded: boolean; reason: string }> {
+  return applyRelationshipOriginSeed(
+    runtime,
+    characterId,
+    userId,
+    {
+      trust: NEW_USER_INITIAL_RELATIONSHIP.trust,
+      closeness: NEW_USER_INITIAL_RELATIONSHIP.closeness,
+      originKind: 'NEW_USER_BASELINE',
+      basis:
+        '新档案的初始关系值（系统在该用户首次建档时给出的起点 —— ' +
+        '既不是用户授权的角色设定基线，也不是由真实互动推导而来）',
+      seededReason:
+        `ORIGIN 建档完成（NEW_USER_BASELINE ${String(NEW_USER_INITIAL_RELATIONSHIP.trust)}/` +
+        `${String(NEW_USER_INITIAL_RELATIONSHIP.closeness)}）`,
+    },
+    now
+  )
 }
 
 /**

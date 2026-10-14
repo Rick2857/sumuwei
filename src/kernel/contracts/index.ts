@@ -130,3 +130,7 @@ export * from './notification-intake.ts'
 export * from './proactive-proposal.ts'
 /* Lv4.5 / ADR-131：皮套入口的**系统发起开口**机会预检（15 条具名拒绝；纯层，无 IO） */
 export * from './proactive-opening.ts'
+/* 多用户补充计划 X0/U1 / ADR-133：作用域三元组、权限矩阵、可见性标签（纯层，无 IO） */
+export * from './scope.ts'
+/* 多用户补充计划 U1 / WP5：读取面的**唯一**判定（授权 × 归属披露；纯层，无 IO） */
+export * from './record-visibility.ts'

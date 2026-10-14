@@ -126,6 +126,7 @@ export interface AffectEvaluationRunInput {
   toSequence: number
   /** 唯一 active user 的 id（M8-D11；生产 = resolveIds(userName).userId） */
   activeUserId: string
+  allowedUserIds?: readonly string[]
   now?: number
   /**
    * 试算模式：只跑评估器数提案，不验证、不落库、不产生任何副作用。
@@ -222,6 +223,7 @@ export async function runAffectEvaluation(
     views,
     policy: {
       activeUserId: input.activeUserId,
+      allowedUserIds: input.allowedUserIds,
       cutoverSequence: state?.cutoverSequence ?? null,
     },
   }
@@ -287,7 +289,7 @@ export async function runAffectEvaluation(
     evidence: evidenceLookup,
     processed: { hasProcessed: (key: string) => ports.hasProcessed(key) },
     affect: { getAffectState: (characterId: CharacterId) => ports.getAffectState(characterId) },
-    policy: { activeUserId: input.activeUserId },
+    policy: { activeUserId: input.activeUserId, allowedUserIds: input.allowedUserIds },
   }
 
   const acceptedEvents: AcceptedDomainEvent[] = []

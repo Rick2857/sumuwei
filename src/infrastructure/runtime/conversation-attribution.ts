@@ -280,6 +280,22 @@ export function createHumanQqPrivateUserTurnIngress(): ConversationAttributionPr
   })
 }
 
+/** Authenticated QQ member ingress. The caller has already checked account and membership. */
+export function createHumanQqMemberUserTurnIngress(roomKind: 'private' | 'group'): ConversationAttributionProducer {
+  const adapterId = `qq-${roomKind}-member`
+  return Object.freeze({ producerId: `${adapterId}-user-turn`, family: 'user_message' as ConversationFamily,
+    attest(facts: ConversationIngressFacts): TrustedAttributionContext {
+      guardFacts(facts); requirePresenter(facts, adapterId)
+      if (!facts.userId || facts.userId !== facts.presenterActorId) throw new KernelError('validation_error',
+        'attribution_presenter_mismatch', 'QQ speaker must match the resolved domain user')
+      const principal = { kind: 'USER', id: facts.userId } as const
+      return buildTrustedAttributionContext({ family: 'user_message', characterId: facts.characterId,
+        actorEvidence: attestActorFromDecisionPoint({ adapterId, principal }),
+        contentOriginatorEvidence: attestContentOriginatorFromIngress({ adapterId, principal }),
+        epistemicEvidence: attestEpistemicConfirmation({ adapterId, kind: 'authenticated_human_input' }) })
+    } })
+}
+
 /**
  * **角色的输出边界**（`turn-gateway.completeTurn` → `CharacterIntent` → Resolver）。
  *

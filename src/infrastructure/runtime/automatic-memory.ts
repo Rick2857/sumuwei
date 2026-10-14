@@ -10,6 +10,7 @@ import { exec, type RawDb } from '../persistence/db.ts'
 import { conversationEventsInRange, findEventRefs, latestCharacterEventSequence } from '../persistence/conversation-store.ts'
 import { applyAcceptedEvents } from '../persistence/event-store.ts'
 import { createNativeMemoryStore } from '../persistence/memory-store.ts'
+import { scopeForConversation, scopeMemoryCandidate, withReadScope, withoutReadScope } from '../persistence/read-scope.ts'
 import { advanceWatermark, enqueueJob, finishJob, getWatermark, hasProcessedOperation, markJobRunning } from '../persistence/job-store.ts'
 import { AUTOMATIC_MEMORY_PROCESSOR, AUTOMATIC_MEMORY_VERSION } from '../model/langmem-memory-extractor.ts'
 import { AUTOMATIC_MEMORY_FAILURE_LIMIT, automaticMemoryRetryCounts, automaticMemorySourceKey } from './automatic-memory-control.ts'
@@ -18,6 +19,13 @@ export interface AutomaticMemoryReading {
   status: 'cutover' | 'completed' | 'failed' | 'retry_exhausted'
   throughSequence: number
   created: number
+  /**
+   * **U1 / `ADR-137` 写侧**：这一拍**新建**的记忆 id（**只在这一条真的带 id 时才出现**）。
+   *
+   * ⚠️ 为什么不能只靠 `created`（计数）：打标要知道**是哪几条**，计数不知道。
+   *    缺省不出现 ⇒ 既有读数形状与下游逐字不变（先例：`shadow?` / `authorization?`）。
+   */
+  createdMemoryIds?: readonly string[]
   rejected: number
   blockedSourceSequence?: number
   failures?: number
@@ -32,6 +40,7 @@ export class AutomaticMemoryConsumer {
 
   constructor(private readonly input: {
     db: RawDb; characterId: CharacterId; speaker: EntityRef; registry: DomainEventRegistry
+    ownerUserId?: string
     extractor: MemoryExtractor; onReading: (reading: AutomaticMemoryReading) => void
   }) {}
 
@@ -55,7 +64,7 @@ export class AutomaticMemoryConsumer {
     if (this.fence.closed) return Promise.resolve()
     this.notified = true
     if (this.inFlight) return this.inFlight
-    this.inFlight = this.run().finally(() => { this.inFlight = undefined })
+    this.inFlight = withoutReadScope(() => this.run()).finally(() => { this.inFlight = undefined })
     return this.inFlight
   }
 
@@ -79,13 +88,17 @@ export class AutomaticMemoryConsumer {
   }
 
   private async tick(): Promise<boolean> {
-    const { db, characterId, speaker, extractor, registry } = this.input
+    const { db, characterId, extractor, registry } = this.input
     const stored = await getWatermark(db, characterId, AUTOMATIC_MEMORY_PROCESSOR, AUTOMATIC_MEMORY_VERSION)
     if (!stored) throw new Error('automatic_memory_missing_cutover')
     const from = stored.processedThroughSequence + 1
     const latest = await latestCharacterEventSequence(db, characterId)
     const [event] = await conversationEventsInRange(db, characterId, from, latest, 1)
     if (!event) return false
+    const scope = this.input.ownerUserId === undefined ? undefined : await scopeForConversation(db,
+      String(event.conversationId), event.actorType === 'user' && event.actorId ? String(event.actorId) : this.input.ownerUserId, this.input.ownerUserId)
+    const processEvent = async (): Promise<boolean> => {
+    const speaker = scope === undefined || event.actorType !== 'user' || !event.actorId ? this.input.speaker : entityRef('user', String(event.actorId))
     const key = automaticMemorySourceKey(characterId, from, event.sequence)
     const counts = await automaticMemoryRetryCounts(db, characterId, key)
     if (counts.failures >= AUTOMATIC_MEMORY_FAILURE_LIMIT + counts.recoveries) {
@@ -110,7 +123,8 @@ export class AutomaticMemoryConsumer {
         const store = createNativeMemoryStore(tx)
         // Pending old extraction must not undo a newer correction/retraction/dispute.
         const candidates: MemoryCandidate[] = []
-        for (const candidate of extraction.candidates) {
+        for (const unscopedCandidate of extraction.candidates) {
+          const candidate = scopeMemoryCandidate(unscopedCandidate)
           const previous = await store.get(candidate.proposedId)
           if (previous && (previous.status === 'retracted' || previous.status === 'superseded')) continue
           const slot = slotOfCandidate(candidate)
@@ -151,6 +165,8 @@ export class AutomaticMemoryConsumer {
         return result
       })
       this.input.onReading({ status: 'completed', throughSequence: event.sequence, created: outcome.created.length,
+        /* U1 / ADR-137 写侧：把**哪几条**新建的带出去（装配层据此打归属标签） */
+        createdMemoryIds: outcome.created.map((record) => String(record.id)),
         rejected: outcome.rejections.length + extraction.candidates.length - outcome.candidates })
       return true
     } catch {
@@ -158,6 +174,8 @@ export class AutomaticMemoryConsumer {
       this.input.onReading({ status: 'failed', throughSequence: stored.processedThroughSequence, created: 0, rejected: 0 })
       return false
     }
+    }
+    return scope === undefined ? processEvent() : withReadScope(scope, processEvent)
   }
 
   private assertOpen(): void {

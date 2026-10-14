@@ -125,6 +125,7 @@ export type RecallEligibilityCode =
   | 'eligible'
   | 'owner_mismatch'
   | 'subject_missing_user'
+  | 'record_scope_not_authorized'
   | 'target_not_found'
   | 'target_ambiguous'
   | 'target_subject_not_in_candidate'
@@ -188,8 +189,11 @@ export function evaluateEligibility(input: EvaluateEligibilityInput): Eligibilit
   }
 
   // ② user：这条记忆讲的是不是这个人
+  const authorized = request.scope !== undefined && candidate.authorization?.allowed === true
+    && JSON.stringify(candidate.authorization.scope) === JSON.stringify(request.scope)
+  if (request.scope !== undefined && !authorized) return reject('WRONG_USER', 'record_scope_not_authorized')
   const aboutUser = candidate.subjects.some((subject) => sameEntity(subject, request.user))
-  if (!aboutUser) {
+  if (!aboutUser && !authorized) {
     return reject('WRONG_USER', 'subject_missing_user')
   }
 

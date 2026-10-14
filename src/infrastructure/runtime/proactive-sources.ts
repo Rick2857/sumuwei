@@ -34,6 +34,10 @@ import type { ProactiveSourceCandidate } from '../../kernel/contracts/proactive-
 import { listBeliefsByStatus } from '../persistence/belief-store.ts'
 import { listGoalStates } from '../persistence/goal-store.ts'
 import { createNativeMemoryStore } from '../persistence/memory-store.ts'
+/* U1 / ADR-138：依据集的授权过滤（契约 §4 第 9 行） */
+import { filterAuthorizedMemoryCandidates } from '../persistence/record-scope-store.ts'
+import type { Room, ScopeContext } from '../../kernel/contracts/scope.ts'
+import { currentReadScope, withReadScope } from '../persistence/read-scope.ts'
 
 /** 可用的信念状态（`active` = 当前采信；`disputed` = 有争议但仍在用） */
 export const PROACTIVE_SOURCE_BELIEF_STATUSES: readonly string[] = ['active', 'disputed']
@@ -68,8 +72,29 @@ export interface ProactiveSourceBuildResult {
  */
 export async function buildProactiveSourceCandidates(
   db: RawDb,
-  input: { characterId: string }
+  input: {
+    characterId: string
+    /**
+     * **U1 / `ADR-138`（`G18`）· 契约 §4 第 9 行**：本轮的授权上下文（**可选**）。
+     *
+     * ```text
+     * 有它 ⇒ 记忆依据集先过授权过滤（越权候选**不进**依据集）；无它 ⇒ 行为**逐字不变**
+     *        （既有调用点不传，单用户前提下与接线前一致）。
+     * ⚠️ 只过滤**记忆**这一档：信念与目标是**角色自己的认知**（不是别人的私聊内容），
+     *    它们的可见性语义是另一件事（契约 §4 第 9 行的引用也正是记忆那一处 `list({owner,status})`）。
+     *    这条限制是**刻意的**，不许被读成"整个依据面都已过滤"。
+     * ```
+     */
+    authorization?: { context: ScopeContext; defaultOriginRoom: Room }
+  }
 ): Promise<ProactiveSourceBuildResult> {
+  // ADR-140: the same scope now protects memories AND derived belief/goal sources.
+  if (input.authorization !== undefined && currentReadScope() === undefined) {
+    const auth = input.authorization
+    if (auth.defaultOriginRoom.kind !== 'private') throw new Error('proactive_owner_origin_required')
+    return withReadScope({ context: auth.context, ownerUserId: auth.defaultOriginRoom.userId, roomAuthorized: false },
+      () => buildProactiveSourceCandidates(db, { characterId: input.characterId }))
+  }
   const cid = asCharacterId(input.characterId)
   const candidates: ProactiveSourceCandidate[] = []
 
@@ -113,10 +138,27 @@ export async function buildProactiveSourceCandidates(
     status: 'active',
     limit: PROACTIVE_SOURCE_MEMORY_SCAN_LIMIT,
   })
+  /*
+   * U1 / ADR-138：**先授权、后取用**（与召回候选同一条次序纪律）。
+   * 列表已在手 ⇒ 不必改 store；没有 authorization ⇒ `allowedIds === null` ⇒ 逐字不变。
+   */
+  const allowedIds =
+    input.authorization === undefined
+      ? null
+      : new Set(
+          (
+            await filterAuthorizedMemoryCandidates(db, {
+              context: input.authorization.context,
+              candidateIds: memories.map((record) => String(record.id)),
+              defaultOriginRoom: input.authorization.defaultOriginRoom,
+            })
+          ).authorized
+        )
   let memoryCount = 0
   for (const record of memories) {
     const ref = String(record.id ?? '').trim()
     if (ref === '') continue
+    if (allowedIds !== null && !allowedIds.has(ref)) continue
     const label = memoryLabelOf(record)
     if (label === '') continue
     memoryCount += 1

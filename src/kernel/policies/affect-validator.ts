@@ -159,7 +159,7 @@ export interface AffectValidatorDeps {
   processed: { hasProcessed(idempotencyKey: string): Promise<boolean> }
   affect: AffectStateLookup
   /** 资格判定的配置面（active user——M8-D11；cutover 来自状态，不在这里） */
-  policy: { activeUserId: string }
+  policy: { activeUserId: string; allowedUserIds?: readonly string[] }
 }
 
 // ---------------------------------------------------------------------------
@@ -399,7 +399,7 @@ export async function validateAffectProposal(
           type: e.type,
           trustedOrigin: e.trustedOrigin,
         })),
-        { activeUserId: deps.policy.activeUserId, cutoverSequence: state.cutoverSequence },
+        { ...deps.policy, cutoverSequence: state.cutoverSequence },
       )
       if (!verdict.ok) {
         reject(verdict.code, verdict.detail)

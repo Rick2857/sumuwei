@@ -48,6 +48,12 @@ function globToRegExp(glob: string): RegExp {
 
 export const AFFECTED_RULES: readonly AffectedRule[] = [
   {
+    what: 'U1 完成接线与 G1 QQ 成员/房间入口',
+    match: ['src/infrastructure/persistence/read-scope.ts', 'src/infrastructure/qq/**',
+      'src/infrastructure/runtime/impression-query.ts', 'scripts/u1-completion-verify.ts', 'scripts/qq/group-verify.ts'],
+    gates: ['u1:completion:verify', 'qq:group:verify', 'qq:group:coexist:verify'],
+  },
+  {
     what: '任意 `.ts`',
     match: ['**/*.ts'],
     gates: ['typecheck'],
@@ -56,6 +62,86 @@ export const AFFECTED_RULES: readonly AffectedRule[] = [
     what: '`src/kernel/contracts/**`、`src/kernel/policies/validator.ts`、`src/kernel/projections/**`',
     match: ['src/kernel/contracts/**', 'src/kernel/policies/validator.ts', 'src/kernel/projections/**'],
     gates: ['kernel:test', 'kernel:verify'],
+  },
+  {
+    what: '`src/kernel/contracts/scope.ts`（U1 作用域契约：矩阵/可见性/门槛）或它自己的门',
+    match: ['src/kernel/contracts/scope.ts', 'scripts/u1-scope-contract-verify.ts'],
+    gates: ['u1:scope:verify'],
+  },
+  {
+    what: '`src/kernel/contracts/record-visibility.ts`（U1 读取判定核心）或它自己的门',
+    match: ['src/kernel/contracts/record-visibility.ts', 'scripts/u1-record-visibility-verify.ts'],
+    gates: ['u1:record-visibility:verify', 'u1:scope:verify'],
+  },
+  {
+    what: '`src/kernel/identity/inbound-identity.ts`（U1 逐消息身份解析）或它自己的门',
+    match: ['src/kernel/identity/inbound-identity.ts', 'scripts/u1-inbound-identity-verify.ts'],
+    gates: ['u1:identity:verify'],
+  },
+  {
+    what: '`src/infrastructure/runtime/inbound-identity-resolver.ts`（U1 身份解析读写链）或它自己的门',
+    match: ['src/infrastructure/runtime/inbound-identity-resolver.ts', 'scripts/u1-identity-store-verify.ts'],
+    gates: ['u1:identity-store:verify'],
+  },
+  {
+    what: '`src/infrastructure/runtime/conversation-recorder.ts`（U1 录制器逐消息身份）或它自己的门',
+    match: ['src/infrastructure/runtime/conversation-recorder.ts', 'scripts/u1-recorder-identity-verify.ts'],
+    gates: ['u1:recorder-identity:verify'],
+  },
+  {
+    what: '`src/infrastructure/runtime/adapters.ts`（关系 ORIGIN 播种器）或它自己的门',
+    match: ['src/infrastructure/runtime/adapters.ts', 'scripts/u1-new-user-relationship-verify.ts'],
+    gates: ['u1:new-user-relationship:verify'],
+  },
+  {
+    what: '`src/infrastructure/persistence/record-scope-store.ts`（U1 记录作用域标签）或它自己的门',
+    match: ['src/infrastructure/persistence/record-scope-store.ts', 'scripts/u1-record-scope-verify.ts'],
+    gates: ['u1:record-scope:verify'],
+  },
+  {
+    what: '`src/infrastructure/persistence/record-scope-store.ts` 的授权前置过滤（G18 / ADR-138）或它自己的门',
+    match: ['scripts/u1-authorized-candidates-verify.ts'],
+    gates: ['u1:authorized-candidates:verify'],
+  },
+  {
+    what: '`scripts/u1-g18-wiring-verify.ts`（G18 接线的门本身）',
+    match: ['scripts/u1-g18-wiring-verify.ts'],
+    gates: ['u1:g18-wiring:verify'],
+  },
+  {
+    what: '`src/infrastructure/runtime/scope-labeling.ts`（写侧打标）或它自己的门',
+    match: ['src/infrastructure/runtime/scope-labeling.ts', 'scripts/u1-write-path-labeling-verify.ts'],
+    gates: ['u1:write-path-labeling:verify', 'u1:record-scope:verify'],
+  },
+  {
+    what: '`src/main.ts`（生产装配根：入口作用域与召回授权器的接线点）或它自己的门',
+    match: ['scripts/u1-main-wiring-verify.ts'],
+    gates: ['u1:main-wiring:verify'],
+  },
+  {
+    what: '`src/infrastructure/runtime/inbound-turn-scope.ts`（入站 ⇒ 本轮作用域）或它自己的门',
+    match: ['src/infrastructure/runtime/inbound-turn-scope.ts', 'scripts/u1-inbound-turn-scope-verify.ts'],
+    gates: ['u1:inbound-turn-scope:verify', 'u1:entry-scope:verify'],
+  },
+  {
+    what: '`src/kernel/app/turn-gateway.ts` 的作用域注入点或它自己的门',
+    match: ['scripts/u1-gateway-scope-verify.ts'],
+    gates: ['u1:gateway-scope:verify'],
+  },
+  {
+    what: '`src/kernel/identity/entry-scope.ts`（入口 ⇒ 作用域）或它自己的门',
+    match: ['src/kernel/identity/entry-scope.ts', 'scripts/u1-entry-scope-verify.ts'],
+    gates: ['u1:entry-scope:verify'],
+  },
+  {
+    what: '`src/kernel/app/bridge/turn-bridge.ts`（受控登记表 / 桥协议）或它自己的门',
+    match: ['src/kernel/app/bridge/turn-bridge.ts', 'scripts/u1-bridge-platform-facts-verify.ts'],
+    gates: ['u1:bridge-facts:verify', 'postlv2:transport:verify', 'kernel:test'],
+  },
+  {
+    what: '`src/kernel/recall/ports.ts` 或召回检索实现（`memory-retrieval-store.ts`）',
+    match: ['src/kernel/recall/**', 'src/infrastructure/persistence/memory-retrieval-store.ts'],
+    gates: ['u1:g18-wiring:verify', 'kernel:test', 'kernel:verify'],
   },
   {
     what: '`src/kernel/context/sections.ts`、`src/kernel/app/turn-gateway.ts`（prompt 相关）',

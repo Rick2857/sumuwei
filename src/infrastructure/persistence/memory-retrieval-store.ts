@@ -101,6 +101,40 @@ export interface MemoryRetrievalStoreOptions {
   /** 单次检索最多扫描多少行（有界；默认跟随 store 的 500 上限） */
   scanCeiling?: number
   /**
+   * **U1 / `ADR-138`（`G18`）：授权前置过滤**（**可选**，装配层注入）。
+   *
+   * ```text
+   * 语义：**先过滤、后截断**（`filter → slice`）。不注入 ⇒ 行为与今天**逐字不变**
+   *       （候选截断仍按原样发生，token 少的单用户装配完全不受影响）。
+   * 为什么放在 options 而不是 `MemoryRetrievalQuery`：
+   *       授权上下文（谁 · 什么用途 · 哪个空间）是**装配事实**，与单次检索无关；
+   *       塞进 query 会让每个调用点都能自报身份 —— 那正是 D01 要防的事。
+   * 装配处只需传 `({ candidateIds }) => filterAuthorizedMemoryCandidates(db, {...})`。
+   * ```
+   *
+   * ⚠️ 它**只做授权**：不改排序、不改资格、不改任何记录；返回的 id 若比传入的少，
+   *    少掉的那些就是"被授权挡掉的"（会如实计入 `result.authorization`）。
+   */
+  authorizeCandidates?: (input: {
+    readonly candidateIds: readonly string[]
+    readonly limit: number
+    /**
+     * **本轮**的检索请求（含 `scope`）。
+     *
+     * ```text
+     * 为什么把它一起给授权器：适配器在**装配时**构造一次，而"这一轮是谁在问"是每轮的事实
+     * ⇒ 授权器必须是 `query` 的函数（`query.scope` 由 `RecallRequest.scope` 透传）。
+     * ⚠️ 装配层若注入了授权器却发现 `query.scope` 缺失，**必须失败关闭**（拒绝全部候选）——
+     *    那时 `authorization.denied` 会如实等于候选数，"静默放行"在读数上就看得见。
+     * ```
+     */
+    readonly query: MemoryRetrievalQuery
+  }) => Promise<{
+    readonly authorized: readonly string[]
+    readonly denied: number
+    readonly deniedForMissingLabel: number
+  }>
+  /**
    * **M9.5 / WP6（D26-④ + R3）**：语义探针（**可选**）。
    *
    * ```text
@@ -342,7 +376,26 @@ export function createMemoryRetrievalStore(
        *
        * ⚠️ 取不到就**不编**：读数缺失 ⇒ 下游派生为"来源未确立"（`DR-7` 失败关闭）。
        */
-      const selected = orderedIds
+      /*
+       * ⚠️ **U1 / `ADR-138`（`G18`）：授权过滤必须早于截断**（`filter → slice`）。
+       *
+       * 注入了授权器 ⇒ 先在**有序候选**上按授权过滤，**再**截断：
+       * 越权候选因此**不会占掉名额**（`G18` 的缺口正是"先截断后判定"）。
+       * 未注入 ⇒ `orderedIds` 原样进入截断 —— 与今天**逐字相同**（单用户装配不受影响）。
+       *
+       * ⚠️ 过滤**不改顺序**：`orderedIds.filter(...)` 保序，排序策略一个字未动。
+       */
+      const authorizeCandidates = options.authorizeCandidates
+      const authorization =
+        authorizeCandidates === undefined
+          ? null
+          : await authorizeCandidates({
+              candidateIds: orderedIds.map((item) => item.memoryId),
+              limit: query.limit,
+              query,
+            })
+      const allowedIds = authorization === null ? null : new Set(authorization.authorized)
+      const selected = (allowedIds === null ? orderedIds : orderedIds.filter((item) => allowedIds.has(item.memoryId)))
         .slice(0, query.limit)
         .map((item) => byMemoryId.get(item.memoryId))
         .filter((item): item is NonNullable<typeof item> => item !== undefined)
@@ -359,6 +412,7 @@ export function createMemoryRetrievalStore(
         const semanticScore = semanticScores?.get(memoryId)
         return {
           record: item.record,
+          ...(query.scope !== undefined ? { authorization: { scope: query.scope, allowed: allowedIds?.has(memoryId) === true } } : {}),
           channels: [...channels].sort() as MemoryRetrievalHit['channels'],
           rootReadings: readings.get(memoryId) ?? [],
           /* ⚠️ 分数与标签**同源**：都由 `semanticScores` 决定（D25 第 ④ 条） */
@@ -390,6 +444,16 @@ export function createMemoryRetrievalStore(
         ...(shadow !== null ? { shadow } : {}),
         scanned: byId.size,
         brokenMemoryIds,
+        /* U1 / ADR-138 `D05`：**只在真的过滤过**时出现（不注入授权器 ⇒ 字段不出现，形状逐字不变） */
+        ...(authorization === null
+          ? {}
+          : {
+              authorization: {
+                authorized: authorization.authorized.length,
+                denied: authorization.denied,
+                deniedForMissingLabel: authorization.deniedForMissingLabel,
+              },
+            }),
       }
     },
   }

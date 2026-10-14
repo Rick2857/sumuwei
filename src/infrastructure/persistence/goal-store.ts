@@ -49,6 +49,7 @@ import {
 import type { GoalStateLookupPort } from '../../kernel/policies/goal-validator.ts'
 import type { RawDb } from './db.ts'
 import { inTransaction } from './db.ts'
+import { sourceRootsVisible } from './read-scope.ts'
 import {
   deleteProjection,
   domainEventsFor,
@@ -68,7 +69,8 @@ export async function getGoalRow(
   characterId: CharacterId,
   goalId: string,
 ): Promise<CharacterProjection<GoalRowState> | undefined> {
-  return getProjection<GoalRowState>(db, characterId, `goal:${String(goalId)}`)
+  const row = await getProjection<GoalRowState>(db, characterId, `goal:${String(goalId)}`)
+  return row !== undefined && await sourceRootsVisible(db, row.state.goal.sourceRefs.map(ref => String(ref.conversationEventId))) ? row : undefined
 }
 
 /**
@@ -89,9 +91,11 @@ export async function listGoalRows(
 /** 只取 state（放行口的 `GoalStateLookupPort` 实现用） */
 export async function listGoalStates(db: RawDb, characterId: CharacterId): Promise<GoalRowState[]> {
   const rows = await listGoalRows(db, characterId)
-  return rows
+  const states = rows
     .map((row) => row.state as GoalRowState | undefined)
     .filter((state): state is GoalRowState => state !== undefined)
+  const allowed = await Promise.all(states.map(state => sourceRootsVisible(db, state.goal.sourceRefs.map(ref => String(ref.conversationEventId)))))
+  return states.filter((_, index) => allowed[index])
 }
 
 /**

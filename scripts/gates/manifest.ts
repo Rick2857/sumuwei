@@ -1349,10 +1349,253 @@ export const PL2_GATES: readonly GateSpec[] = [
     '⚠️ `postlv2:db:verify` 只读**已落盘**的 artifact 快照（不打开真实库）。',
   })),
   /*
-   * ⚠️ **2026-10-05 追加 1 道**（`L-S8-30` 入口侧 / `ADR-107` `R-2a′`）：
-   * 上面那 10 道的分列读数（**8 PASS · 2 FAIL**，2026-10-04）是**当时的**读数，不回写；
-   * 本道是显式开局入口 `story:start` 的专属门，**独立成条**（自带 `why`）。
+   * ⚠️ **2026-10-13 追加 1 道**（多用户补充计划 X0/U1 / `ADR-133` `ACCEPTED / DESIGN FROZEN`）：
+   * 作用域契约的**纯判定门**。它只核对契约层（矩阵完整性 / 每个具名拒绝码可复现 /
+   * 拆掉身份核查必须判红并恢复 / 裁定门槛的严格大于语义 / 可见性铁律）。
+   * ⚠️ **不**主张接线、不主张运行时隔离、不打开任何库。
    */
+  {
+    id: 'u1:scope:verify',
+    title: 'U1 作用域契约（权限矩阵 · 可见性 · 裁定门槛；纯判定）',
+    argv: tsx('scripts/u1-scope-contract-verify.ts'),
+    entry: 'scripts/u1-scope-contract-verify.ts',
+    tags: ['post-lv2', 'u1'],
+    resources: { parallel: 'safe' as const },
+    why:
+      '**纯进程内**：只读 `src/kernel/contracts/scope.ts` 的纯函数；零数据库 / 零模型 / 零出网 / 不占端口 / 不写证据 / 不改工作树。' +
+      '三段式：正控（该放行的格放行）+ 负控（**每个具名拒绝码都可复现**）+ 拆掉身份核查必须判红、恢复后正控再次通过。' +
+      '⚠️ 它**只**核对契约判定：不主张身份解析/读取面过滤/RLS 已接线，也不主张多用户隔离已就绪。',
+  },
+  {
+    id: 'u1:identity:verify',
+    title: 'U1 逐消息身份解析（平台账号唯一依据 · 不回退为原主人；纯判定）',
+    argv: tsx('scripts/u1-inbound-identity-verify.ts'),
+    entry: 'scripts/u1-inbound-identity-verify.ts',
+    tags: ['post-lv2', 'u1'],
+    resources: { parallel: 'safe' as const },
+    why:
+      '**纯进程内**：只读 `src/kernel/identity/inbound-identity.ts` 的纯函数；零数据库 / 零模型 / 零出网 / 不占端口 / 不写证据 / 不改工作树。' +
+      '三段式：正控（含"同一 QQ 跨私聊与两群 = 同一 userId"）+ 负控（**每个具名拒绝码都可复现**）+ ' +
+      '拆掉账号比对的弱化解析器必须把陌生人当主人（证明防线在被量）。' +
+      '⚠️ 它**只**核对解析判定：不主张入口已接线（WP2b）、不主张任何生产开通。',
+  },
+  {
+    id: 'u1:identity-store:verify',
+    title: 'U1 身份解析读写链（映射表 · 幂等建档 · 并发首次消息只有一行）',
+    argv: tsx('scripts/u1-identity-store-verify.ts'),
+    entry: 'scripts/u1-identity-store-verify.ts',
+    tags: ['post-lv2', 'u1'],
+    resources: { parallel: 'serial' as const, evidenceWrites: ['artifacts/post-lv2'] },
+    why:
+      '隔离库（`isolateDatabase()` 一次性 %TEMP% 沙箱；`data/pglite` **从不被打开**）+ 零模型 / 零出网。' +
+      '三段式：正控（首见幂等建档 / 重复解析不新建 / 同一账号跨群同一 userId / 原主人识别）+ ' +
+      '负控（**每条拒绝路径都不写任何行**；G14 的并发首次消息 ×8 ⇒ 映射**恰好 +1 行**）+ ' +
+      '拆防线（白名单恒真 ⇒ 会真的为陌生账号建档）+ 恢复。' +
+      '⚠️ 证据写共享里程碑根 ⇒ 保守声明 serial。⚠️ 它**不**接线入口：生产链路仍只接本人私聊。',
+  },
+  {
+    id: 'u1:recorder-identity:verify',
+    title: 'U1 录制器逐消息身份（现状回归 · 不回退为单用户 · 三处失败关闭 · 拆防线判红）',
+    argv: tsx('scripts/u1-recorder-identity-verify.ts'),
+    entry: 'scripts/u1-recorder-identity-verify.ts',
+    tags: ['post-lv2', 'u1'],
+    resources: { parallel: 'serial' as const, evidenceWrites: ['artifacts/post-lv2'] },
+    why:
+      '隔离库（`isolateDatabase()` 一次性 %TEMP% 沙箱；`data/pglite` **从不被打开**）+ 零模型 / 零出网。' +
+      '正控（不给身份 ⇒ 与今天逐字节相同；给身份 ⇒ 按平台账号解析、事件 actor 正确、跨会话同一 userId）+ ' +
+      '负控（**三处失败关闭都不回退**：缺解析器 / 空账号 / 空 userId）+ 拆防线（忽略平台账号 ⇒ 陌生人被记成主人）+ 恢复。' +
+      '⚠️ `.env` 为 postgres 后端时本门**具名 NOT RUN**（目录沙箱要求 PGlite）。' +
+      '⚠️ 它**不**接线生产入口：装配层（main.ts）本轮一字未改。',
+  },
+  {
+    id: 'u1:new-user-relationship:verify',
+    title: 'U1 新用户初始关系（WP3 / ADR-136 方案 A：0.2/0.2 + NEW_USER_BASELINE · 原主人路径不变 · 幂等）',
+    argv: tsx('scripts/u1-new-user-relationship-verify.ts'),
+    entry: 'scripts/u1-new-user-relationship-verify.ts',
+    tags: ['post-lv2', 'u1'],
+    resources: { parallel: 'serial' as const },
+    why:
+      '隔离库（`isolateDatabase()` 一次性 %TEMP% 沙箱；`data/pglite` **从不被打开**）+ 零模型 / 零出网。' +
+      '正控（新用户 = 0.2/0.2 + `NEW_USER_BASELINE` + originated；**原主人仍是 0.85/0.60 + `SETTING_BASELINE`**；两份投影互不影响）+ ' +
+      '负控（重复播种 no-op、revision 不变 ⇒ 不重置）+ 拆防线（**用原主人播种器建新用户 ⇒ 读数真的会错**）+ 恢复 + ' +
+      '契约闭集（五值**具名**、`MAINTENANCE_INJECTION` 仍失败关闭）。' +
+      '⚠️ `.env` 为 postgres 后端时本门**具名 NOT RUN**。⚠️ 它只证"播种器的值/来源/幂等"：**不**接线（谁何时调它属 WP2b-2b）。',
+  },
+  {
+    id: 'u1:record-scope:verify',
+    title: 'U1 记录作用域标签（WP4 / ADR-137 方案 B：迁移 0019 · 写一次 · 保守缺省 · 库层 CHECK · 不回填）',
+    argv: tsx('scripts/u1-record-scope-verify.ts'),
+    entry: 'scripts/u1-record-scope-verify.ts',
+    tags: ['post-lv2', 'u1'],
+    resources: { parallel: 'serial' as const },
+    why:
+      '隔离库（`isolateDatabase()` 一次性 %TEMP% 沙箱；`data/pglite` **从不被打开**）+ 零模型 / 零出网。' +
+      '正控（表/列齐 · schema=19 · 写读一致 · 缺标签被如实列出）+ ' +
+      '负控（**写一次**：重复写不改原标签 · 缺标签 ⇒ `private_to_origin`+`labelMissing` · ' +
+      '**库层 CHECK 拒绝五类非法行**（绕过应用层直接插）· 应用层也拒）+ ' +
+      '拆防线（把缺省换成 `public_to_room` 必须与真实判定不同）+ 恢复 + ' +
+      '**迁移只建表**（事后标签表为空 ⇒ 不给旧记录回填 origin）。' +
+      '⚠️ 它只证**标签的存取与缺省**：读取面（召回/候选/输出）**尚未**按它过滤（那是 WP5）。',
+  },
+  {
+    id: 'u1:record-visibility:verify',
+    title: 'U1 记录可见性判定（WP5 判定核心：授权 × 归属披露 · 缺标签保守 · 特权独立带审计）',
+    argv: tsx('scripts/u1-record-visibility-verify.ts'),
+    entry: 'scripts/u1-record-visibility-verify.ts',
+    tags: ['post-lv2', 'u1'],
+    resources: { parallel: 'safe' as const },
+    why:
+      '**纯进程内**：只读 `src/kernel/contracts/record-visibility.ts`（以及它组合的 scope 判定）；' +
+      '零数据库 / 零模型 / 零出网 / 不占端口 / 不写证据 / 不改工作树。' +
+      '正控（自己私聊来源 · 同群公开 · **特权通路带审计** · 内部认知走 `internal_cognition_read`）+ ' +
+      '负控（他人私聊来源 · 跨群 · 私聊里读群资料 · 显式分享条件不满足 · 群未授权 · 用途不对 · `character_internal` 不回吐原文）+ ' +
+      '**缺标签保守性专项**（本人可读但 `labelMissing=true`；他人/群来源一律拒）+ 矩阵格派生（五条）+ 拆防线（缺标签当"同群可见"必与真实判定相反）。' +
+      '⚠️ 它只证**判定**：今天**没有任何读取面**接线；`explicit_shared` 的放宽按 `ADR-137` `R-WP4-2` 已推迟（今天拒、失败关闭）。',
+  },
+  {
+    id: 'u1:authorized-candidates:verify',
+    title: 'U1 授权前置过滤（G18 / ADR-138：filter→slice 而不是 slice→filter · 缺标签缺省=原主人私聊）',
+    argv: tsx('scripts/u1-authorized-candidates-verify.ts'),
+    entry: 'scripts/u1-authorized-candidates-verify.ts',
+    tags: ['post-lv2', 'u1'],
+    resources: { parallel: 'serial' as const },
+    why:
+      '隔离库（`isolateDatabase()` 一次性 %TEMP% 沙箱；`data/pglite` **从不被打开**）+ 零模型 / 零出网。' +
+      '正控（越权候选**占满前缀**时合法记录仍被选出 · `limit` 被填满 · 返回**同序** · `denied`/`deniedForMissingLabel` 如实 · 留痕不记正文）+ ' +
+      '负控（**拆防线**：`slice(2)→filter` 得 0 条 vs `filter→slice(2)` 得 2 条 ⇒ 次序就是被量的那件事 · ' +
+      '缺标签对普通用户拒/对**原主人**可见 · 群未授权不可见）+ 恢复 + 空候选边界。' +
+      '⚠️ 本门**不**关闭 `G18`：读取面尚未接线（截断仍在 `memory-retrieval-store.ts:345-348`）。' +
+      '⚠️ `.env` 为 postgres 后端时本门**具名 NOT RUN**。',
+  },
+  {
+    id: 'u1:g18-wiring:verify',
+    title: 'U1 G18 接线（ADR-138：召回**截断之前**先过授权 · 不注入即逐字不变）',
+    argv: tsx('scripts/u1-g18-wiring-verify.ts'),
+    entry: 'scripts/u1-g18-wiring-verify.ts',
+    tags: ['post-lv2', 'u1'],
+    resources: { parallel: 'safe' as const },
+    why:
+      '**纯进程内**：被测对象是**真的** `createMemoryRetrievalStore({ authorizeCandidates })` 的截断路径；' +
+      '数据面用夹具 store（合成记录）⇒ 候选集合可控；零数据库 / 零模型 / 零出网 / 不占端口 / 不写证据。' +
+      '正控（注入后越权候选**不占名额** · `limit` 被填满 · `authorization` 计数如实 · **同序**）+ ' +
+      '负控（**不注入 ⇒ 取到最新两条且 `authorization` 字段不出现** —— 形状逐字不变 · ' +
+      '**拆防线：先截断后过滤得 0 条 vs 新次序得 2 条** · 授权器"全放行" ⇒ 又回到最新两条）+ 恢复。' +
+      '⚠️ 本门**不**代表 `G18` 在生产已关闭：装配处（`main.ts` 召回装配）**尚未**注入授权器。',
+  },
+  {
+    id: 'u1:entry-scope:verify',
+    title: 'U1 入口作用域（入口 ⇒ 作用域三元组 · 身份不明/群无名一律失败关闭 · 缺省来源域=原主人私聊）',
+    argv: tsx('scripts/u1-entry-scope-verify.ts'),
+    entry: 'scripts/u1-entry-scope-verify.ts',
+    tags: ['post-lv2', 'u1'],
+    resources: { parallel: 'safe' as const },
+    why:
+      '**纯进程内**：只读 `src/kernel/identity/entry-scope.ts`；零数据库 / 零模型 / 零出网 / 不占端口 / 不写证据。' +
+      '正控（四种入口各自的作用域：私聊主人 / 私聊普通用户 / 本机入口 / 群）+ ' +
+      '**失败关闭五条**（身份解析不出 · 空白身份 · 群无 groupId · 群内身份不明 · 取不到原主人 id）+ ' +
+      '群 ≠ 私聊（原主人在群里 room 仍是那个群；未授权如实传 false）+ 缺省来源域恒为原主人私聊 + ' +
+      '拆防线（"身份不明当作原主人"必与真实判定相反）+ 入口闭集自检。' +
+      '⚠️ 本门**不**代表生产入口已接线：`main.ts` 仍未调用它。',
+  },
+  {
+    id: 'u1:gateway-scope:verify',
+    title: 'U1 网关作用域端到端（真 TurnGateway 一轮 ⇒ 检索端口真的收到 query.scope；不传即 undefined）',
+    argv: tsx('scripts/u1-gateway-scope-verify.ts'),
+    entry: 'scripts/u1-gateway-scope-verify.ts',
+    tags: ['post-lv2', 'u1'],
+    resources: { parallel: 'serial' as const },
+    why:
+      '隔离库（`isolateDatabase()` 一次性 %TEMP% 沙箱）+ **真 `TurnGateway`**（`beginTurn → compileTurn`；' +
+      '**不调 `completeTurn`** ⇒ 零模型 / 零出网）+ 真召回服务 + **间谍检索端口**（只记 `query.scope`，不碰真库）。' +
+      '正控（传了 `scope` ⇒ 端口看到的 `query.scope` **逐字相同**）+ 负控（**不传 ⇒ `undefined`**，不是空对象/默认作用域 —— 接线前逐字相同）+ ' +
+      '拆防线（"不传就补一个原主人作用域"会凭空造出授权上下文，与真实读数相反）。' +
+      '⚠️ 本门只证"网关把 scope 传下去了"：`main.ts` **仍未设置该选项** ⇒ 生产行为一字未变。',
+  },
+  {
+    id: 'u1:inbound-turn-scope:verify',
+    title: 'U1 入站消息 ⇒ 本轮作用域（WP2b-2b 核心：平台事实 → 身份解析 → 入口作用域 · 失败关闭 · 幂等不改绑）',
+    argv: tsx('scripts/u1-inbound-turn-scope-verify.ts'),
+    entry: 'scripts/u1-inbound-turn-scope-verify.ts',
+    tags: ['post-lv2', 'u1'],
+    resources: { parallel: 'serial' as const },
+    why:
+      '隔离库（真身份映射表；`data/pglite` 从不被打开）+ 零模型 / 零出网。' +
+      '正控（私聊原主人 ⇒ owner · 私聊陌生但获准 ⇒ user · 群消息 ⇒ room 是那个群且未授权如实传 false）+ ' +
+      '负控（**没有平台账号证据 ⇒ 不给 scope** · 未获准 ⇒ 失败关闭且**不建档** · 群号出现在私聊里 ⇒ 具名拒绝）+ ' +
+      '幂等（重复解析 `boundFirstTime=false` 且**不改绑**）+ 缺省来源域恒为原主人私聊 + 拆防线（把"解析失败"补成原主人必与真实读数相反）。' +
+      '⚠️ 本门只证"这一层翻译得对"：`main.ts` **仍未调用它**（生产未接线）。',
+  },
+  {
+    id: 'u1:main-wiring:verify',
+    title: 'U1 main.ts 接线（G18 生产接线点存在性 + **量具有效性**：四处削弱必须各判红）',
+    argv: tsx('scripts/u1-main-wiring-verify.ts'),
+    entry: 'scripts/u1-main-wiring-verify.ts',
+    tags: ['post-lv2', 'u1'],
+    resources: { parallel: 'safe' as const },
+    why:
+      '**结构判据（text-lock）**，但按"量具有效性"写：① 真实 `src/main.ts` ⇒ 0 违规；' +
+      '② **四处人为削弱**（对所有入口给 scope / 掐掉网关转交 / 授权器永远放行 / 失败关闭改成放行全部）' +
+      '各跑一次 ⇒ **必须每次判红且红的正是那一条**。只有 ② 全过，① 才有信息量。' +
+      '⚠️ 它**只证接线点在**，**不证行为**；行为读数（真会话走一轮看召回是否按作用域过滤）**未取得**。',
+  },
+  {
+    id: 'u1:write-path-labeling:verify',
+    title: 'U1 写入侧打标（ADR-137 写侧：新记忆写下时按**本轮房间**打归属 · 写一次 · 无作用域即 no-op）',
+    argv: tsx('scripts/u1-write-path-labeling-verify.ts'),
+    entry: 'scripts/u1-write-path-labeling-verify.ts',
+    tags: ['post-lv2', 'u1'],
+    resources: { parallel: 'serial' as const },
+    why:
+      '隔离库（真标签表；`data/pglite` 从不被打开）+ 零模型 / 零出网。' +
+      '正控（私聊 ⇒ 来源域=那个人 · **群 ⇒ 来源域=那个群** · `labeled_by` 记写侧标记）+ ' +
+      '负控（**没有作用域 ⇒ 完全 no-op**、标签表里没有那一行 ⇒ 不编来源域 · 空 memoryId 不打）+ ' +
+      '写一次（重复打标 `already_labeled` 且原标签逐字不变）+ ' +
+      '**收益**（打完标的记录经授权过滤器读回：来源域本人读得到、旁人读不到）+ ' +
+      '拆防线（硬编码"原主人私聊"会把群来源记错 ⇒ 可判红）。' +
+      '⚠️ `main.ts` 是否调用它由 `u1:main-wiring:verify`（结构判据）守。',
+  },
+  {
+    id: 'u1:bridge-facts:verify',
+    title: 'U1 / ADR-139：桥上的入站平台事实（闭集形状 · 具名拒绝 · 缺席逐字旧行为）',
+    argv: tsx('scripts/u1-bridge-platform-facts-verify.ts'),
+    entry: 'scripts/u1-bridge-platform-facts-verify.ts',
+    tags: ['post-lv2', 'u1'],
+    resources: { parallel: 'safe' as const },
+    why:
+      '**纯进程内**（真 `TurnBridge` + 桩 host）：零数据库 / 零模型 / 零出网 / 不占端口 / 不写证据。' +
+      '正控（合法 private / 合法 group ⇒ 合法；合法 facts 的轮次真的回；缺席 facts 照常回）+ ' +
+      '负控（未知键 / 未知 transport / 空 selfId / 空 senderUserId / 未知 messageType / private 带 groupId / ' +
+      'group 缺 groupId / null / 数组 / 字符串 **逐条具名判红**，且非法 facts 的轮次 **host.runTurn 一次都不跑**）+ 恢复。' +
+      '⚠️ 它**只**守这一格的形状与拒绝语义（`ADR-139` `D01`/`D04`）：' +
+      '非原主人私聊未开放（`R-139-3` = ①，本切片 owner-only），核心侧"谁消费它、怎么算 scope"是下一包。',
+  },
+  {
+    id: 'u1:completion:verify',
+    title: 'U1 实库房间隔离、非旁路 RLS、后台归因和印象阈值',
+    argv: tsx('scripts/u1-completion-verify.ts'),
+    entry: 'scripts/u1-completion-verify.ts',
+    tags: ['post-lv2', 'u1'],
+    resources: { parallel: 'serial' as const },
+    why: '固定 PGlite 沙箱；真存储/事务和无旁路角色，零外部模型，零生产连接。',
+  },
+  {
+    id: 'qq:group:verify',
+    title: 'G1 真桥/核心群聊隔离与成员撤销整链',
+    argv: tsx('scripts/qq/group-verify.ts'),
+    entry: 'scripts/qq/group-verify.ts',
+    tags: ['post-lv2', 'u1', 'qq'],
+    resources: { parallel: 'serial' as const },
+    why: '本地临时 OneBot/模型端口、人工账号、真 main.ts 子进程和隔离数据库；真实 QQ/外部模型未运行。',
+  },
+  {
+    id: 'qq:group:coexist:verify',
+    title: 'G1 共存连接：群聊矩阵与皮套主人具名查询',
+    argv: [...tsx('scripts/qq/group-verify.ts'), '--coexist'],
+    entry: 'scripts/qq/group-verify.ts',
+    tags: ['post-lv2', 'u1', 'qq'],
+    resources: { parallel: 'serial' as const },
+    why: '复用群夹具；真 --coexist 核心、两个临时 TCP 端口和单一隔离库；不启停生产服务。',
+  },
   {
     id: 'postlv2:s8:start:verify',
     title:

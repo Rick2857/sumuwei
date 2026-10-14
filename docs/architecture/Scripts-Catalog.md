@@ -18,11 +18,11 @@
 
 | 类别 | 条目数 |
 |---|---:|
-| 已登记门 | 205 |
+| 已登记门 | 223 |
 | 汇总/链入口 | 17 |
-| 文档入口 | 24 |
-| 内部 | 371 |
-| **合计** | **617** |
+| 文档入口 | 2 |
+| 内部 | 400 |
+| **合计** | **642** |
 
 `scripts/` 下**没有任何 pnpm 入口引用**的脚本文件：**265 个**（见文末）。
 
@@ -57,6 +57,10 @@
 
 **内部（4）**：`action:audit` · `action:list` · `action:show` · `action:trace`
 
+### `avatar`（3 条）
+
+**内部（3）**：`avatar:3d:stop` · `avatar:3d:test` · `avatar:3d:test:live`
+
 ### `backfill`（2 条）
 
 **内部（2）**：`backfill:apply` · `backfill:preview`
@@ -69,6 +73,11 @@
 
 **内部（1）**：`chat`
 
+### `ci`（1 条）
+
+**入口**：
+- `ci:offline` — 文档入口
+
 ### `cli`（1 条）
 
 **内部（1）**：`cli:exit:verify`
@@ -77,7 +86,10 @@
 
 **内部（6）**：`coexist:chat` · `coexist:check` · `coexist:pet` · `coexist:prepare` · `coexist:start` · `coexist:stop`
 
-### `db`（3 条）
+### `db`（4 条）
+
+**入口**：
+- `db:init` — 文档入口
 
 **内部（3）**：`db:inspect` · `db:restore` · `db:snapshot`
 
@@ -93,10 +105,7 @@
 
 ### `doc`（2 条）
 
-**入口**：
-- `doc:check` — 文档入口
-
-**内部（1）**：`doc:sync`
+**内部（2）**：`doc:check` · `doc:sync`
 
 ### `dump`（1 条）
 
@@ -104,12 +113,9 @@
 
 ### `eval`（20 条）
 
-**入口**：
-- `eval:m3:live` — 文档入口
-
 **已登记门（7）**：`eval:dryrun` · `eval:m3` · `eval:m4` · `eval:otlp` · `eval:providers` · `eval:scenarios` · `eval:telemetry`
 
-**内部（12）**：`eval:m3:promptfoo` · `eval:m3:promptfoo:build` · `eval:m4:extraction` · `eval:m4:extraction:live` · `eval:m4:promptfoo` · `eval:m4:promptfoo:assertions` · `eval:m4:promptfoo:build` · `eval:m4:promptfoo:live` · `eval:phoenix-chat` · `eval:promptfoo` · `eval:promptfoo:build` · `eval:real`
+**内部（13）**：`eval:m3:live` · `eval:m3:promptfoo` · `eval:m3:promptfoo:build` · `eval:m4:extraction` · `eval:m4:extraction:live` · `eval:m4:promptfoo` · `eval:m4:promptfoo:assertions` · `eval:m4:promptfoo:build` · `eval:m4:promptfoo:live` · `eval:phoenix-chat` · `eval:promptfoo` · `eval:promptfoo:build` · `eval:real`
 
 ### `extractor`（1 条）
 
@@ -133,12 +139,9 @@
 
 ### `inc-01`（6 条）
 
-**入口**：
-- `inc-01:regression:verify` — 文档入口
-
 **已登记门（1）**：`inc-01:gates`
 
-**内部（4）**：`inc-01:first-snapshot` · `inc-01:measurement:verify` · `inc-01:test` · `inc-01:verify`
+**内部（5）**：`inc-01:first-snapshot` · `inc-01:measurement:verify` · `inc-01:regression:verify` · `inc-01:test` · `inc-01:verify`
 
 ### `inspect`（1 条）
 
@@ -173,15 +176,9 @@
 
 ### `m10.1`（18 条）
 
-**入口**：
-- `m10.1:agreement:verify` — 文档入口
-- `m10.1:long:live` — 文档入口
-- `m10.1:measurement:verify` — 文档入口
-- `m10.1:smoke:live` — 文档入口
-
 **已登记门（1）**：`m10.1:gates`
 
-**内部（13）**：`m10.1:a11:behavior` · `m10.1:activate` · `m10.1:activation:readback` · `m10.1:assembly:verify` · `m10.1:context:verify` · `m10.1:docs:verify` · `m10.1:e2e:verify` · `m10.1:expiry:verify` · `m10.1:inputs:verify` · `m10.1:long:verify` · `m10.1:policy:verify` · `m10.1:review:materials` · `m10.1:wp0:verify`
+**内部（17）**：`m10.1:a11:behavior` · `m10.1:activate` · `m10.1:activation:readback` · `m10.1:agreement:verify` · `m10.1:assembly:verify` · `m10.1:context:verify` · `m10.1:docs:verify` · `m10.1:e2e:verify` · `m10.1:expiry:verify` · `m10.1:inputs:verify` · `m10.1:long:live` · `m10.1:long:verify` · `m10.1:measurement:verify` · `m10.1:policy:verify` · `m10.1:review:materials` · `m10.1:smoke:live` · `m10.1:wp0:verify`
 
 ### `m11`（23 条）
 
@@ -206,11 +203,10 @@
 - `m3:ci` — 汇总/链入口
 - `m3:ci:full` — 汇总/链入口
 - `m3:gates` — 汇总/链入口
-- `m3:phoenix` — 文档入口
 
 **已登记门（3）**：`m3:migrate-gate` · `m3:seed-check` · `m3:verify`
 
-**内部（1）**：`m3:seed-baseline`
+**内部（2）**：`m3:phoenix` · `m3:seed-baseline`
 
 ### `m3.5`（7 条）
 
@@ -258,35 +254,21 @@
 
 ### `m5.1.1`（43 条）
 
-**入口**：
-- `m5.1.1:wp8:verify` — 文档入口
-
 **已登记门（1）**：`m5.1.1:gates`
 
-**内部（41）**：`m5.1.1:d01:smoke:live` · `m5.1.1:final:verify` · `m5.1.1:k16:verify` · `m5.1.1:k17:verify` · `m5.1.1:k19:verify` · `m5.1.1:k20:verify` · `m5.1.1:k25:verify` · `m5.1.1:k29:verify` · `m5.1.1:migration:verify` · `m5.1.1:phase4:closure:verify` · `m5.1.1:phase4:preflight` · `m5.1.1:phase4a:verify` · `m5.1.1:phase4b:db-v9` · `m5.1.1:phase4b:preflight` · `m5.1.1:phase4b:verify` · `m5.1.1:prod-copy:verify` · `m5.1.1:test` · `m5.1.1:wp10a:verify` · `m5.1.1:wp10b:verify` · `m5.1.1:wp10c:verify` · `m5.1.1:wp11:verify` · `m5.1.1:wp3:verify` · `m5.1.1:wp3.2:verify` · `m5.1.1:wp4:verify` · `m5.1.1:wp4.1:verify` · `m5.1.1:wp5:verify` · `m5.1.1:wp5.1:verify` · `m5.1.1:wp6:verify` · `m5.1.1:wp6.1:verify` · `m5.1.1:wp7:preflight` · `m5.1.1:wp7:verify` · `m5.1.1:wp8c1:restore` · `m5.1.1:wp8c1:verify` · `m5.1.1:wp8c2:verify` · `m5.1.1:wp8c3:verify` · `m5.1.1:wp9:verify` · `m5.1.1:wp9a:verify` · `m5.1.1:wp9b:selection:verify` · `m5.1.1:wp9b1:verify` · `m5.1.1:wp9b2:verify` · `m5.1.1:wp9c0:verify`
+**内部（42）**：`m5.1.1:d01:smoke:live` · `m5.1.1:final:verify` · `m5.1.1:k16:verify` · `m5.1.1:k17:verify` · `m5.1.1:k19:verify` · `m5.1.1:k20:verify` · `m5.1.1:k25:verify` · `m5.1.1:k29:verify` · `m5.1.1:migration:verify` · `m5.1.1:phase4:closure:verify` · `m5.1.1:phase4:preflight` · `m5.1.1:phase4a:verify` · `m5.1.1:phase4b:db-v9` · `m5.1.1:phase4b:preflight` · `m5.1.1:phase4b:verify` · `m5.1.1:prod-copy:verify` · `m5.1.1:test` · `m5.1.1:wp10a:verify` · `m5.1.1:wp10b:verify` · `m5.1.1:wp10c:verify` · `m5.1.1:wp11:verify` · `m5.1.1:wp3:verify` · `m5.1.1:wp3.2:verify` · `m5.1.1:wp4:verify` · `m5.1.1:wp4.1:verify` · `m5.1.1:wp5:verify` · `m5.1.1:wp5.1:verify` · `m5.1.1:wp6:verify` · `m5.1.1:wp6.1:verify` · `m5.1.1:wp7:preflight` · `m5.1.1:wp7:verify` · `m5.1.1:wp8:verify` · `m5.1.1:wp8c1:restore` · `m5.1.1:wp8c1:verify` · `m5.1.1:wp8c2:verify` · `m5.1.1:wp8c3:verify` · `m5.1.1:wp9:verify` · `m5.1.1:wp9a:verify` · `m5.1.1:wp9b:selection:verify` · `m5.1.1:wp9b1:verify` · `m5.1.1:wp9b2:verify` · `m5.1.1:wp9c0:verify`
 
 ### `m5.5`（6 条）
 
-**入口**：
-- `m5.5:e2e:verify` — 文档入口
-- `m5.5:measurement:verify` — 文档入口
-- `m5.5:smoke:live` — 文档入口
-- `m5.5:test` — 文档入口
-- `m5.5:verify` — 文档入口
-
 **已登记门（1）**：`m5.5:gates`
+
+**内部（5）**：`m5.5:e2e:verify` · `m5.5:measurement:verify` · `m5.5:smoke:live` · `m5.5:test` · `m5.5:verify`
 
 ### `m5.5.1`（7 条）
 
-**入口**：
-- `m5.5.1:e2e:verify` — 文档入口
-- `m5.5.1:measurement:verify` — 文档入口
-- `m5.5.1:test` — 文档入口
-- `m5.5.1:verify` — 文档入口
-
 **已登记门（1）**：`m5.5.1:gates`
 
-**内部（2）**：`m5.5.1:semantics:live` · `m5.5.1:smoke:live`
+**内部（6）**：`m5.5.1:e2e:verify` · `m5.5.1:measurement:verify` · `m5.5.1:semantics:live` · `m5.5.1:smoke:live` · `m5.5.1:test` · `m5.5.1:verify`
 
 ### `m6`（4 条）
 
@@ -308,12 +290,9 @@
 
 ### `m8`（11 条）
 
-**入口**：
-- `m8:live:level1` — 文档入口
-
 **已登记门（1）**：`m8:gates`
 
-**内部（9）**：`m8:e2e:verify` · `m8:long:verify` · `m8:wp0:admission` · `m8:wp0:baseline` · `m8:wp2:contracts` · `m8:wp3:verify` · `m8:wp4:verify` · `m8:wp5:verify` · `m8:wp6:verify`
+**内部（10）**：`m8:e2e:verify` · `m8:live:level1` · `m8:long:verify` · `m8:wp0:admission` · `m8:wp0:baseline` · `m8:wp2:contracts` · `m8:wp3:verify` · `m8:wp4:verify` · `m8:wp5:verify` · `m8:wp6:verify`
 
 ### `m8.5`（17 条）
 
@@ -364,24 +343,20 @@
 
 **内部（2）**：`phoenix:down` · `phoenix:up`
 
-### `postgresql`（14 条 · **有同名 lane**）
+### `postgresql`（15 条 · **有同名 lane**）
 
 **已登记门（11）**：`postgresql:bench:verify` · `postgresql:g01:verify` · `postgresql:g02:verify` · `postgresql:g03:verify` · `postgresql:g04:verify` · `postgresql:g05:verify` · `postgresql:g06:verify` · `postgresql:g07:verify` · `postgresql:g08:verify` · `postgresql:g09:verify` · `postgresql:g10:verify`
 
-**内部（3）**：`postgresql:cutover:apply` · `postgresql:goal-rebuild:apply` · `postgresql:live:smoke`
+**内部（4）**：`postgresql:cutover:apply` · `postgresql:goal-rebuild:apply` · `postgresql:live:smoke` · `postgresql:p02:verify`
 
-### `postlv2`（88 条 · **有同名 lane**）
+### `postlv2`（89 条 · **有同名 lane**）
 
 **入口**：
-- `postlv2:automatic-memory:verify` — 文档入口
-- `postlv2:bridge:verify` — 文档入口
-- `postlv2:coexist:shells` — 文档入口
 - `postlv2:controls:gates` — 汇总/链入口
-- `postlv2:qq-proactive:measurement:verify` — 文档入口
 
 **已登记门（32）**：`postlv2:affected:verify` · `postlv2:automatic-memory:recovery:verify` · `postlv2:avatar-opening:verify` · `postlv2:body:verify` · `postlv2:database-env:verify` · `postlv2:db:verify` · `postlv2:delivery:verify` · `postlv2:gate-selection:verify` · `postlv2:goal-deadline:verify` · `postlv2:goal-parallel:verify` · `postlv2:image:verify` · `postlv2:orchestration:verify` · `postlv2:oss-mechanisms:verify` · `postlv2:role-tool:path` · `postlv2:role-tool:verify` · `postlv2:s8:choice:verify` · `postlv2:s8:contracts:verify` · `postlv2:s8:daily:e2e` · `postlv2:s8:daily:verify` · `postlv2:s8:entry-lock:verify` · `postlv2:s8:gates` · `postlv2:s8:lifecycle:verify` · `postlv2:s8:measurement:verify` · `postlv2:s8:production:verify` · `postlv2:s8:reflection:verify` · `postlv2:s8:roots:verify` · `postlv2:s8:start:verify` · `postlv2:s8:state:verify` · `postlv2:s8:store:verify` · `postlv2:s8:withdraw:verify` · `postlv2:sequence-continuity:verify` · `postlv2:transport:verify`
 
-**内部（51）**：`postlv2:appearance:verify` · `postlv2:asr:verify` · `postlv2:automatic-memory:live` · `postlv2:avatar` · `postlv2:avatar-opening:chain` · `postlv2:avatar:production` · `postlv2:avatar:production:verify` · `postlv2:avatar:verify` · `postlv2:baseline` · `postlv2:coexist:live` · `postlv2:coexist:matrix` · `postlv2:coexist:verify` · `postlv2:expression:verify` · `postlv2:goal-thinking:eval` · `postlv2:image:live` · `postlv2:memory-write:live` · `postlv2:memory-write:verify` · `postlv2:mic` · `postlv2:model-memory:live` · `postlv2:model-memory:verify` · `postlv2:playback-buffer:eval` · `postlv2:qq-proactive:chain` · `postlv2:qq-proactive:live` · `postlv2:qq-proactive:verify` · `postlv2:role-tool:activation:readback` · `postlv2:role-tool:first-use:readback` · `postlv2:role-tool:known-dirs` · `postlv2:role-tool:live` · `postlv2:role-tool:main-live` · `postlv2:role-tool:matrix` · `postlv2:role-tool:semantic:eval` · `postlv2:s7:gate` · `postlv2:s7:live` · `postlv2:s8:activation-readback` · `postlv2:s8:activation-readback:db` · `postlv2:s8:baseline` · `postlv2:s8:daily:live` · `postlv2:s8:dev-probe` · `postlv2:s8:quote:ab:live` · `postlv2:s8:semantic:eval` · `postlv2:s8:semantic:recompute` · `postlv2:semantic:production:verify` · `postlv2:semantic:verify` · `postlv2:source-root:verify` · `postlv2:source:verify` · `postlv2:speech:verify` · `postlv2:story:build` · `postlv2:story:verify` · `postlv2:text-stream:verify` · `postlv2:tts:verify` · `postlv2:world:verify`
+**内部（56）**：`postlv2:appearance:verify` · `postlv2:asr:verify` · `postlv2:automatic-memory:live` · `postlv2:automatic-memory:verify` · `postlv2:avatar` · `postlv2:avatar-opening:chain` · `postlv2:avatar:live2d` · `postlv2:avatar:production` · `postlv2:avatar:production:verify` · `postlv2:avatar:verify` · `postlv2:baseline` · `postlv2:bridge:verify` · `postlv2:coexist:live` · `postlv2:coexist:matrix` · `postlv2:coexist:shells` · `postlv2:coexist:verify` · `postlv2:expression:verify` · `postlv2:goal-thinking:eval` · `postlv2:image:live` · `postlv2:memory-write:live` · `postlv2:memory-write:verify` · `postlv2:mic` · `postlv2:model-memory:live` · `postlv2:model-memory:verify` · `postlv2:playback-buffer:eval` · `postlv2:qq-proactive:chain` · `postlv2:qq-proactive:live` · `postlv2:qq-proactive:measurement:verify` · `postlv2:qq-proactive:verify` · `postlv2:role-tool:activation:readback` · `postlv2:role-tool:first-use:readback` · `postlv2:role-tool:known-dirs` · `postlv2:role-tool:live` · `postlv2:role-tool:main-live` · `postlv2:role-tool:matrix` · `postlv2:role-tool:semantic:eval` · `postlv2:s7:gate` · `postlv2:s7:live` · `postlv2:s8:activation-readback` · `postlv2:s8:activation-readback:db` · `postlv2:s8:baseline` · `postlv2:s8:daily:live` · `postlv2:s8:dev-probe` · `postlv2:s8:quote:ab:live` · `postlv2:s8:semantic:eval` · `postlv2:s8:semantic:recompute` · `postlv2:semantic:production:verify` · `postlv2:semantic:verify` · `postlv2:source-root:verify` · `postlv2:source:verify` · `postlv2:speech:verify` · `postlv2:story:build` · `postlv2:story:verify` · `postlv2:text-stream:verify` · `postlv2:tts:verify` · `postlv2:world:verify`
 
 ### `productivity`（5 条 · **有同名 lane**）
 
@@ -389,14 +364,11 @@
 
 **内部（3）**：`productivity:activation:readback` · `productivity:sidecar:check` · `productivity:wp0`
 
-### `qq`（7 条）
+### `qq`（9 条）
 
-**入口**：
-- `qq:verify` — 文档入口
+**已登记门（3）**：`qq:group:coexist:verify` · `qq:group:verify` · `qq:reconnect:verify`
 
-**已登记门（1）**：`qq:reconnect:verify`
-
-**内部（5）**：`qq:chat` · `qq:check` · `qq:prepare` · `qq:start` · `qq:status`
+**内部（6）**：`qq:chat` · `qq:check` · `qq:prepare` · `qq:start` · `qq:status` · `qq:verify`
 
 ### `reminder`（4 条）
 
@@ -453,6 +425,10 @@
 ### `typecheck`（1 条）
 
 **已登记门（1）**：`typecheck`
+
+### `u1`（16 条）
+
+**已登记门（16）**：`u1:authorized-candidates:verify` · `u1:bridge-facts:verify` · `u1:completion:verify` · `u1:entry-scope:verify` · `u1:g18-wiring:verify` · `u1:gateway-scope:verify` · `u1:identity-store:verify` · `u1:identity:verify` · `u1:inbound-turn-scope:verify` · `u1:main-wiring:verify` · `u1:new-user-relationship:verify` · `u1:record-scope:verify` · `u1:record-visibility:verify` · `u1:recorder-identity:verify` · `u1:scope:verify` · `u1:write-path-labeling:verify`
 
 ### `utility`（1 条）
 

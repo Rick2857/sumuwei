@@ -57,6 +57,18 @@ import type { RawDb } from '../persistence/db.ts'
 import type { ConversationLine } from '../../kernel/context/sections.ts'
 import { ActorResolver } from './actor-resolver.ts'
 
+/**
+ * 逐消息平台身份输入（U1 / WP2b-2a，ADR-133 `D04`）。
+ *
+ * ⚠️ **只有 `externalId`（平台账号）是身份依据**；`displayName` 只影响显示名，
+ *    绝不用来判定"是谁"。昵称 / 群名片 / 会话 ID / 自报身份都不在这个类型里 ——
+ *    于是"拿昵称当身份"在**类型上**做不到（与 `kernel/identity/inbound-identity.ts` 同一条纪律）。
+ */
+export interface InboundIdentityInput {
+  readonly externalId: string
+  readonly displayName?: string
+}
+
 export interface ConversationRecorderOptions {
   db: RawDb
   characterId: CharacterId
@@ -120,6 +132,16 @@ export interface ConversationRecorderOptions {
    * 因此既有数据不会因为这次收口而分叉。
    */
   deriveUserId?: (input: { transport: string; externalId: string }) => string
+  /**
+   * **逐消息**身份解析（U1 / WP2b-2a，ADR-133 `D04`）。
+   *
+   * 给了它，`recordUserMessage(..., identity)` 才会按**平台账号**解析领域身份；
+   * **不给** ⇒ 本文件与今天**逐字节相同**（永远走 `userId` / `userRef` 那条既有路径）。
+   *
+   * ⚠️ 传了 `identity` 却没有它 ⇒ **具名拒绝**
+   *    （`inbound_identity_resolver_missing`）——**不**静默回退到配置里的单用户身份。
+   */
+  resolveInboundUserId?: (input: InboundIdentityInput) => Promise<string>
   /**
    * 记账端口（可选）。不传则用 `db` 现造一个。
    *
@@ -242,38 +264,11 @@ export class ConversationRecorder {
      * （实测踩到过：`user_identities` 0 行而 `conversation_identities` 1 行）。
      */
     if (this.options.userId) {
-      this.resolvedDisplayName = this.options.userName
-      const userId = this.options.userId
-      await ensureUserIdentity(this.options.db, userId, this.options.userName)
-
-      /*
-       * 有明确的 transport 身份时，把它**绑定**到这个已知的领域身份。
-       *
-       * 这一步不是多余的：它正是计划书第 25 节要的
-       * `external_identity → Internal UserId` 映射。
-       * 少了它，"这个 cli 上的 Alex 就是我们这边的那个人"这件事只存在于
-       * 调用方的内存推导里，换一个入口就重新推导、无从核对。
-       *
-       * 与"推导"的区别：这里**不猜** userId（它已经给了），
-       * 只登记"这个平台身份对应那个人"。绑定是 `on conflict do nothing`，
-       * 因此一个 transport 身份永远不会改绑到别人。
-       */
-      if (this.options.userRef) {
-        await bindTransportIdentity(this.options.db, {
-          transport: this.transport,
-          externalId: this.options.userRef,
-          userId,
-        })
-      }
-
-      await this.resolver.ensureConversation({
-        conversationId: this.options.conversationId,
-        characterId: String(this.options.characterId),
-        userId,
-        label: `dm-${String(this.options.characterId).slice(0, 8)}`,
-        transport: this.transport,
+      return this.bindKnownIdentity({
+        userId: this.options.userId,
+        displayName: this.options.userName,
+        ...(this.options.userRef === undefined ? {} : { externalId: this.options.userRef }),
       })
-      return userId
     }
 
     // 没有现成的领域身份 → 经 ActorResolver 推导（并落映射表）
@@ -295,6 +290,90 @@ export class ConversationRecorder {
   }
 
   /**
+   * 登记一个**已经解析好**的领域身份（`ensureIdentity` 与 `ensureIdentityFor` 共用）。
+   *
+   * 一个概念一处实现：两条路径的落库语义必须完全一致
+   * （`user_identities` + 可选 `user_identity_mappings` + `conversation_identities`）。
+   */
+  private async bindKnownIdentity(input: {
+    userId: string
+    displayName?: string
+    externalId?: string
+  }): Promise<string> {
+    const displayName = input.displayName ?? this.options.userName
+    this.resolvedDisplayName = displayName
+    await ensureUserIdentity(this.options.db, input.userId, displayName)
+
+    /*
+     * 有明确的 transport 身份时，把它**绑定**到这个已知的领域身份。
+     *
+     * 这一步不是多余的：它正是计划书第 25 节要的
+     * `external_identity → Internal UserId` 映射。
+     * 与"推导"的区别：这里**不猜** userId（它已经给了），只登记对应关系。
+     * 绑定是 `on conflict do nothing`，因此一个 transport 身份永远不会改绑到别人。
+     */
+    if (input.externalId !== undefined) {
+      await bindTransportIdentity(this.options.db, {
+        transport: this.transport,
+        externalId: input.externalId,
+        userId: input.userId,
+      })
+    }
+
+    await this.resolver.ensureConversation({
+      conversationId: this.options.conversationId,
+      characterId: String(this.options.characterId),
+      userId: input.userId,
+      label: `dm-${String(this.options.characterId).slice(0, 8)}`,
+      transport: this.transport,
+    })
+    return input.userId
+  }
+
+  /**
+   * **逐消息**身份登记（U1 / WP2b-2a）。
+   *
+   * 与 `ensureIdentity()` 的区别：身份来自**这一条消息的平台账号**，
+   * 而不是进程级配置的单用户。
+   *
+   * 失败关闭三处（都不静默回退到 `options.userId`）：
+   *   ① 装配层没给 `resolveInboundUserId` ⇒ `inbound_identity_resolver_missing`
+   *   ② 平台账号为空                      ⇒ `inbound_identity_external_id_empty`
+   *   ③ 解析器返回空 userId               ⇒ `inbound_identity_user_id_empty`
+   */
+  async ensureIdentityFor(input: InboundIdentityInput): Promise<string> {
+    const resolve = this.options.resolveInboundUserId
+    if (resolve === undefined) {
+      throw new KernelError(
+        'validation_error',
+        'inbound_identity_resolver_missing',
+        '调用方给了逐消息身份，但装配层没有提供 resolveInboundUserId —— ' +
+          '失败关闭：**不**静默回退到配置里的单用户身份（那会把陌生人当成主人）'
+      )
+    }
+    if (typeof input.externalId !== 'string' || input.externalId.trim() === '') {
+      throw new KernelError(
+        'validation_error',
+        'inbound_identity_external_id_empty',
+        '平台账号为空：没有任何身份依据（不猜、不回退）'
+      )
+    }
+    const userId = await resolve(input)
+    if (typeof userId !== 'string' || userId.trim() === '') {
+      throw new KernelError(
+        'validation_error',
+        'inbound_identity_user_id_empty',
+        `解析器对账号 ${input.externalId} 返回空 userId（不猜、不回退）`
+      )
+    }
+    return this.bindKnownIdentity({
+      userId,
+      displayName: input.displayName ?? this.options.userName,
+      externalId: input.externalId,
+    })
+  }
+
+  /**
    * 录制用户消息。
    *
    * **预分配两个序号**：本次交互的用户事件与随后可能的助手事件。
@@ -305,11 +384,16 @@ export class ConversationRecorder {
   async recordUserMessage(
     text: string,
     conversationSequence: number,
-    imageRefs?: readonly string[]
+    imageRefs?: readonly string[],
+    /**
+     * U1 / WP2b-2a：**这条消息**的平台身份。给了它就必须有 `resolveInboundUserId`
+     * （否则具名拒绝）；不给 ⇒ 与今天逐字节相同。
+     */
+    identity?: InboundIdentityInput
   ): Promise<{ event: ConversationEvent | undefined; assistantSequence: number | undefined }> {
     if (this.options.dryRun) return { event: undefined, assistantSequence: undefined }
 
-    const userId = await this.ensureIdentity()
+    const userId = identity === undefined ? await this.ensureIdentity() : await this.ensureIdentityFor(identity)
     await this.assertSequenceContiguous(conversationSequence)
 
     const range = await allocateSequenceRange(this.options.db, this.options.characterId, 2)

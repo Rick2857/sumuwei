@@ -397,6 +397,8 @@ export interface AffectEvidenceCandidateView {
 export interface AffectEvidencePolicy {
   /** 唯一 active user 的 id（M8-D11；生产 = resolveIds(userName).userId） */
   activeUserId: string
+  /** Trusted admission bindings for a shared multi-user character; absent retains M8 single-user behavior. */
+  allowedUserIds?: readonly string[]
   /** 切换边界（M8-D05；来自 AffectState.cutoverSequence——ORIGIN 之后才有值） */
   cutoverSequence: number | null
 }
@@ -465,7 +467,7 @@ export function affectEvidenceVerdictOf(
         detail: `事件 ${String(candidate.id)} 的归因主体不是 Known（防御性收窄失败）`,
       }
     }
-    if (originator.value.id !== policy.activeUserId) {
+    if (originator.value.id !== policy.activeUserId && !policy.allowedUserIds?.includes(String(originator.value.id))) {
       return {
         ok: false,
         code: 'affect_source_unqualified',

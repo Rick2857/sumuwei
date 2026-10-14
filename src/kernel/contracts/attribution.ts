@@ -986,6 +986,30 @@ export const ACTION_ATTRIBUTION_EXEMPTIONS = {
     principal: { kind: 'SYSTEM', id: 'local-reminder-scheduler' },
     capability: 'local.reminder.message', operation: 'send', sideEffect: 'write', basis: 'system_scheduled_reminder_due',
   },
+  /**
+   * ============================================================================
+   *  A1 / WP3+WP4：**管理控制台的写动作**（`jobs.admit`；用户 2026-10-14 裁定走 ActionGateway）
+   * ============================================================================
+   * 为什么它需要一条**写**豁免：管理控制台的动作**没有因果轮次上下文**
+   * （它不是"某一轮对话引发的"，而是操作者在控制台点了一次）⇒ 网关失败关闭。
+   * 而它确实**会写**（登记一行 `admin_jobs`），所以 `ADR-098` 那条只读豁免结构上用不了。
+   *
+   * ⚠️ 收窄到**三元组**（主体 / 能力 / 操作），并**必须**写清"凭什么"：
+   * ```text
+   * 主体   SERVICE/admin-console  —— 已认证的管理会话（用户 2026-10-14 裁定的位次）
+   * 能力   admin.jobs.admit       —— **只**登记任务，不改任何领域数据
+   * 操作   register               —— 不是 delete / update
+   * 副作   write                  —— 见 WRITE_CAPABLE_ATTRIBUTION_EXEMPTIONS（第二道 diff）
+   * 依据   authenticated_admin_session —— 「有据可依」的出处：**已通过口令认证的会话**
+   * ```
+   * ⚠️ 它**不**把"操作者是人"洗成 USER 位次：这里记录的是**控制台这个服务位次**，
+   *    人是谁由会话记录承载，不由这条豁免断言（否则就成了"自报身份"）。
+   */
+  admin_job_admission: {
+    principal: { kind: 'SERVICE', id: 'admin-console' },
+    capability: 'admin.jobs.admit', operation: 'register', sideEffect: 'write',
+    basis: 'authenticated_admin_session',
+  },
 } as const satisfies Record<
   string,
   {
@@ -1007,7 +1031,11 @@ export const ACTION_ATTRIBUTION_EXEMPTIONS = {
  * 这样"声明 `sideEffect: 'write'`"本身**不构成**许可：默认仍是只读，
  * 写豁免必须被**逐个点名**。ADR-098 的"收窄不是调用点的自觉"因此原样成立。
  */
-export const WRITE_CAPABLE_ATTRIBUTION_EXEMPTIONS: readonly string[] = ['proactive_qq_delivery', 'scheduled_local_reminder_delivery']
+export const WRITE_CAPABLE_ATTRIBUTION_EXEMPTIONS: readonly string[] = [
+  'proactive_qq_delivery', 'scheduled_local_reminder_delivery',
+  /* 第二道 diff（A1/WP4 · 用户 2026-10-14 裁定）：管理控制台的 `admin.jobs.admit` 也是写 */
+  'admin_job_admission',
+]
 
 /** 具名豁免的名字（闭集的键） */
 export type ActionAttributionExemptionName = keyof typeof ACTION_ATTRIBUTION_EXEMPTIONS

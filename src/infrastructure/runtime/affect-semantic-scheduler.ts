@@ -99,6 +99,7 @@ export interface AffectSemanticSchedulerAssembly {
   readonly characterAlias: string
   /** 唯一 active user（M8-D11 口径） */
   readonly activeUserId: string
+  readonly allowedUserIds?: readonly string[]
   /** WP5 provider（原生 fetch；装配层构造一次） */
   readonly provider: AffectSemanticProvider
 }
@@ -127,6 +128,7 @@ export function createAffectSemanticWorkerPorts(
     },
   }
   const commitOutcome = createAffectSemanticCommitPort({
+    allowedUserIds: assembly.allowedUserIds,
     characterId,
     activeUserId,
     registry: createFullDomainEventRegistry(),
@@ -271,6 +273,7 @@ export async function maybeRunAffectSemanticEvaluation(
     characterId: CharacterId | string
     characterAlias: string
     activeUserId: string
+    allowedUserIds?: readonly string[]
     mode: AffectSemanticMode
     provider: AffectSemanticProvider
     /** shutdown 信号（透传模型调用；中止 ⇒ 传输失败 ⇒ 可重试路径） */
@@ -281,6 +284,7 @@ export async function maybeRunAffectSemanticEvaluation(
   const characterId =
     typeof input.characterId === 'string' ? asCharacterId(input.characterId) : input.characterId
   const ports = createAffectSemanticWorkerPorts(db, {
+    allowedUserIds: input.allowedUserIds,
     characterId,
     characterAlias: input.characterAlias,
     activeUserId: input.activeUserId,
@@ -293,6 +297,7 @@ export async function maybeRunAffectSemanticEvaluation(
    * 口吻"：一个 mode_not_semantic 壳子里藏 assemblyError 是撒谎）。
    */
   return await runAffectSemanticWorkerTick(ports, {
+    allowedUserIds: input.allowedUserIds,
     characterId,
     activeUserId: input.activeUserId,
     mode: input.mode,

@@ -1,6 +1,7 @@
 import type { CharacterId } from '../../kernel/contracts/ids.ts'
 import type { AdaptiveSelfState } from '../../kernel/contracts/adaptive-self.ts'
 import type { RawDb } from '../persistence/db.ts'
+import { sourceRootsVisible } from '../persistence/read-scope.ts'
 import { listAdaptiveSelfStates } from '../persistence/adaptive-self-store.ts'
 import { readReflectionSourceSnapshot } from '../persistence/reflection-source-read.ts'
 import { filterAdaptiveSelfThisTurn } from '../../kernel/app/reflection/invalidation.ts'
@@ -18,6 +19,7 @@ export async function readUsableAdaptiveSelfStates(
   try { states = await listAdaptiveSelfStates(db, characterId) } catch { return [] }
   const result: AdaptiveSelfState[] = []
   for (const state of states) {
+    if (state.level === 'enhanced' && !await sourceRootsVisible(db, state.roots)) continue
     if (state.level !== 'enhanced') { result.push(state); continue }
     try {
       const snapshot = await readReflectionSourceSnapshot(db, characterId, state.roots.map(id => ({

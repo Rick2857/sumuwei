@@ -66,6 +66,7 @@ import {
 } from './memory.ts'
 import type { ConversationEventId, ConversationId } from './ids.ts'
 import type { SourceQualification } from './attribution.ts'
+import type { ScopeContext } from './scope.ts'
 /*
  * M5.5（ADR-045 D-14）：外部证据的**引用**只有一个定义，住在
  * `contracts/external-evidence.ts`；这里**只** re-export 同一个名字，
@@ -661,6 +662,17 @@ export interface RecallRequest {
   /** 本次请求归属的用户（subject 作用域） */
   user: EntityRef
   session: RecallSessionScope
+  /**
+   * **U1 / `ADR-138`（`G18`）：本轮的作用域三元组**（谁 · 什么用途 · 哪个空间）——**可选**。
+   *
+   * ```text
+   * 它存在的理由：召回适配器在**装配时**构造一次（`main.ts`），
+   * 而"这一轮是谁在问、在哪个空间问"是**每一轮**的事实 ⇒ 必须随请求走到检索层。
+   * 缺省 ⇒ 行为一字不变（授权接线未贯通身份之前，装配层不注入授权器）。
+   * ⚠️ 它**由服务端装配层**给出（与 `user` 同一条信任边界），**不许**来自请求载荷。
+   * ```
+   */
+  scope?: ScopeContext
   query: RecallQuery
   intent: RecallIntent
   target: RecallTarget
@@ -699,6 +711,14 @@ export interface NewRecallRequest {
   candidateLimit?: number
   contextBudget?: Partial<RecallBudget>
   session?: RecallSessionScope
+  /**
+   * **U1 / `ADR-138`**：本轮的作用域三元组（**程序化构造**用；见 `RecallRequest.scope` 的说明）。
+   *
+   * ⚠️ 它**只**能由装配层在**进程内**给出：`parseRecallRequest`（唯一接受外部形状的入口）
+   *    **拒绝**载荷里的 `scope`（`recall_scope_from_payload`）——
+   *    否则任何能喂进请求的地方都能自称"我是原主人"。
+   */
+  scope?: ScopeContext
   /** **M9.5 / WP6（D25）**：缺省 = 现状；未知值**拒绝**（不静默回落） */
   retrievalPolicyVersion?: string
   /** **M9.5 / WP8**：`off` / `shadow` / `on`；未知值**拒绝**；缺省由策略版本推导 */
@@ -717,6 +737,9 @@ function assertPositiveInt(value: unknown, name: string, min: number, max: numbe
   return value
 }
 
+/** 作用域用途闭集（与 `contracts/scope.ts` 的 `Purpose` 同源；这里只用于**校验**） */
+const RECALL_SCOPE_PURPOSES: readonly string[] = ['external_query', 'internal_cognition', 'admin_operation']
+
 /**
  * 构造召回请求（**失败关闭**）。
  *
@@ -726,6 +749,7 @@ function assertPositiveInt(value: unknown, name: string, min: number, max: numbe
  *   2. `query.text` 非空 —— 没有问题的召回不是召回
  *   3. `candidateLimit` / `memoryTokens` 有界
  *   4. `memoryKinds` 若给出，必须非空且都已登记
+ *   5. （U1 / `ADR-138`）`scope` 若给出，**形状必须成立**（principal / purpose / room id 都要能判）
  */
 export function createRecallRequest(input: NewRecallRequest): RecallRequest {
   if (typeof input.traceId !== 'string' || input.traceId.trim() === '') {
@@ -799,6 +823,33 @@ export function createRecallRequest(input: NewRecallRequest): RecallRequest {
   const timeScope: RecallTimeScope = input.timeScope ?? { kind: 'any' }
   assertTimeScope(timeScope)
 
+  /*
+   * U1 / ADR-138：作用域三元组**失败关闭**校验。
+   * 只是"看起来像"一个 scope 不算 —— 空间叫不出名字、用途没登记，一律拒绝。
+   * （它是授权输入：错的 scope 比没有 scope 更危险，因为读面会以为"已经授权过了"。）
+   */
+  let scope: ScopeContext | undefined
+  if (input.scope !== undefined) {
+    const candidate = input.scope
+    /* 先取成 `string` 再判：直接反复比较 `kind` 会被 TS 收窄成 `never`（本仓库踩过多次） */
+    const principalKind: string = candidate.principal.kind
+    if (principalKind !== 'user' && principalKind !== 'owner' && principalKind !== 'system') {
+      throw new KernelError('validation_error', 'recall_scope_bad_principal', `未登记的 principal.kind：${principalKind}`)
+    }
+    if (!RECALL_SCOPE_PURPOSES.includes(candidate.purpose)) {
+      throw new KernelError('validation_error', 'recall_scope_bad_purpose', `未登记的 purpose：${String(candidate.purpose)}`)
+    }
+    const roomKind: string = candidate.room.kind
+    if (roomKind !== 'private' && roomKind !== 'group') {
+      throw new KernelError('validation_error', 'recall_scope_bad_room', `未登记的 room.kind：${roomKind}`)
+    }
+    const roomId = candidate.room.kind === 'private' ? candidate.room.userId : candidate.room.groupId
+    if (typeof roomId !== 'string' || roomId.trim() === '') {
+      throw new KernelError('validation_error', 'recall_scope_bad_room_id', '作用域的空间 id 不能为空（不给叫不出名字的空间授权）')
+    }
+    scope = candidate
+  }
+
   return {
     traceId,
     characterId,
@@ -813,6 +864,8 @@ export function createRecallRequest(input: NewRecallRequest): RecallRequest {
     target: input.target ?? RECALL_TARGET_NONE,
     timeScope,
     ...(memoryKinds !== undefined ? { memoryKinds } : {}),
+    /* U1 / ADR-138：作用域三元组（**只由装配层给**；缺省 ⇒ 字段不出现 ⇒ 行为一字不变） */
+    ...(scope !== undefined ? { scope } : {}),
     candidateLimit,
     /*
      * M9.5 / WP6（D25）：未知策略名**拒绝**（不静默回落、不默认 on）。
@@ -910,14 +963,32 @@ function canonicalMaterial(value: unknown): unknown {
   return value
 }
 
+/**
+ * 记录用的材料：**去掉 `scope`**。
+ *
+ * ```text
+ * U1 / ADR-138：作用域三元组是**每一轮**的授权事实，不是请求的"内容"。
+ *   ① 它若进记录/trace/摘要 ⇒ 一轮的作用域会被**固化**进另一轮（回放时用的是旧身份）
+ *   ② `parseRecallRequest` 拒绝载荷里的 `scope`（提权防线）
+ *      ⇒ 若序列化写它、反序列化丢它，往返就**不幂等** —— 那类"看起来存了其实没存"
+ *         正是本仓库最贵的一类缺陷。
+ * ⇒ 结论：序列化与摘要在**同一处**把它排除，往返因此仍然一致（且旧摘逐一字不变）。
+ * ```
+ */
+function recallRecordMaterial(request: RecallRequest): unknown {
+  const { scope: _scope, ...rest } = request
+  void _scope
+  return rest
+}
+
 /** 请求的规范 JSON 文本（进 trace / 进证据文件的形态） */
 export function serializeRecallRequest(request: RecallRequest): string {
-  return JSON.stringify(canonicalMaterial(request))
+  return JSON.stringify(canonicalMaterial(recallRecordMaterial(request)))
 }
 
 /** 请求的稳定摘要（FNV-1a，见 `memoryDigest` 的局限说明：**不是**安全哈希） */
 export function recallRequestDigest(request: RecallRequest): string {
-  return memoryDigest(stableMaterial(canonicalMaterial(request)))
+  return memoryDigest(stableMaterial(canonicalMaterial(recallRecordMaterial(request))))
 }
 
 /**
@@ -933,6 +1004,22 @@ export function parseRecallRequest(value: unknown): RecallRequest {
     throw new KernelError('validation_error', 'recall_request_not_object', 'RecallRequest 必须是对象')
   }
   const raw = value as Record<string, unknown>
+
+  /*
+   * U1 / ADR-138：**载荷不许自带作用域**。
+   *
+   * `scope` 是授权输入（"我是谁 · 在哪个空间"）。本函数是**唯一**接受外部形状的入口，
+   * 而 WP3 适配器 / WP7 证据回放 / 未来的外部证据都从这里进来 ——
+   * 一旦接受载荷里的 `scope`，任何能喂进请求的地方都能自称原主人（**提权**）。
+   * ⇒ 显式拒绝（不是"忽略"）：静默忽略会让攻击者以为成功、而我们以为没发生。
+   */
+  if (Object.hasOwn(raw, 'scope')) {
+    throw new KernelError(
+      'validation_error',
+      'recall_scope_from_payload',
+      '载荷不得自带 scope：作用域三元组只能由装配层在进程内给出'
+    )
+  }
 
   const query = raw.query
   if (typeof query !== 'object' || query === null) {
@@ -1064,6 +1151,8 @@ function assertRecallTarget(value: unknown): void {
  *    WP3 的适配器负责"行 → 这个类型"，M5 的其余部分只认它。
  */
 export interface RecallCandidate {
+  /** Trusted retrieval-port result, bound to the exact requester/audience. */
+  authorization?: { readonly scope: ScopeContext; readonly allowed: boolean }
   memoryId: MemoryId
   owner: EntityRef
   type: MemoryType

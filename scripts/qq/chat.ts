@@ -8,7 +8,8 @@ import { readQqPrivateConfig } from '../../src/infrastructure/qq/private-config.
 import { OneBotPrivateClient } from '../../src/infrastructure/qq/onebot-private-client.ts'
 import { LgStdioClient } from '../../src/infrastructure/qq/lg-stdio-client.ts'
 
-const root = resolve(import.meta.dirname, '../..')
+const root = process.env.LG_3D_OPERATION_ROOT === undefined
+  ? resolve(import.meta.dirname, '../..') : resolve(process.env.LG_3D_OPERATION_ROOT)
 assertProductionAvatarEnvironment(process.env, root)
 const production = config({ path: resolve(root, '.env'), override: true, quiet: true })
 const qqEnv = parse(readFileSync(resolve(root, '.env.qq')))
@@ -66,6 +67,11 @@ if (process.argv.includes('--check')) {
   const stop = (): void => { stopped = true }
   process.once('SIGINT', stop)
   process.once('SIGTERM', stop)
+  // The shared production supervisor closes this pipe before draining the core.
+  if (coexistConnect !== undefined && !process.stdin.isTTY) {
+    process.stdin.resume()
+    process.stdin.once('end', stop)
+  }
   lg.process?.once('close', stop)
   try {
     await lg.ready

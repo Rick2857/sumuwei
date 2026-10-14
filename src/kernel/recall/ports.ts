@@ -40,6 +40,7 @@ import type {
   SemanticUnavailableReason,
 } from '../contracts/recall.ts'
 import type { TrustedOriginReading } from '../contracts/attribution.ts'
+import type { ScopeContext } from '../contracts/scope.ts'
 import type { RollupSourceFacts } from '../contracts/rollup.ts'
 
 /**
@@ -84,6 +85,13 @@ export interface MemoryRetrievalQuery {
   text: string
   memoryKinds?: readonly MemoryType[]
   timeScope: RecallTimeScope
+  /**
+   * **U1 / `ADR-138`（`G18`）：本轮的作用域三元组**（谁 · 什么用途 · 哪个空间）——**可选**。
+   *
+   * 由 `RecallRequest.scope` 透传；装配层注入的授权器**读它**来决定候选的可读性。
+   * 缺省 ⇒ 字段不出现 ⇒ 既有行为一字不变。
+   */
+  scope?: ScopeContext
   /** 宽召回上限（有界；资格过滤之后还会再裁一次，见 WP5） */
   limit: number
   /** 只要这些 memory id（**目前没有生产者**：见 RECALL_CHANNEL_FACTS.explicit_id） */
@@ -148,6 +156,7 @@ export interface MemorySemanticProbe {
 
 /** 一条命中的候选行 */
 export interface MemoryRetrievalHit {
+  authorization?: { readonly scope: ScopeContext; readonly allowed: boolean }
   /** 投影行（还**没有**变成 RecallCandidate —— 那一步由应用层渲染） */
   record: MemoryRecord
   /** 它被哪几条通道找到（进 trace；也告诉 WP4 "这条是不是词面命中过"） */
@@ -202,6 +211,23 @@ export interface MemoryRetrievalResult {
    * ```
    */
   semanticScoredIds: readonly string[]
+  /**
+   * **U1 / `ADR-138`（`G18`）`D05`：授权前置过滤的读数**（**可选**）。
+   *
+   * ```text
+   * 只有装配层**注入**了授权器时才会出现（`createMemoryRetrievalStore({ authorizeCandidates })`）。
+   * 缺省**不出现**在对象上 ⇒ 既有调用点与 trace 的形状逐字不变。
+   *
+   * 为什么必须可观测：`G18` 的第二个后果是**静默** —— 调用方只看到 `hits` 变少，
+   * 分不清"本来就没有"与"被越权候选挤掉了"。这三个数把后者变成可读的事实。
+   * ⚠️ 只记**计数**，不记 id、不记正文（隐私边界与 `shadow` 同一条）。
+   * ```
+   */
+  authorization?: {
+    readonly authorized: number
+    readonly denied: number
+    readonly deniedForMissingLabel: number
+  }
   /**
    * **M9.5 / WP8（`shadow` 模式）**：新旧检索的**对照读数**。
    *

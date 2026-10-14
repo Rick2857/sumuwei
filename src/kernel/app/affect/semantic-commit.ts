@@ -100,6 +100,7 @@ export interface AffectSemanticCommitDeps {
   readonly characterId: CharacterId
   /** 唯一 active user（M8-D11 口径；资格判定配置面） */
   readonly activeUserId: string
+  readonly allowedUserIds?: readonly string[]
   readonly registry: DomainEventRegistry
   readonly evidence: AffectSemanticEvidenceLookup
   readonly processed: { hasProcessed(idempotencyKey: string): Promise<boolean> }
@@ -183,7 +184,7 @@ export function createAffectSemanticCommitPort(
         evidence: deps.evidence,
         processed: deps.processed,
         affect: deps.affect,
-        policy: { activeUserId: deps.activeUserId },
+        policy: { activeUserId: deps.activeUserId, allowedUserIds: deps.allowedUserIds },
       },
       proposal
     )

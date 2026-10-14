@@ -123,7 +123,7 @@ export function qualifiedAffectEvidence(
     if (sourceQualificationOf(view.trustedOrigin) !== 'ESTABLISHED') continue
     const originator = view.trustedOrigin?.contentOriginator
     if (originator === undefined || originator.state !== 'KNOWN') continue // ESTABLISHED 必然 KNOWN；防御性收窄
-    if (originator.value.id !== policy.activeUserId) continue
+    if (originator.value.id !== policy.activeUserId && !policy.allowedUserIds?.includes(String(originator.value.id))) continue
     if (policy.cutoverSequence !== null && view.sequence <= policy.cutoverSequence) continue
     qualified.push(view)
   }

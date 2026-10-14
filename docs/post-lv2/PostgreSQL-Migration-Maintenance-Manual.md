@@ -35,11 +35,13 @@ docker exec -e PGPASSWORD=<migrate-pw> lg-postgresql-trial psql -h 127.0.0.1 -U 
 docker exec -e PGPASSWORD=<readonly-pw> lg-postgresql-trial psql -h 127.0.0.1 -U lg_readonly -d sumuwei -tAc "select count(*) from conversation_events"
 
 # 3.2 在线备份（核心附着时也做过：实测 11 123 042 B / 231 ms / exit 0）
-docker exec -e PGPASSWORD=<migrate-pw> lg-postgresql-trial pg_dump -h 127.0.0.1 -U lg_migrate -d sumuwei --no-comments > 备份.sql
+docker exec -e PGPASSWORD=<migrate-pw> lg-postgresql-trial pg_dump -h 127.0.0.1 -U lg_migrate -d sumuwei --no-comments --enable-row-security > 备份.sql
 ```
 
 ⚠️ `--no-comments` **不是可选项**：`COMMENT ON EXTENSION` 要求扩展所有权，而 `vector` 非 trusted
 （目标库里的注释由 bootstrap 写、迁移账号改不动）。代价实测为 **0**（注释由扩展安装脚本自带）。
+
+v22 / U1 补充：两张业务表已开启 FORCE RLS，完整管理备份需追加 `--enable-row-security`，使用不携带聊天外部读取作用域的可信管理连接；再以备份清单和同快照逐表计数核对完整性。容器、库名和账号须替换成操作者自己的目标；本公开副本未做真实 PostgreSQL 备份或恢复验收。见 [QQ-GROUPS](../QQ-GROUPS.md)。
 
 **核心重启不停数据库**（实测过）：关核心 → 再起核心，`pg_postmaster_start_time()` **逐字不变**
 ⇒ 数据库一次都没重启。重启核心**不需要**停容器。

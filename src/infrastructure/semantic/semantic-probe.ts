@@ -33,6 +33,7 @@ import { sql } from 'drizzle-orm'
 
 import type { RawDb } from '../persistence/db.ts'
 import { rowsOf } from '../persistence/db.ts'
+import { authorizedMemoryIds } from '../persistence/read-scope.ts'
 import type { EmbeddingManifest } from './embedding-manifest.ts'
 import { embeddingFingerprintOf } from './embedding-manifest.ts'
 import type { SemanticUnavailableReason } from '../../kernel/contracts/recall.ts'
@@ -212,7 +213,8 @@ export function createSemanticProbe(options: SemanticProbeOptions): MemorySemant
       if (queryVector === undefined || queryVector.length !== dimension) return failed('dimension_mismatch')
 
       /* ⑤ 精确检索：namespace 与**那一代**双重预过滤（这就是"派生索引可重建"的检索面） */
-      const wanted = new Set(input.memoryIds.map((id) => String(id)))
+      const wanted = await authorizedMemoryIds(options.db, input.memoryIds.map(String))
+      if (wanted.size === 0) return failed('missing_score')
       const scores = new Map<string, number>()
       const limit = options.maxResults ?? Math.max(wanted.size, 1)
       {
@@ -221,6 +223,7 @@ export function createSemanticProbe(options: SemanticProbeOptions): MemorySemant
             sql`select memory_id, (embedding <=> ${toLiteral(queryVector)}::vector) as distance
                 from memory_semantic_index
                 where namespace = ${input.characterId} and generation_id = ${serving.generationId}
+                  and memory_id in (${sql.join([...wanted].map(id => sql`${id}`), sql`, `)})
                 limit ${limit}`
           )
         )

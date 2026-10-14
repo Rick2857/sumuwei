@@ -49,6 +49,7 @@ import {
 } from '../../kernel/contracts/attribution.ts'
 import type { AttributionValue } from '../../kernel/contracts/actor.ts'
 import { asRows, exec, firstRow, type RawDb } from './db.ts'
+import { conversationReadPredicate, currentReadScope, scopedReadDb } from './read-scope.ts'
 
 interface EventRow {
   id: string
@@ -532,8 +533,8 @@ export async function getConversationEvent(
   id: ConversationEventId
 ): Promise<ConversationEvent | undefined> {
   const rows = await exec(
-    db,
-    sql`select * from conversation_events where id = ${id} limit 1`,
+    scopedReadDb(db),
+    sql`select * from conversation_events where id = ${id} and (${conversationReadPredicate()}) limit 1`,
     '读取事件'
   )
   return rowToEvent(firstRow<EventRow>(rows))
@@ -559,8 +560,8 @@ export async function getConversationEventsByIds(
     sql`, `
   )
   const rows = await exec(
-    db,
-    sql`select * from conversation_events where id in (${idList})`,
+    scopedReadDb(db),
+    sql`select * from conversation_events where id in (${idList}) and (${conversationReadPredicate()})`,
     '批量读取事件'
   )
   const byId = new Map<string, ConversationEvent>()
@@ -586,8 +587,8 @@ export async function readConversationEventAttribution(
   id: ConversationEventId
 ): Promise<StoredAttributionReadback | undefined> {
   const rows = await exec(
-    db,
-    sql`select * from conversation_events where id = ${id} limit 1`,
+    scopedReadDb(db),
+    sql`select * from conversation_events where id = ${id} and (${conversationReadPredicate()}) limit 1`,
     '读取事件的存储归因'
   )
   const row = firstRow<EventRow>(rows)
@@ -637,16 +638,18 @@ export async function recentConversationEvents(
 ): Promise<ConversationEvent[]> {
   const limit = Math.max(1, Math.min(1000, Math.floor(query.limit)))
   const rows = await exec(
-    db,
-    query.conversationId
+    scopedReadDb(db),
+    query.conversationId && currentReadScope()?.context.room.kind !== 'group'
       ? sql`select * from conversation_events
             where character_id = ${query.characterId}
               and conversation_id = ${query.conversationId}
+              and (${conversationReadPredicate()})
               ${query.beforeSequence === undefined ? sql`` : sql`and sequence <= ${query.beforeSequence}`}
             order by sequence desc
             limit ${limit}`
       : sql`select * from conversation_events
             where character_id = ${query.characterId}
+              and (${conversationReadPredicate()})
               ${query.beforeSequence === undefined ? sql`` : sql`and sequence <= ${query.beforeSequence}`}
             order by sequence desc
             limit ${limit}`,

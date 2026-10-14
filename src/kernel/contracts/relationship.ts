@@ -135,21 +135,37 @@ export type RelationshipOriginKind =
    * 才允许用它（NPC 台词 / 作者设定 / 剧情内"信任"一律不合格）。
    */
   | 'STORY_DERIVED'
+  /**
+   * **多用户补充计划 U1 / WP3（`ADR-136`，2026-10-14 原主人裁定采用方案 A）**：
+   * **系统在新用户首次幂等建档时给的初始值**（0.2 / 0.2）。
+   *
+   * ⚠️ 语义上它**既不是** `SETTING_BASELINE`（那是"用户授权的角色设定基线"，原主人 0.85/0.60），
+   *    **也不是** `INTERACTION_DERIVED`（首见**没有任何互动证据**）。
+   *    单独给一个具名种类，才让读回面/审计能区分"人给的设定"与"系统给的起点"（INV-CI-01）。
+   */
+  | 'NEW_USER_BASELINE'
 
 export const RELATIONSHIP_ORIGIN_KINDS: readonly RelationshipOriginKind[] = [
   'SETTING_BASELINE',
   'INTERACTION_DERIVED',
   'MAINTENANCE_INJECTION',
   'STORY_DERIVED',
+  'NEW_USER_BASELINE',
 ]
 
 export function isRelationshipOriginKind(value: unknown): value is RelationshipOriginKind {
   return typeof value === 'string' && (RELATIONSHIP_ORIGIN_KINDS as readonly string[]).includes(value)
 }
 
-/** M7 放行口实际接受的 originKind（MAINTENANCE_INJECTION 登记但拒绝） */
+/** M7 放行口实际接受的 originKind（`MAINTENANCE_INJECTION` 登记但拒绝） */
 export function originKindAcceptedByM7(kind: RelationshipOriginKind): boolean {
-  return kind === 'SETTING_BASELINE' || kind === 'INTERACTION_DERIVED' || kind === 'STORY_DERIVED'
+  return (
+    kind === 'SETTING_BASELINE' ||
+    kind === 'INTERACTION_DERIVED' ||
+    kind === 'STORY_DERIVED' ||
+    /* U1 / WP3（ADR-136 方案 A）：系统给新档案的起点，**接受**（它不是注入） */
+    kind === 'NEW_USER_BASELINE'
+  )
 }
 
 /** U-M7-02 裁定的设定基线（ORIGIN 事件携带；来源 = 用户 2026-09 授权的角色设定） */

@@ -376,6 +376,11 @@ export function selectMemoryContext(input: SelectMemoryContextInput): MemoryCont
   for (const item of input.ranked) {
     const candidate = item.candidate
     const memoryId = String(candidate.memoryId)
+    // A caller bypassing eligibility must not render unauthorized ranked material.
+    if (input.request.scope !== undefined && (candidate.authorization?.allowed !== true ||
+      JSON.stringify(candidate.authorization.scope) !== JSON.stringify(input.request.scope))) {
+      throw new KernelError('validation_error', 'recall_scope_not_authorized', '候选缺少当前作用域授权')
+    }
 
     /*
      * AT5.4：**重复不浪费预算**（预算阶段的最后一道）。

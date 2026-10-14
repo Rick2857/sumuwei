@@ -61,6 +61,8 @@ import {
 } from '../../kernel/projections/memory.ts'
 import { rowToDomainEvent } from './event-store.ts'
 import { affectedRows, asRows, exec, firstRow, inTransaction, type RawDb } from './db.ts'
+import { authorizedMemoryIds, currentReadScope, scopedReadDb, memoryReadPredicate } from './read-scope.ts'
+import { labelRecordScope } from './record-scope-store.ts'
 
 // ---------------------------------------------------------------------------
 // 行收窄（与 db.ts 的 asRows 同一条规矩，但针对我们的 row 类型）
@@ -700,96 +702,117 @@ async function rawGetMany(db: RawDb, ids: readonly MemoryId[]): Promise<(MemoryR
 // ---------------------------------------------------------------------------
 
 export function createNativeMemoryStore(db: RawDb): MemoryStorePort {
+  const readDb = scopedReadDb(db)
   return {
     async get(id) {
-      return rawGet(db, id)
+      if (!(await authorizedMemoryIds(readDb, [String(id)])).has(String(id))) return null
+      return rawGet(readDb, id)
     },
 
     async getMany(ids) {
-      return rawGetMany(db, ids)
+      const allowed = await authorizedMemoryIds(readDb, ids.map(String))
+      const records = await rawGetMany(readDb, ids.filter(id => allowed.has(String(id))))
+      const found = new Map(records.flatMap(record => record === null ? [] : [[String(record.id), record] as const]))
+      return ids.map(id => found.get(String(id)) ?? null)
     },
 
     async getActiveByCanonicalKey(key) {
       const rows = await exec(
-        db,
+        readDb,
         sql`select * from memory_records
             where canonical_key = ${key} and status = 'active'
+              and (${memoryReadPredicate()})
             order by recorded_at asc`,
         '按 canonical key 查当前记忆'
       )
-      return Promise.all(asRows<MemoryRow>(rows).map((row) => hydrate(db, row)))
+      return Promise.all(asRows<MemoryRow>(rows).map((row) => hydrate(readDb, row)))
     },
 
     async getActiveByFingerprint(owner, fingerprint) {
       const rows = await exec(
-        db,
+        readDb,
         sql`select * from memory_records
             where owner_kind = ${owner.kind} and owner_id = ${String(owner.id)}
               and content_fingerprint = ${fingerprint} and status = 'active'
+              and (${memoryReadPredicate()})
             limit 1`,
         '按内容指纹查当前记忆'
       )
       const raw = firstMemoryRow(rows)
-      return raw ? hydrate(db, raw) : null
+      return raw ? hydrate(readDb, raw) : null
     },
 
     async listByCanonicalKey(key) {
       const rows = await exec(
-        db,
+        readDb,
         sql`select * from memory_records
             where canonical_key = ${key}
+              and (${memoryReadPredicate()})
             order by recorded_at asc`,
         '按 canonical key 列出全部记忆（含历史）'
       )
-      return Promise.all(memoryRows(rows).map((row) => hydrate(db, row)))
+      return Promise.all(memoryRows(rows).map((row) => hydrate(readDb, row)))
     },
 
     async listBySubject(owner, subject) {
       const rows = await exec(
-        db,
+        readDb,
         sql`select r.* from memory_records r
             join memory_subject_links l on l.memory_id = r.id
             where r.owner_kind = ${owner.kind} and r.owner_id = ${String(owner.id)}
               and l.subject_kind = ${subject.kind} and l.subject_id = ${String(subject.id)}
+              and (${memoryReadPredicate('r')})
             order by r.recorded_at asc`,
         '按 subject 查记忆'
       )
-      return Promise.all(memoryRows(rows).map((row) => hydrate(db, row)))
+      return Promise.all(memoryRows(rows).map((row) => hydrate(readDb, row)))
     },
 
     async listBySource(ref) {
       const rows = await exec(
-        db,
+        readDb,
         sql`select r.* from memory_records r
             join memory_evidence_links l on l.memory_id = r.id
             where l.evidence_kind = ${ref.kind} and l.evidence_id = ${ref.id}
+              and (${memoryReadPredicate('r')})
             order by r.recorded_at asc`,
         '按来源反查记忆'
       )
-      return Promise.all(memoryRows(rows).map((row) => hydrate(db, row)))
+      return Promise.all(memoryRows(rows).map((row) => hydrate(readDb, row)))
     },
 
     async list(scope) {
       const limit = Math.max(1, Math.min(500, scope.limit ?? 50))
       const rows = await exec(
-        db,
+        readDb,
         sql`select * from memory_records
             where owner_kind = ${scope.owner.kind} and owner_id = ${String(scope.owner.id)}
               ${scope.status === undefined ? sql`` : sql`and status = ${scope.status}`}
               ${scope.type === undefined ? sql`` : sql`and memory_type = ${scope.type}`}
+              and (${memoryReadPredicate()})
             order by recorded_at desc
             limit ${limit}`,
         '列出记忆'
       )
-      return Promise.all(memoryRows(rows).map((row) => hydrate(db, row)))
+      return Promise.all(memoryRows(rows).map((row) => hydrate(readDb, row)))
     },
 
     async history(id) {
-      return domainEventsForMemory(db, id)
+      if (!(await authorizedMemoryIds(readDb, [String(id)])).has(String(id))) return []
+      return domainEventsForMemory(readDb, id)
     },
 
     async apply(event) {
-      return applyMemoryEvent(db, event)
+      const scope = currentReadScope()
+      if (scope === undefined) return applyMemoryEvent(db, event)
+      return inTransaction(db, async tx => {
+        const result = await applyMemoryEvent(tx, event)
+        if (result.record !== null && result.created) {
+          await labelRecordScope(tx, { recordKind: 'memory', recordId: String(result.record.id),
+            originRoom: scope.context.room, disclosure: 'private_to_origin', labeledBy: 'scoped-memory-fold@1' })
+        }
+        return result
+      })
     },
 
     async rebuildMemory(id) {
@@ -859,7 +882,7 @@ export async function listRecentExplicitWrites(
           )
           and r.owner_kind = ${input.owner.kind} and r.owner_id = ${String(input.owner.id)}
           and r.processor = 'explicit-memory'
-          and r.status = 'active'
+          and r.status = 'active' and (${memoryReadPredicate('r')})
         order by r.recorded_at desc
         limit ${limit}`,
     '按会话列出该用户最近的显式写入（B① 兜底读取口）'

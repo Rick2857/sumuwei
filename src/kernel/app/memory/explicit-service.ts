@@ -237,6 +237,8 @@ export interface ExplicitMemoryServiceDeps {
   validator: MemoryMutationValidator
   /** 内容抽取器。缺省 = 只走规则（离线安全） */
   extractor?: MemoryContentExtractor
+  /** Infrastructure may separate identical content from distinct source rooms; absent preserves legacy IDs. */
+  prepareCandidate?: (candidate: MemoryCandidate) => MemoryCandidate
   /**
    * 目标解析器。
    *
@@ -373,11 +375,12 @@ export function createExplicitMemoryService(
     }
 
     // ---- 造候选（纯计算）-----------------------------------------------
-    const candidate = buildCandidate({
+    const builtCandidate = buildCandidate({
       owner: request.owner,
       extracted,
       triggerEventId: request.triggerEventId,
     })
+    const candidate = deps.prepareCandidate?.(builtCandidate) ?? builtCandidate
 
     /*
      * ==========================================================================
@@ -732,11 +735,12 @@ async function supersedeWithReplacement(
   target: MemoryRecord,
   extracted: ExtractedMemoryContent
 ): Promise<ExplicitMemoryOutcome> {
-  const replacement = buildCandidate({
+  const builtReplacement = buildCandidate({
     owner: request.owner,
     extracted,
     triggerEventId: request.triggerEventId,
   })
+  const replacement = deps.prepareCandidate?.(builtReplacement) ?? builtReplacement
 
   /*
    * ⚠️ 顺序很重要：**先建新条、再 supersede 旧条**。

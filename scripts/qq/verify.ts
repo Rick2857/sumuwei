@@ -130,8 +130,24 @@ try {
   sandbox = isolateDatabase('qq-private-verify', { keep: true }).dir
   const features = Object.fromEntries([...readFileSync(resolve(root, 'src/kernel/app/flags.ts'), 'utf8')
     .matchAll(/env\.(CHARACTER_[A-Z_]+_ENABLED)/g)].map((match) => [match[1]!, 'false']))
+  /*
+   * ⚠️ **子进程必须显式钉死后端**（2026-10-14 实测修）。
+   *
+   * 子进程的 `cwd` 是仓库根 ⇒ `src/db/index.ts` 会在开库前重读 `<cwd>/.env`；
+   * 而 `.env` 里 `CHARACTER_DB_BACKEND=postgres` ⇒ 本门以为的"目录沙箱"对子进程**不成立**，
+   * 它会去连**生产 PostgreSQL**（实测读数：`[db] 后端 postgres，身份核对通过：database=sumuwei`），
+   * 只是被"单认知执行者资格锁"挡下才没写进去。
+   * 这里按 `u1-*` 门的同一套跑法把后端钉成 pglite（dotenv **不覆盖**已存在的环境变量）。
+   * ⚠️ 光钉后端还不够：`.env` 的 `LG_PG_EXPECT_DATABASE=sumuwei` 同样会漏进子进程，
+   *    而 `initDatabaseInner()` 的**身份核对是按"有没有期望值"触发的**（不按后端）⇒
+   *    PGlite 句柄会被拿去做 PG 身份核对（`实际 template1`）⇒ 核心照样起不来。
+   *    所以期望值那几项也要一并清空。
+   */
   lg = new LgStdioClient(root, {
-    ...process.env, ...features, ...env, PGLITE_DATA_DIR: sandbox, PROJECT_LG_SANDBOX: sandbox,
+    ...process.env, ...features, ...env,
+    CHARACTER_DB_BACKEND: 'pglite', POSTGRES_URL: '', DATABASE_URL: '',
+    LG_PG_EXPECT_DATABASE: '', LG_PG_EXPECT_USER: '', LG_PG_EXPECT_DATABASE_PREFIX: '', LG_PG_EXPECT_USER_PREFIX: '',
+    PGLITE_DATA_DIR: sandbox, PROJECT_LG_SANDBOX: sandbox,
     USER_NAME: 'qq-fixture-owner', OPENAI_API_KEY: 'offline-local-fixture',
     OPENAI_BASE_URL: `http://127.0.0.1:${modelPort}`, OPENAI_LARGE_MODEL: 'offline-fixture', OPENAI_SMALL_MODEL: 'offline-fixture',
     CHARACTER_KERNEL_ENABLED: 'true', CHARACTER_MEMORY_ENABLED: 'true', CHARACTER_MEMORY_EXPLICIT_ENABLED: 'true',

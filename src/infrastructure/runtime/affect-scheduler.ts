@@ -314,6 +314,7 @@ export async function maybeRunAffectEvaluation(
     characterId: CharacterId | string
     /** 唯一 active user 的 id（M8-D11；生产 = resolveIds(userName).userId） */
     activeUserId: string
+    allowedUserIds?: readonly string[]
     /** 播种用的激活标识（缺省 = 'open-catchup'） */
     activationId?: string
     /**
@@ -404,6 +405,7 @@ export async function maybeRunAffectEvaluation(
       fromSequence: from,
       toSequence: to,
       activeUserId: input.activeUserId,
+      allowedUserIds: input.allowedUserIds,
       suppressImpacts: input.suppressImpacts,
       now,
     })

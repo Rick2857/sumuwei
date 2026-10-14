@@ -52,5 +52,5 @@ async function request(input: NativeVoiceRequest & { checkedText?: string }, pha
   return { text: value.text, durationMs: value.durationMs }
 }
 installNativeVoiceReplyPort({ model: 'qwen3.8-omni-flash-realtime', generate: input => request(input, 'generate'), correct: input => request(input, 'correct') })
-process.argv = [process.argv[0]!, process.argv[1]!, '--bridge']
+process.argv = [process.argv[0]!, process.argv[1]!, process.argv.includes('--coexist') ? '--coexist' : '--bridge']
 await import('../../src/main.ts')

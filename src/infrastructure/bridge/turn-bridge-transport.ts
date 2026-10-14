@@ -166,7 +166,13 @@ export interface BridgeSessionLike {
     onSpeechSegment: (segment: CheckedSpeechSegment) => void
     signal?: AbortSignal
     onModelStart?: () => void
-  }, images?: readonly import('../../kernel/contracts/image-input.ts').ImageInput[]): Promise<string>
+  }, images?: readonly import('../../kernel/contracts/image-input.ts').ImageInput[],
+  /**
+   * ★ U1 / `WP2b-2b`：**本轮作用域**（可选；`ADR-138` 的"每轮优先于会话级"）。
+   * ⚠️ 用类型 import 而不是值 import（本文件对整个契约层都是类型依赖）。
+   */
+  turnScope?: import('../../kernel/contracts/scope.ts').ScopeContext,
+  groupContext?: readonly import('../../kernel/app/bridge/turn-bridge.ts').BridgeGroupContextLine[]): Promise<string>
   lastTurnIdentity():
     | {
         replyId: string
@@ -263,6 +269,23 @@ export function sessionHost(
      *    那三个由桥填，装配层**看不到**也**不该猜**（见 `TurnBridgeHost.openingOpportunity`）。
      */
     openingOpportunity?: TurnBridgeHost['openingOpportunity']
+    /**
+     * ★ U1 / `WP2b-2b`（`ADR-139` `D01`）：**入站平台事实 ⇒ 本轮作用域** 的解析能力 —— 可选。
+     *
+     * ```text
+     * 为什么做成**注入**而不是在这里读库/读配置：
+     *   本文件是**桥的传输层**，它不认识 `db`、也不认识"原主人是谁"（那是装配层的程序事实）。
+     *   与取消 / 交付账 / 提前查 / 主动开口同一条纪律：
+     *     **不传 ⇒ 没有这个能力** ⇒ 本轮不给每轮作用域 ⇒ 回落到会话级 ⇒ 逐字旧行为。
+     * ⚠️ 实现方（装配层）必须用 `resolveInboundTurnScope`：它自己带三条失败关闭
+     *   （没有平台账号 / 身份解析被拒 / 入口层取不到原主人 id）。
+     * ⚠️ **失败关闭时返回 `scope: undefined`** ⇒ 本轮走"无每轮作用域"。
+     *   若此时授权器已注入，结果是**全拒且计数可观测**（设计如此）——
+     *    接线时**不许**为了"让它能跑"而放宽这一条（本单 §5bis ④）。
+     * ```
+     */
+    resolveTurnScope?: (facts: unknown) => Promise<{ scope?: import('../../kernel/contracts/scope.ts').ScopeContext | undefined }>
+    selectSession?: (facts: unknown) => Promise<BridgeSessionLike>
     /** 覆盖 `Date.now`（只给门用；缺省取真实时钟） */
     now?: () => number
   } = {}
@@ -295,10 +318,24 @@ export function sessionHost(
        * ⚠️ 它**不**撤销任何已提交的东西，也不动终态：只把悬着的交付态定案。
        */
       delivery?.markSuperseded({ at: now(), by: 'lg', reason: 'superseded_by_new_turn' })
+      /*
+       * ★ U1 / `WP2b-2b`：**本轮作用域**（`ADR-139` `D01`）。
+       * ⚠️ 只在**这一轮带平台事实**且**装配层注入了能力**时解析；
+       *   任何一处不满足 ⇒ `turnScope` 保持 `undefined` ⇒ `compileTurn` 不传 `scope`
+       *   ⇒ 网关回落到 `TurnGatewayOptions.scope`（会话级）⇒ 逐字旧行为。
+       * ⚠️ 解析失败**不抛**：那会把"这一轮身份不确定"变成"整轮失败"。
+       *   正确语义是**不给每轮作用域**（失败关闭）——若授权器在，则表现为全拒且计数可观测。
+       */
+      let turnScope: import('../../kernel/contracts/scope.ts').ScopeContext | undefined
+      const selectedSession = options.selectSession === undefined ? session : await options.selectSession(input.platformFacts)
+      if (input.platformFacts !== undefined && options.resolveTurnScope !== undefined) {
+        const resolved = await options.resolveTurnScope(input.platformFacts)
+        turnScope = resolved.scope
+      }
       const segments: import('../../kernel/contracts/expressive-speech.ts').SpeechExpression['segments'] = []
       let replyText: string
       try {
-        replyText = await session.send(input.userText, input.onSpeechSegment === undefined ? undefined : {
+        replyText = await selectedSession.send(input.userText, input.onSpeechSegment === undefined ? undefined : {
           onSpeechSegment: packet => {
             if (registry?.isCancelled(input.requestId)) return
             segments.push(packet.segment)
@@ -307,9 +344,9 @@ export function sessionHost(
           },
           ...(registry !== undefined ? { signal: registry.signalFor(input.requestId),
             onModelStart: () => registry.markModelStarted(input.requestId) } : {}),
-        }, input.images)
+        }, input.images, turnScope, input.groupContext)
       } finally { registry?.release(input.requestId) }
-      const identity = session.lastTurnIdentity()
+      const identity = selectedSession.lastTurnIdentity()
       if (identity === undefined) {
         /*
          * 失败关闭：`send()` 返回了却没有身份记录 —— 那说明这一轮**没走**

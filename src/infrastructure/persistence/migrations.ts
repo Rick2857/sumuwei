@@ -1804,6 +1804,145 @@ const MIGRATION_0018: Migration = {
   ],
 }
 
+/**
+ * **多用户补充计划 U1 / WP4（`ADR-137` 方案 B，2026-10-14 原主人裁定）**：
+ * 记录的**归属 + 披露**标签放在 `memory_records` **之外**。
+ *
+ * ```text
+ * MemoRecord / 事件 payload **一字不改**：标签是**授权元数据**，不是记录内容
+ *   ⇒ `rebuildMemory()` **不**重算标签（重建前后标签行逐字节不变）
+ *   ⇒ 迁移**不**给旧记录回填 origin（宁可按最保守的 private_to_origin，也不编一个来源）
+ * ```
+ *
+ * ⚠️ `record_kind` 首版只有 `'memory'`（留种类，便于日后扩到附件/日志）；
+ *    它**不是**外键：标签行与被标记录是两条独立事实（谁先谁后都合法，缺标签时按缺省保守处理）。
+ */
+const MIGRATION_0019: Migration = {
+  version: 19,
+  name: 'u1-record-scope-labels',
+  statements: [
+    `create table if not exists record_scope_labels (
+       record_kind       text   not null,
+       record_id         text   not null,
+       origin_room_kind  text   not null,
+       origin_room_id    text   not null,
+       disclosure        text   not null,
+       labeled_at        bigint not null,
+       labeled_by        text   not null,
+       primary key (record_kind, record_id),
+       check (record_kind in ('memory')),
+       check (origin_room_kind in ('private', 'group')),
+       check (origin_room_id <> ''),
+       check (disclosure in ('private_to_origin', 'explicit_shared', 'public_to_room', 'character_internal')),
+       check (labeled_by <> '')
+     )`,
+    /* 按"来源域"反查：`U1` 需要回答"这个 room 里有哪些记录" */
+    `create index if not exists record_scope_labels_by_origin
+       on record_scope_labels (record_kind, origin_room_kind, origin_room_id)`,
+  ],
+}
+
+/**
+ * A1 / WP4：管理后台的**最小任务记录**（`ADR-135` `R-A1-3`，用户 2026-10-14 批准 + 同日授权应用）。
+ *
+ * ```text
+ * 承载    job_id / operator（可信操作者）/ kind / idempotency_key / params_fingerprint /
+ *         state（闭集，与 `admin-ports/jobs.ts` 的 `JOB_STATES` **逐字一致**）/ result_ref / 时间戳
+ * 幂等    靠**唯一约束**（`idempotency_key` 唯一索引），不是靠提示词或进程内缓存
+ * 状态    check 里写死闭集 ⇒ 库层兜一次（与端口层同一份语义；门里有交叉判据）
+ * ⚠️ 它**不**保证外部副作用恰好一次（`R-A1-3` 逐字）：持久记录只保证"同一幂等键不会开出第二个任务"
+ * ```
+ */
+const MIGRATION_0020: Migration = {
+  version: 20,
+  name: 'a1-admin-jobs',
+  statements: [
+    `create table if not exists admin_jobs (
+       job_id              text   primary key,
+       operator            text   not null,
+       kind                text   not null,
+       idempotency_key     text   not null,
+       params_fingerprint  text   not null,
+       state               text   not null,
+       result_ref          text,
+       created_at          bigint not null,
+       updated_at          bigint not null,
+       check (operator <> ''),
+       check (kind <> ''),
+       check (idempotency_key <> ''),
+       check (params_fingerprint <> ''),
+       check (state in ('pending', 'running', 'succeeded', 'failed', 'interrupted'))
+     )`,
+    /* 幂等键唯一：**这就是**"重复提交返回原任务"的机器保证 */
+    `create unique index if not exists admin_jobs_idempotency
+       on admin_jobs (idempotency_key)`,
+    /* 按状态看"还在跑/中断待核验"的任务 */
+    `create index if not exists admin_jobs_state
+       on admin_jobs (state, updated_at)`,
+  ],
+}
+
+const MIGRATION_0021: Migration = {
+  version: 21,
+  name: 'multi-user-conversation-rooms',
+  statements: [
+    `create table if not exists conversation_rooms (
+      conversation_id text primary key, character_id text not null,
+      room_kind text not null check (room_kind in ('private','group')),
+      room_id text not null check (room_id <> ''))`,
+    `create index if not exists conversation_rooms_room on conversation_rooms (character_id, room_kind, room_id)`,
+    `create table if not exists room_participants (
+      character_id text not null, room_kind text not null check (room_kind in ('private','group')),
+      room_id text not null check (room_id <> ''), user_id text not null check (user_id <> ''),
+      primary key (character_id, room_kind, room_id, user_id))`,
+    `create table if not exists scope_read_audit (
+      audit_id text primary key, operator_id text not null, target_ids jsonb not null,
+      purpose text not null, created_at bigint not null)`,
+    // Keep content fingerprints/reducers unchanged; new IDs already encode the source room.
+    // Legacy IDs share their original uniqueness domain. Rebuild retains the same IDs.
+    `drop index if exists memory_records_active_fingerprint`,
+    `create unique index memory_records_active_fingerprint
+      on memory_records (owner_kind, owner_id, content_fingerprint,
+        coalesce(substring(id from ':room-[a-f0-9]{16}$'), 'legacy')) where status = 'active'`,
+  ],
+}
+
+const MIGRATION_0022: Migration = {
+  version: 22, name: 'multi-user-scoped-read-rls',
+  statements: [
+    `alter table memory_records enable row level security`,
+    `alter table memory_records force row level security`,
+    `create policy memory_scope_read on memory_records for select using (
+      coalesce(current_setting('lg.scope_mode', true), '') <> 'external_query' or (
+        exists (select 1 from record_scope_labels l where l.record_kind='memory' and l.record_id=memory_records.id
+          and l.origin_room_kind=current_setting('lg.room_kind', true) and l.origin_room_id=current_setting('lg.room_id', true)
+          and l.disclosure in ('private_to_origin','public_to_room'))
+        or (current_setting('lg.room_kind', true)='private' and current_setting('lg.room_id', true)=current_setting('lg.owner_user_id', true)
+          and not exists (select 1 from record_scope_labels l where l.record_kind='memory' and l.record_id=memory_records.id))
+        or (current_setting('lg.room_kind',true)='private' and current_setting('lg.room_id',true)=current_setting('lg.owner_user_id',true)
+          and exists (select 1 from scope_read_audit a join record_scope_labels l on a.target_ids ? l.origin_room_id
+            where a.audit_id=current_setting('lg.scope_audit_id',true) and a.operator_id=current_setting('lg.owner_user_id',true)
+              and l.record_kind='memory' and l.origin_room_kind='private' and l.record_id=memory_records.id))))`,
+    `create policy memory_scope_insert on memory_records for insert with check (true)`,
+    `create policy memory_scope_update on memory_records for update using (true) with check (true)`,
+    `create policy memory_scope_delete on memory_records for delete using (true)`,
+    `alter table conversation_events enable row level security`,
+    `alter table conversation_events force row level security`,
+    `create policy conversation_scope_read on conversation_events for select using (
+      coalesce(current_setting('lg.scope_mode', true), '') <> 'external_query' or (
+        exists (select 1 from conversation_rooms r where r.conversation_id=conversation_events.conversation_id
+          and r.room_kind=current_setting('lg.room_kind', true) and r.room_id=current_setting('lg.room_id', true))
+        or (current_setting('lg.room_kind', true)='private' and current_setting('lg.room_id', true)=current_setting('lg.owner_user_id', true)
+          and not exists (select 1 from conversation_rooms r where r.conversation_id=conversation_events.conversation_id))
+        or (current_setting('lg.room_kind',true)='private' and current_setting('lg.room_id',true)=current_setting('lg.owner_user_id',true)
+          and exists (select 1 from scope_read_audit a join conversation_rooms r on a.target_ids ? r.room_id
+            where a.audit_id=current_setting('lg.scope_audit_id',true) and a.operator_id=current_setting('lg.owner_user_id',true)
+              and r.room_kind='private' and r.conversation_id=conversation_events.conversation_id))))`,
+    `create policy conversation_scope_insert on conversation_events for insert with check (true)`,
+    `create policy conversation_scope_update on conversation_events for update using (true) with check (true)`,
+  ],
+}
+
 /** 全部迁移，按版本升序。新增迁移**只许往后追加**。 */
 export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_0001,
@@ -1824,6 +1963,10 @@ export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_0016,
   MIGRATION_0017,
   MIGRATION_0018,
+  MIGRATION_0019,
+  MIGRATION_0020,
+  MIGRATION_0021,
+  MIGRATION_0022,
 ]
 
 export function latestSchemaVersion(): number {

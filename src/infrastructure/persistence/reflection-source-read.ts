@@ -10,6 +10,7 @@ import { createNativeMemoryStore } from './memory-store.ts'
 import { computeWithdrawnEvidence } from './withdrawn-evidence.ts'
 import { exec, type RawDb } from './db.ts'
 import { getConversationEventsByIds } from './conversation-store.ts'
+import { sourceRootsVisible } from './read-scope.ts'
 import { originReadingOfEvent } from './qualification-read.ts'
 import { qualificationsForMemories } from './qualification-read.ts'
 import { createRecallRequest } from '../../kernel/contracts/recall.ts'
@@ -70,6 +71,7 @@ export async function readReflectionSourceSnapshot(
     inTime(row.state.proposition.validFrom, row.state.proposition.validTo) && beliefVerdicts.get(String(row.state.beliefId))?.usable === true)
   const derivedUsable = memoriesUsable && beliefsUsable
   const roots = lineage.roots.map(root => root.id)
+  const audienceAllowed = await sourceRootsVisible(db, roots)
   const rootIds = sql.join(roots.map(id => sql`${id}`), sql`, `)
   // A short commit transaction holds source records against concurrent retraction.
   if (options.lock && roots.length > 0) {
@@ -110,7 +112,7 @@ export async function readReflectionSourceSnapshot(
   )
   const sourceVerdicts = roots.map((id): ReflectionSourceVerdict => {
     const row = byId.get(id)
-    if (row === undefined || String(row.character_id) !== String(characterId) || !withdrawn.ok || !lineage.usable || !derivedUsable) return { handleId: id, usable: false, reason: 'unavailable' }
+    if (!audienceAllowed || row === undefined || String(row.character_id) !== String(characterId) || !withdrawn.ok || !lineage.usable || !derivedUsable) return { handleId: id, usable: false, reason: 'unavailable' }
     if (options.activeUserId !== undefined && String(row.actor_type) === 'user' && String(row.actor_id) !== options.activeUserId) return { handleId: id, usable: false, reason: 'unavailable' }
     const reason = withdrawn.byReason[id]
     if (reason !== undefined) return { handleId: id, usable: false, reason: reason === 'explicit_forget' ? 'source_forgotten' : 'source_retracted' }

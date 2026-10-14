@@ -10,6 +10,7 @@ import { createLateWriteFence } from '../../kernel/app/reflection/late-write-fen
 import { exec, type RawDb } from '../persistence/db.ts'
 import { conversationEventsInRange, findEventRefs, latestCharacterEventSequence } from '../persistence/conversation-store.ts'
 import { createNativeMemoryStore } from '../persistence/memory-store.ts'
+import { scopeForConversation, scopeMemoryCandidate, withReadScope, withoutReadScope } from '../persistence/read-scope.ts'
 import { applyAcceptedEvents } from '../persistence/event-store.ts'
 import { advanceWatermark, enqueueJob, finishJob, getWatermark, hasProcessedOperation, markJobRunning } from '../persistence/job-store.ts'
 import type { AutomaticMemoryReading } from './automatic-memory.ts'
@@ -118,6 +119,8 @@ export function parseModelMemoryPlan(raw: string, source: string, records: reado
 export async function commitModelMemoryPlan(input: {
   db: RawDb; characterId: CharacterId; speaker: EntityRef; registry: DomainEventRegistry
   event: ConversationEvent; records: readonly MemoryRecord[]; plan: ModelMemoryPlan
+  /** U1 / ADR-137 写侧：把**新建**的记录 id 报出来（缺省不传 ⇒ 既有调用者行为逐字不变） */
+  onCreatedIds?: (memoryIds: readonly string[]) => void
 }): Promise<number> {
   const { db, characterId, speaker, registry, event, records, plan } = input
   if (event.type !== 'user_message' || event.actorId !== String(speaker.id)
@@ -139,6 +142,8 @@ export async function commitModelMemoryPlan(input: {
     }, features: { restatementRevivalEnabled: true },
   })
   let count = 0
+  /* U1 / ADR-137 写侧：这一拍**新建**的记录 id（`create` 真的执行了才收） */
+  const createdIds: string[] = []
   for (const decision of plan.decisions) {
     const target = decision.targetId ? records.find((record) => String(record.id) === decision.targetId) : undefined
     if (target) {
@@ -152,14 +157,14 @@ export async function commitModelMemoryPlan(input: {
       }
     }
     const memory = decision.memory
-    const candidate = memory ? createMemoryCandidate({ owner, type: memory.type,
+    const candidate = memory ? scopeMemoryCandidate(createMemoryCandidate({ owner, type: memory.type,
       content: memory.type === 'episode'
         ? { kind: 'episode', summary: memory.summary!, participants: [speaker], eventRefs: [String(event.id)] }
         : { kind: 'claim', subject: speaker, predicate: memory.predicate!, value: memory.value! },
       subjects: [speaker], sourceRefs: [{ kind: 'conversation_event', id: String(event.id) }],
       evidenceRootIds: [String(event.id)], epistemicStatus: 'reported', authority: decision.operation === 'correct' ? 'EXPLICIT_CORRECTION' : 'EXPLICIT_USER_STATEMENT',
       importance: memory.importance, confidence: memory.confidence, processor: MODEL_MEMORY_PROCESSOR, processorVersion: MODEL_MEMORY_VERSION,
-    }) : undefined
+    })) : undefined
     if (candidate) {
       const previous = await store.get(candidate.proposedId)
       if (previous?.status === 'active' && !target) continue
@@ -181,13 +186,18 @@ export async function commitModelMemoryPlan(input: {
       count += events.length
     }
     if (candidate) {
-      if ((await store.get(candidate.proposedId))?.status !== 'active') await commit('create')
+      if ((await store.get(candidate.proposedId))?.status !== 'active') {
+        await commit('create')
+        /* 真的建了 ⇒ 记下它的 id（打标要用"是哪几条"，计数做不到） */
+        createdIds.push(String(candidate.proposedId))
+      }
       if (target) await commit('supersede', { memoryId: target.id, supersededBy: candidate.proposedId, reason: '明确语义更正', validUntil: event.createdAt })
     } else if (target) {
       await commit(decision.operation === 'forget' ? 'retract' : decision.operation as 'dispute' | 'restore',
         { memoryId: target.id, reason: decision.operation === 'forget' ? 'explicit_forget' : '用户明确要求', note: decision.quote })
     }
   }
+  if (createdIds.length > 0) input.onCreatedIds?.(createdIds)
   return count
 }
 
@@ -198,6 +208,7 @@ export class PostTurnModelMemoryConsumer {
   private notified = false
   constructor(private readonly input: {
     db: RawDb; characterId: CharacterId; speaker: EntityRef; registry: DomainEventRegistry
+    ownerUserId?: string
     invoke: (prompt: string) => Promise<string>; onReading: (reading: ModelMemoryReading) => void
   }) {}
 
@@ -217,7 +228,7 @@ export class PostTurnModelMemoryConsumer {
     if (this.fence.closed) return Promise.resolve()
     this.notified = true
     if (this.inFlight) return this.inFlight
-    this.inFlight = this.run().finally(() => { this.inFlight = undefined })
+    this.inFlight = withoutReadScope(() => this.run()).finally(() => { this.inFlight = undefined })
     return this.inFlight
   }
   async close(): Promise<void> { this.fence.close(); await this.inFlight }
@@ -236,12 +247,16 @@ export class PostTurnModelMemoryConsumer {
     } catch { this.input.onReading({ status: 'failed', throughSequence: 0, created: 0, rejected: 0 }) }
   }
   private async tick(): Promise<boolean> {
-    const { db, characterId, speaker, invoke, registry } = this.input
+    const { db, characterId, invoke, registry } = this.input
     const watermark = await getWatermark(db, characterId, MODEL_MEMORY_PROCESSOR, MODEL_MEMORY_VERSION)
     if (!watermark) throw new Error('model_memory_missing_cutover')
     const from = watermark.processedThroughSequence + 1
     const [event] = await conversationEventsInRange(db, characterId, from, await latestCharacterEventSequence(db, characterId), 1)
     if (!event) return false
+    const scope = this.input.ownerUserId === undefined ? undefined : await scopeForConversation(db,
+      String(event.conversationId), event.actorType === 'user' && event.actorId ? String(event.actorId) : this.input.ownerUserId, this.input.ownerUserId)
+    const processEvent = async (): Promise<boolean> => {
+    const speaker = scope === undefined || event.actorType !== 'user' || !event.actorId ? this.input.speaker : entityRef('user', String(event.actorId))
     const view = processorEventViewOf(event)
     let trustedUser = event.type === 'user_message' && event.actorId === String(speaker.id)
       && qualificationEstablishesUserFact(sourceQualificationOf(view.trustedOrigin))
@@ -268,15 +283,19 @@ export class PostTurnModelMemoryConsumer {
         recent: recent.reverse().map((row) => ({ actor: String(row.actor_type), text: String(row.content).slice(0, 500) })) })), event.content, records)
         : { destination: 'none' as const, decisions: [] }
       if (!db.transaction) throw new Error('model_memory_transaction_required')
+      const createdIds: string[] = []
       const created = await db.transaction(async (tx) => {
         if (this.fence.closed) throw new Error('late_write_fenced')
-        const count = await commitModelMemoryPlan({ db: tx, characterId, speaker, registry, event, records, plan })
+        const count = await commitModelMemoryPlan({ db: tx, characterId, speaker, registry, event, records, plan,
+          /* U1 / ADR-137 写侧：把新建 id 收出来，随读数交回装配层打标 */
+          onCreatedIds: (memoryIds) => { createdIds.push(...memoryIds) } })
         await finishJob(tx, job.id, 'completed')
         await advanceWatermark(tx, characterId, MODEL_MEMORY_PROCESSOR, MODEL_MEMORY_VERSION, event.sequence)
         if (this.fence.closed) throw new Error('late_write_fenced')
         return count
       })
-      this.input.onReading({ status: 'completed', throughSequence: event.sequence, created, rejected: 0, destination: plan.destination })
+      this.input.onReading({ status: 'completed', throughSequence: event.sequence, created, rejected: 0, destination: plan.destination,
+        ...(createdIds.length > 0 ? { createdMemoryIds: createdIds } : {}) })
       return true
     } catch (error) {
       const message = error instanceof Error ? error.message : ''
@@ -284,5 +303,7 @@ export class PostTurnModelMemoryConsumer {
       this.input.onReading({ status: 'failed', throughSequence: watermark.processedThroughSequence, created: 0, rejected: 0 })
       return false
     }
+    }
+    return scope === undefined ? processEvent() : withReadScope(scope, processEvent)
   }
 }
