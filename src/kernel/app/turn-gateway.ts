@@ -720,7 +720,8 @@ export interface CompileTurnInput {
   scope?: ScopeContext
   images?: readonly CheckedImageInput[]
   loadImage?: (ref: string) => Promise<CheckedImageInput | undefined>
-  runReminderTurn?: (recent: readonly ConversationLine[], withdrawn?: Pick<WithdrawnSetResult, 'ok' | 'withdrawnEventIds'>) => Promise<ReminderTurnResult>
+  runReminderTurn?: (recent: readonly ConversationLine[], withdrawn?: Pick<WithdrawnSetResult, 'ok' | 'withdrawnEventIds'>,
+    materials?: readonly import('./reminder/plan.ts').ReminderMaterial[]) => Promise<ReminderTurnResult>
   turn: IncomingTurn
   /**
    * 本轮输入文本。
@@ -1636,7 +1637,7 @@ export class TurnGateway {
       return [{ id: 'desktop-capabilities', kind: 'instruction', priority: 98,
         content: desktopFacts, droppable: false }]
     } })
-    const imageContext = (input.images ?? []).map(image => ({ image, text: input.currentInput, eventId: String(input.turn.userEvent?.id ?? 'current') }))
+    const imageContext = (input.images ?? []).map(image => ({ image, text: input.currentInput, eventId: String(input.turn.userEvent?.id ?? 'current'), createdAt: input.turn.userEvent?.createdAt ?? 0 }))
     const imageSeen = new Set(imageContext.map(item => item.image.sourceRef))
     let imageBytes = imageContext.reduce((total, item) => total + item.image.dataUrl.split(',')[1].length * 3 / 4, 0)
     let unavailableImages = 0
@@ -1651,7 +1652,7 @@ export class TurnGateway {
           const image = await input.loadImage(ref)
           const bytes = image ? image.dataUrl.split(',')[1].length * 3 / 4 : 0
           if (!image || imageBytes + bytes > IMAGE_INPUT_LIMITS.maxContextBytes) { unavailableImages++; continue }
-          imageContext.unshift({ image, text: line.text, eventId: String(line.id) })
+          imageContext.unshift({ image, text: line.text, eventId: String(line.id), createdAt: line.createdAt ?? 0 })
           imageBytes += bytes
         }
       }
@@ -1663,7 +1664,17 @@ export class TurnGateway {
           (unavailableImages ? `\n另有 ${unavailableImages} 张近期原图未提供（读取失败或图片预算超限）；涉及未提供原图的细节时请明确说明并请求重发，不得猜测。` : ''),
         sourceRefs: imageContext.map(item => item.image.sourceRef) }]
     } })
-    const reminder = await input.runReminderTurn?.(recentLines, withdrawnForRecall)
+    const contextBudget = this.options.recallBudget ?? DEFAULT_CONTEXT_BUDGET
+    const turnContentSelection = selectTurnContentContext({
+      items: input.turn.turnContent ?? [],
+      budgetTokens: contextBudget.turnContentTokens,
+    })
+    const reminder = await input.runReminderTurn?.(recentLines, withdrawnForRecall, [
+      ...imageContext.filter(item => withdrawnForRecall?.ok !== false && !withdrawnForRecall?.withdrawnEventIds.includes(item.eventId))
+        .map(item => ({ id: item.image.sourceRef, text: item.text, createdAt: item.createdAt, dataUrl: item.image.dataUrl })),
+      ...turnContentSelection.selected.map(({ item }) => ({ id: item.contentId, text: item.text,
+        createdAt: input.turn.userEvent?.createdAt ?? 0, truncated: item.scope.truncated })),
+    ])
     input.turn.reminderResult = reminder
     const reminderContent = reminderFactText(reminder)
     if (reminderContent !== '') extraProviders.push({ name: 'reminder-result', async provide() {
@@ -1936,7 +1947,6 @@ export class TurnGateway {
      */
     const evidenceStartedAt = Date.now()
     const turnEvidence = input.turn.externalEvidence ?? []
-    const contextBudget = this.options.recallBudget ?? DEFAULT_CONTEXT_BUDGET
     const evidenceSelection = selectExternalEvidenceContext({
       evidence: turnEvidence,
       budgetTokens: contextBudget.externalEvidenceTokens,
@@ -1981,10 +1991,6 @@ export class TurnGateway {
     const turnContentDroppedDuplicates = input.turn.turnContentAggregation?.droppedDuplicates ?? 0
     const turnContentDroppedByLimit = input.turn.turnContentAggregation?.droppedByLimit ?? 0
     const turnContentAggregationDropped = turnContentDroppedDuplicates + turnContentDroppedByLimit
-    const turnContentSelection = selectTurnContentContext({
-      items: turnContentItems,
-      budgetTokens: contextBudget.turnContentTokens,
-    })
     if (turnContentSelection.selected.length > 0) {
       extraProviders.push(
         createTurnContentProvider({ render: () => turnContentSelection.selected })

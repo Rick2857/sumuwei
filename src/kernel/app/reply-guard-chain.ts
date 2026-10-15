@@ -185,7 +185,8 @@ export function runReplyGuardChain(input: ReplyGuardChainInput): ReplyGuardChain
       input.memoryWriteResult?.kind === 'written' ||
       input.memoryWriteResult?.kind === 'already_applied' ||
       (input.goalWriteReality?.eventsCommitted ?? 0) > 0 ||
-      (input.reminderResult !== undefined && ['scheduled', 'updated', 'existing'].includes(input.reminderResult.kind)),
+      (input.reminderResult !== undefined && (['scheduled', 'updated', 'existing'].includes(input.reminderResult.kind)
+        || (input.reminderResult.kind === 'planned' && input.reminderResult.items.some(item => ['created', 'updated', 'cancelled'].includes(item.status))))),
     replyText: memoryTruth.replyText,
   })
   const reminder = input.reminderResult

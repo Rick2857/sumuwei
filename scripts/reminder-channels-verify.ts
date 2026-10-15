@@ -36,7 +36,8 @@ const server = createServer(async (request, response) => {
   for await (const chunk of request) body += String(chunk)
   const data = JSON.parse(body)
   const instruction = String(data.messages?.[0]?.content ?? '')
-  prompts.push(instruction)
+  // The provider puts compiled context in a user message after the seed's system message.
+  prompts.push((data.messages ?? []).map((message: { content: unknown }) => typeof message.content === 'string' ? message.content : JSON.stringify(message.content)).join('\n'))
   let content = '你好。'
   if (instruction.includes('提醒请求解析器')) {
     const input = JSON.parse(data.messages[1].content) as ReminderResolutionInput
@@ -147,7 +148,7 @@ try {
  */
 const channelSeq = rows.map(row => row.delivery_channel).join(',')
 check(`目标渠道独立持久化（含 S2 改投的那一条）`, channelSeq === 'qq_private,avatar,cli,avatar,cli,qq_private,avatar,cli')
-    check('新迁移已应用到隔离库', (await db.query('select max(version)::int as version from character_schema_migrations')).rows[0]?.version === 18) // ★S3：18 = #18 reminder-repeat-mode-and-attempt（旧期望 17）
+    check('新迁移已应用到隔离库', (await db.query('select max(version)::int as version from character_schema_migrations')).rows[0]?.version === MIGRATIONS.at(-1)!.version)
   } finally { await db.close() }
   host = await boot(); stopped = false
   await connectEntries()

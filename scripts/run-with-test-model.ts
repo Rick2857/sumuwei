@@ -7,7 +7,8 @@
  * ```text
  * · 真实记忆库聊天（我手动打开并与她聊天）      ⇒ 用 `.env` 里的**原 key**
  * · 执行测试（全量回归 / 冒烟 / 评测）          ⇒ 用 `.env.test` 的测试端点
- *   url: https://r.dis.115.zone/v1 · model: deepseek-v4.1-flash
+ *   历史端点见旧记录；当前默认取 `.env.test`，2026-10-15 用户改为
+ *   https://api.minimax.cn/v1 · MiniMax-M3.1-Flash-Preview。
  * · 默认为**没有预算上限**
  * ```
  *

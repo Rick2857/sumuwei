@@ -649,7 +649,9 @@
     "u1:bridge-facts:verify": "tsx scripts/u1-bridge-platform-facts-verify.ts",
     "u1:completion:verify": "tsx scripts/u1-completion-verify.ts",
     "qq:group:verify": "tsx scripts/qq/group-verify.ts",
-    "qq:group:coexist:verify": "tsx scripts/qq/group-verify.ts --coexist"
+    "qq:group:coexist:verify": "tsx scripts/qq/group-verify.ts --coexist",
+    "reminder:planning:verify": "tsx scripts/reminder-planning-verify.ts && tsx scripts/reminder-planning-main-verify.ts && tsx scripts/reminder-planning-gateway-verify.ts",
+    "reminder:planning:live": "tsx scripts/reminder-planning-live.ts"
   },
   "dependencies": {
     "@elizaos/core": "1.7.2",
@@ -667,7 +669,8 @@
     "mathjs": "15.2.0",
     "rss-parser": "3.13.0",
     "tesseract.js": "7.0.0",
-    "tesseract.js-core": "7.0.0"
+    "tesseract.js-core": "7.0.0",
+    "chrono-node": "2.10.3"
   },
   "devDependencies": {
     "@types/jsdom": "^27.0.0",

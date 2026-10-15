@@ -407,6 +407,23 @@ export async function updateReminderText(db: RawDb, target: NotificationIntentRe
   return rows.length > 0
 }
 
+/** Batch edits keep the same owner/conversation/version fence as content updates. */
+export async function revisePendingReminder(db: RawDb, target: NotificationIntentRecord,
+  change: ({ dueAt: number } | { cancel: true }) & { sourceRefs?: readonly string[] }, now = Date.now()): Promise<boolean> {
+  if ('dueAt' in change && (!Number.isFinite(change.dueAt) || change.dueAt <= now)) return false
+  const rows = await exec(db, sql`update notification_intents
+    set scheduled_at = ${'dueAt' in change ? change.dueAt : target.scheduledAt},
+        status = ${'cancel' in change ? 'cancelled' : 'pending'}, plan_version = plan_version + 1, updated_at = ${now},
+        source_refs = ${JSON.stringify([...new Set([...target.sourceRefs, ...(change.sourceRefs ?? [])])])}::jsonb
+    where id = ${String(target.id)} and character_id = ${String(target.characterId)}
+      and owner_ref = ${target.ownerRef} and conversation_ref = ${target.conversationRef}
+      and kind = 'reminder' and status = 'pending' and plan_version = ${target.planVersion}
+      and scheduled_at > ${now}
+      and not exists (select 1 from notification_occurrences o where o.intent_id = notification_intents.id and o.state <> 'cancelled')
+    returning id`, '批量提醒改期或取消')
+  return rows.length > 0
+}
+
 /** 取消（`cancelled` 是**终态**：不许被后来任何动作改回 `pending`） */
 export async function cancelIntent(
   db: RawDb,

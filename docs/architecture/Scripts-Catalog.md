@@ -21,8 +21,8 @@
 | 已登记门 | 223 |
 | 汇总/链入口 | 17 |
 | 文档入口 | 2 |
-| 内部 | 400 |
-| **合计** | **642** |
+| 内部 | 402 |
+| **合计** | **644** |
 
 `scripts/` 下**没有任何 pnpm 入口引用**的脚本文件：**265 个**（见文末）。
 
@@ -370,11 +370,11 @@
 
 **内部（6）**：`qq:chat` · `qq:check` · `qq:prepare` · `qq:start` · `qq:status` · `qq:verify`
 
-### `reminder`（4 条）
+### `reminder`（6 条）
 
 **已登记门（1）**：`reminder:channels:verify`
 
-**内部（3）**：`reminder:channels:live` · `reminder:context:live` · `reminder:context:verify`
+**内部（5）**：`reminder:channels:live` · `reminder:context:live` · `reminder:context:verify` · `reminder:planning:live` · `reminder:planning:verify`
 
 ### `reset`（1 条）
 

@@ -29,6 +29,7 @@
  */
 
 import { KernelError, type Timestamp } from './ids.ts'
+import { hasCalendarDate, readCalendarComponents } from './reminder-calendar.ts'
 import {
   DEFAULT_PROACTIVE_POLICY,
   careOpportunityKey,
@@ -256,7 +257,14 @@ export function readReminderRequest(input: ReminderIntakeInput): ReminderIntakeO
   let matched = ''
   let explicitNight = false
 
-  if (relative !== undefined) {
+  if (hasCalendarDate(text)) {
+    const date = readCalendarComponents(text, input.now, timezoneOffsetMs(input.now, timeZone) / 60_000)
+    if (date === undefined) return { kind: 'clarify', code: 'reminder_calendar_unreadable', question: '请给出完整、有效的日期和时间；我还没有设置这条提醒。' }
+    dueAt = instantOfZonedWallClock({ ...date, timeZone })
+    basis = `calendar:${date.matched}`
+    matched = date.matched
+    explicitNight = dueAt !== undefined && !isWithinActiveWindow(dueAt, policy.activeWindow)
+  } else if (relative !== undefined) {
     dueAt = input.now + relative.ms
     basis = `relative:${relative.matched}`
     matched = relative.matched

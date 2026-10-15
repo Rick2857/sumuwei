@@ -377,7 +377,7 @@ import { createLocalReminderCapabilities, LOCAL_REMINDER_SEND, LOCAL_REMINDER_PE
 import { createLocalReminderDeliveryAdapter } from './infrastructure/action/adapters/local-reminder-delivery.ts'
 import { bindLocalReminderConnection, createReminderScheduling, reportReminderForChannel } from './infrastructure/runtime/reminder-scheduling.ts'
 import { reminderDedupeKey } from './kernel/contracts/notification-intake.ts'
-import { createIntent, updateReminderText } from './infrastructure/persistence/notification-store.ts'
+import { createIntent, updateReminderText, revisePendingReminder } from './infrastructure/persistence/notification-store.ts'
 import { randomUUID } from 'node:crypto'
 import type { NotificationIntentId } from './kernel/contracts/index.ts'
 /** 提醒解析的私有调用端口（一次调用就是一次调用；失败 ⇒ 不建意图） */
@@ -4581,24 +4581,32 @@ class ChatSession {
           .filter(line => line.at >= Date.now() - 300_000 && line.at <= Date.now())
           .map((line, index) => ({ id: asConversationEventId(`group-buffer-${index}`), createdAt: line.at, sequence: index - 20,
             speaker: `QQ用户${line.senderId}（未受理的群语境，不能作为长期事实）`, text: line.text })), ...voiceLines],
-        ...(incoming.userEvent !== undefined && !this.dryRun ? { runReminderTurn: async (lines, withdrawn) => {
+        ...(incoming.userEvent !== undefined && !this.dryRun ? { runReminderTurn: async (lines, withdrawn, materials) => {
           const source = incoming!.userEvent!
           const current: ReminderSource = { id: String(source.id), text: userText, createdAt: source.createdAt }
           const recent = lines.filter(line => (line.actorType === 'user' || line.actorType === 'character') && line.createdAt !== undefined && line.id !== source.id)
-            .slice(-24).map(line => ({ id: String(line.id), text: [...line.text].slice(0, 500).join(''), createdAt: line.createdAt!, actor: line.actorType as 'user' | 'character' }))
+            .slice(-24).map(line => ({ id: String(line.id), text: [...line.text].slice(0, 2000).join(''), createdAt: line.createdAt!, actor: line.actorType as 'user' | 'character', truncated: [...line.text].length > 2000 }))
           if (!reminderCandidate(userText, recent)) return { kind: 'none' as const }
           let ownerRef: string
           try { ownerRef = readQqPrivateConfig(process.env).ownerId ?? this.ids.userId } catch { ownerRef = this.ids.userId }
           const rows = await listPendingIntents(this.kernel!.stores.db, this.kernel!.characterId, {
-            kind: 'reminder', ownerRef, conversationRef: source.conversationId, editable: true, limit: 20,
+            kind: 'reminder', ownerRef, conversationRef: source.conversationId, editable: true, limit: 500,
           })
           const pending = rows.filter(row => row.scheduledAt > Date.now() && withdrawn?.ok !== false &&
             !row.sourceRefs.some(ref => withdrawn?.withdrawnEventIds.includes(ref))).map(row => ({ id: String(row.id), text: row.text!, dueAt: row.scheduledAt, sourceRefs: row.sourceRefs, channel: row.deliveryChannel }))
-          const result = await runReminderTurn({ current, recent, pending, now: Date.now(),
+          const result = await runReminderTurn({ current, recent, pending, materials, now: Date.now(),
             entry: this.entryKey, availableChannels: reminderRuntimeChannels,
             enabled: this.flags.qqProactiveMode === 'on' && this.flags.entryScopedConversations && reminderRefreshHook !== undefined,
           }, {
             resolve: resolveReminder,
+            reschedule: async (target, dueAt) => {
+              const row = rows.find(item => String(item.id) === target.id)
+              return row !== undefined && await revisePendingReminder(this.kernel!.stores.db, row, { dueAt, sourceRefs: [current.id] })
+            },
+            cancel: async target => {
+              const row = rows.find(item => String(item.id) === target.id)
+              return row !== undefined && await revisePendingReminder(this.kernel!.stores.db, row, { cancel: true, sourceRefs: [current.id] })
+            },
             create: async request => {
               const created = await createIntent(this.kernel!.stores.db, { id: `qni:${randomUUID()}` as NotificationIntentId,
                 characterId: this.kernel!.characterId, ownerRef, conversationRef: source.conversationId, kind: 'reminder',
@@ -4618,7 +4626,7 @@ class ChatSession {
             },
           })
           logger.info(`[qq-proactive] 提醒入口：${result.kind}${'code' in result ? ` (${result.code})` : ''}`)
-          if (result.kind === 'scheduled' || result.kind === 'updated') await reminderRefreshHook?.()
+          if (result.kind === 'scheduled' || result.kind === 'updated' || result.kind === 'planned') await reminderRefreshHook?.()
           return result
         } } : {}),
         stateSection,
@@ -6379,7 +6387,10 @@ async function createCoexistenceEntryServer(input: {
        */
       const cancellation = new TurnCancellationRegistry()
       const base = sessionHost(session, {
-        ...(spec.entry === 'qq_private' && input.selectQqSession !== undefined ? { selectSession: input.selectQqSession } : {}),
+        ...(spec.entry === 'qq_private' && input.selectQqSession !== undefined ? {
+          selectSession: async (facts: unknown) => facts === undefined && !readQqPrivateConfig(process.env).multiUserEnabled
+            ? session : input.selectQqSession!(facts),
+        } : {}),
         cancellation,
         ...(delivery === undefined ? {} : { delivery }),
         sheIsSpeaking: delivery === undefined ? undefined : () => delivery.hasUnplayed(),
