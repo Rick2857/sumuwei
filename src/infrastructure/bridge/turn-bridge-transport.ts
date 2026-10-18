@@ -285,7 +285,7 @@ export function sessionHost(
      * ```
      */
     resolveTurnScope?: (facts: unknown) => Promise<{ scope?: import('../../kernel/contracts/scope.ts').ScopeContext | undefined }>
-    selectSession?: (facts: unknown) => Promise<BridgeSessionLike>
+    selectSession?: (facts: unknown, userText?: string) => Promise<BridgeSessionLike>
     /** 覆盖 `Date.now`（只给门用；缺省取真实时钟） */
     now?: () => number
   } = {}
@@ -327,7 +327,7 @@ export function sessionHost(
        *   正确语义是**不给每轮作用域**（失败关闭）——若授权器在，则表现为全拒且计数可观测。
        */
       let turnScope: import('../../kernel/contracts/scope.ts').ScopeContext | undefined
-      const selectedSession = options.selectSession === undefined ? session : await options.selectSession(input.platformFacts)
+      const selectedSession = options.selectSession === undefined ? session : await options.selectSession(input.platformFacts, input.userText)
       if (input.platformFacts !== undefined && options.resolveTurnScope !== undefined) {
         const resolved = await options.resolveTurnScope(input.platformFacts)
         turnScope = resolved.scope
@@ -530,6 +530,8 @@ export async function runBridgeTransport(
     controlLatencyMs: [],
   }
   const controlInFlight = new Set<Promise<void>>()
+  // Read-only model decisions have their own single slot: never queue QQ turns or controls behind them.
+  let assessment: Promise<void> | undefined
   let submits: Promise<void> = Promise.resolve()
 
   const write = (response: BridgeWireResponse): void => {
@@ -546,6 +548,15 @@ export async function runBridgeTransport(
   bridge.setOutputSink(write)
 
   const dispatch = (parsed: unknown): void => {
+    if ((parsed as { kind?: unknown })?.kind === 'ASSESS_GROUP_REPLY') {
+      if (assessment) {
+        write({ kind: 'GROUP_REPLY_DECISION', requestId: String((parsed as { requestId?: unknown }).requestId ?? ''),
+          outcome: 'rejected', code: 'group_reply_busy' })
+      } else {
+        assessment = handleBridgeMessage(bridge, parsed).then(write).finally(() => { assessment = undefined })
+      }
+      return
+    }
     if (isBridgeControlMessageKind((parsed as { kind?: unknown })?.kind)) {
       const startedAt = Date.now()
       const task = (async () => {
@@ -598,6 +609,7 @@ export async function runBridgeTransport(
    * 写出之前就 EOF 收工。
    */
   await submits
+  await assessment
   await Promise.all([...controlInFlight])
   await streams.flush?.()
   return reading

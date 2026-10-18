@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "suiteId": "s1-rejection-suite",
+  "suiteFile": "evals/s1/rejection-suite.json",
+  "sha256": "3729380450f93225759a499c3ae5d10c2cabc63a14d68fa1b238d48851a61c60",
+  "bytes": 6051,
+  "frozenAt": "2026-10-13",
+  "frozenBy": "U1/S1 WP0（S0 契约冻结后的形状冻结）",
+  "counts": { "rejectionCases": 19, "positiveControls": 6, "classes": 7, "faces": 8 },
+  "rule": "改用例集合（增/删/改 id、类别、回复面、副作用面、inputFaces、必选标记）必须**显式**更新本文件的 sha256 与 frozenAt，并在提交信息里可见；S1 读到的失败案**不删**，只允许追加 history 记录。",
+  "notCovered": [
+    "本文件只是**形状冻结**：它不主张任何用例已被执行",
+    "执行契约（判定器、模型/端点、隔离桩）见 ADR-134 §4 的证据面 E-1…E-4；R-S0-1/R-S0-2 的最终数值仍在复验点"
+  ],
+  "history": []
+}

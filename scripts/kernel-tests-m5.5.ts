@@ -643,8 +643,8 @@ const SEARCH_MODULES = [
   'src/infrastructure/search/fingerprint.ts',
   'src/infrastructure/search/fixture-search-provider.ts',
   'src/infrastructure/search/recording-fetch.ts',
-  'src/infrastructure/search/tavily-config.ts',
-  'src/infrastructure/search/tavily-search-provider.ts',
+  'src/infrastructure/search/deepseek-config.ts',
+  'src/infrastructure/search/deepseek-search-provider.ts',
 ]
 /*
  * ⚠️ 2026-09-22（ADR-054）：**唯一**允许读环境变量的是 `tavily-config.ts` ——
@@ -653,7 +653,7 @@ const SEARCH_MODULES = [
  *    凭证由配置层读一次、注入给 provider，出站层因此没有第二个"读 env"的地方。
  *    判据不是"全都禁"，而是"**只有那一个，且只有那两个具名变量**"。
  */
-const CONFIG_MODULE = 'src/infrastructure/search/tavily-config.ts'
+const CONFIG_MODULE = 'src/infrastructure/search/deepseek-config.ts'
 check(
   '★ 出站层没有任何日志（日志最多报"有没有"，不报取值）；只有配置模块读 env',
   SEARCH_MODULES.every((file) => {
@@ -661,10 +661,10 @@ check(
     if (text.includes('console.') || text.includes('logger')) return false
     return file === CONFIG_MODULE ? text.includes('process.env') : !text.includes('process.env')
   }),
-  `${SEARCH_MODULES.length} 个文件：0 处 console / logger · env 读取仅限 tavily-config.ts`
+  `${SEARCH_MODULES.length} 个文件：0 处 console / logger · env 读取仅限 deepseek-config.ts`
 )
 check(
-  '★ 配置模块只读**两个具名**变量（不是"扫一遍 env"）',
+  '★ 配置模块按用途读取具名凭证（不是"扫一遍 env"）',
   (() => {
     const text = sourceOf(CONFIG_MODULE)
     /*
@@ -675,14 +675,11 @@ check(
      *    于是它对**更好的**写法报假红。现在两面都断言：常量名**在**、字面量下标**不在**
      *    （后者才是"扫一遍 env"或"多读一个变量"的形态）。
      */
-    const hasNamedConstants =
-      text.includes("TAVILY_API_KEY_ENV = 'M55_TAVILY_SEARCH_API_KEY'") &&
-      text.includes("TAVILY_TEST_API_KEY_ENV = 'M55_TAVILY_SEARCH_TEST_API_KEY'")
-    const hasNoLiteralEnvSubscript = !/env\[['"]/.test(text)
-    const singleNamedRead = (text.match(/env\[envName\]/g) ?? []).length === 1
-    return hasNamedConstants && hasNoLiteralEnvSubscript && singleNamedRead
+    return text.includes("DEEPSEEK_SEARCH_TEST_KEY_ENV = 'DEEPSEEK_SEARCH_TEST_API_KEY'") &&
+      text.includes('test ? env[DEEPSEEK_SEARCH_TEST_KEY_ENV] : officialRoute ? env.OPENAI_API_KEY : undefined') &&
+      !text.includes('Object.entries(env)') && !text.includes('Object.keys(env)')
   })(),
-  '两个具名常量在场 · 无字面量 env 下标 · 恰好一次 env[envName]'
+  'ADR-141：测试只认具名 DeepSeek 测试凭证；生产凭证受官方路由约束'
 )
 check(
   '★ 静态清单：搜索层**恰好**这五个实现文件（没有第二个 provider 悄悄长出来）',
@@ -691,7 +688,7 @@ check(
   readdirSync(join(ROOT, 'src', 'infrastructure', 'search')).sort().join(', ')
 )
 check(
-  '★ 只有 `main.ts` 能构造真实 provider：其它 src 文件里没有 `createTavilySearchProvider`',
+  '★ 只有 `main.ts` 能构造真实 provider：其它 src 文件里没有 `createDeepSeekSearchProvider`',
   (() => {
     /*
      * ⚠️ 两个坑：① `readdirSync(recursive)` 在 Windows 上给的是 `a\\b\\c.ts`，
@@ -702,8 +699,8 @@ check(
       .map((entry) => String(entry).split('\\').join('/'))
       .filter((entry) => entry.endsWith('.ts'))
       .filter((entry) => entry !== 'main.ts')
-      .filter((entry) => !entry.endsWith('infrastructure/search/tavily-search-provider.ts'))
-      .filter((entry) => sourceOf(join('src', entry)).includes('createTavilySearchProvider'))
+      .filter((entry) => !entry.endsWith('infrastructure/search/deepseek-search-provider.ts'))
+      .filter((entry) => sourceOf(join('src', entry)).includes('createDeepSeekSearchProvider'))
     return offenders.length === 0
   })(),
   '装配层 + provider 自身之外 0 处'

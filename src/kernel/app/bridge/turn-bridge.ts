@@ -62,6 +62,7 @@ import type { CheckedSpeechSegment } from './streaming-speech.ts'
  *    而两处迟早会漂移（一处放行、一处拦下）。
  */
 import { createExternalEvidenceIntentDetector } from '../../action/external-evidence-intent.ts'
+import { parseActionResult, type ActionResultResponse } from './delegation-wire.ts'
 
 // ---------------------------------------------------------------------------
 // 端口（装配层实现；桥本身不碰数据库、不碰模型、不碰 prompt）
@@ -164,6 +165,16 @@ export interface BridgeSubmitResult {
  * 它只能给一句用户文本，拿回一段已经过守卫的回复。
  */
 export interface TurnBridgeHost {
+  assessGroupReply?(request: BridgeSubmitRequest): Promise<import('./group-reply.ts').GroupReplyDecision>
+  /**
+   * ADR-146 `D01`：**受理一次执行端回的动作结果**。
+   *
+   * ⚠️ **可选**：不装 = 核心侧没有接执行端 ⇒ 桥回 `action_executor_absent`，
+   *    **如实说没有**，绝不静默丢弃（与 `cancelTurn` 缺席时的 `cancel_capability_absent`
+   *    是同一条纪律）。
+   * ⚠️ 它**不**评估风险、不决定额度（`D02`）—— 那一层在**委派发出去之前**就过了。
+   */
+  actionResult?: (result: ActionResultResponse) => Promise<BridgeWireResponse>
   /**
    * 跑完**一个正式轮次**：`beginTurn` → `compileTurn` → 模型 → 回复守卫 → `completeTurn`。
    *
@@ -724,7 +735,8 @@ export class TurnBridge {
     if (request.groupContext !== undefined) {
       if (request.platformFacts?.messageType !== 'group' || !Array.isArray(request.groupContext)
         || request.groupContext.length > 20 || request.groupContext.some(line => !line ||
-          typeof line.senderId !== 'string' || !/^[1-9]\d{4,19}$/.test(line.senderId) ||
+          typeof line.senderId !== 'string' || !(request.platformFacts?.transport === 'wechat'
+            ? /^[a-zA-Z][a-zA-Z0-9_-]{2,100}$/ : /^[1-9]\d{4,19}$/).test(line.senderId) ||
           typeof line.text !== 'string' || line.text.length > 1000 || !Number.isFinite(line.at))
         || request.groupContext.reduce((sum, line) => sum + line.text.length, 0) > 6000) return 'invalid_group_context'
     }
@@ -754,6 +766,11 @@ export class TurnBridge {
    */
   get hostCancelTurn(): TurnBridgeHost['cancelTurn'] {
     return this.host.cancelTurn?.bind(this.host)
+  }
+
+  /** ADR-146：执行端回的动���结果（**可选**；缺席时桥如实说"没有这个能力"） */
+  get hostActionResult(): TurnBridgeHost['actionResult'] {
+    return this.host.actionResult?.bind(this.host)
   }
 
   /** host 有没有取消能力（门与诊断用；**不**参与任何产品判据） */
@@ -832,6 +849,10 @@ export class TurnBridge {
    */
   get hostOpeningOpportunity(): TurnBridgeHost['openingOpportunity'] {
     return this.host.openingOpportunity?.bind(this.host)
+  }
+
+  get hostAssessGroupReply(): TurnBridgeHost['assessGroupReply'] {
+    return this.host.assessGroupReply?.bind(this.host)
   }
 
   /** host 有没有主动开口能力（门与诊断用；**不**参与任何产品判据） */
@@ -1335,6 +1356,7 @@ export class TurnBridge {
  * **不撤销**已提交的用户消息 / 记忆 / 外部副作用。
  */
 export type BridgeMessageKind =
+  | 'ASSESS_GROUP_REPLY'
   | 'SUBMIT_TURN'
   | 'CANCEL_TURN'
   | 'REPORT_SYNTHESIZED'
@@ -1357,8 +1379,20 @@ export type BridgeMessageKind =
    *    ⇒ 这是本桥第三条**与某个轮次无关**的入站消息（前两条是 `PREPARE_TURN` 与投递回执）。
    */
   | 'PROACTIVE_OPPORTUNITY'
+  /**
+   * ADR-146 `D01`：**执行端回的一次动作结果**（外壳/PC → 核心，**入站**）。
+   *
+   * ⚠️ 与 `PROACTIVE_OPPORTUNITY` 同类：它是"某个动作做完了"的**事实**，
+   *    不是一次请求的回答 ⇒ **不占** `requestId`（那是轮次 id）。
+   *    它带的是自己的 `actionId`。
+   * ⚠️ **登记它 ≠ 已接线。** `handleBridgeMessage` 里它在没有执行端时**失败关闭**
+   *    （`action_executor_absent`），绝不静默丢弃 ——
+   *    "登记了但没实现"如果表现成"收到后什么也没发生"，那是本仓库明令禁止的形状。
+   */
+  | 'ACTION_RESULT'
 
 export const BRIDGE_MESSAGE_KINDS: readonly BridgeMessageKind[] = [
+  'ASSESS_GROUP_REPLY',
   'SUBMIT_TURN',
   'CANCEL_TURN',
   'REPORT_SYNTHESIZED',
@@ -1367,6 +1401,7 @@ export const BRIDGE_MESSAGE_KINDS: readonly BridgeMessageKind[] = [
   'REPORT_QQ_DELIVERY',
   'REPORT_REMINDER_DELIVERY',
   'PROACTIVE_OPPORTUNITY',
+  'ACTION_RESULT',
 ]
 
 /**
@@ -1468,7 +1503,7 @@ export interface BridgeCancelRequest {
 export interface BridgeGroupContextLine { readonly senderId: string; readonly text: string; readonly at: number }
 
 export interface BridgeInboundPlatformFacts {
-  readonly transport: 'qq'
+  readonly transport: 'qq' | 'wechat'
   /** 机器人自己的平台账号（来自包，非自报） */
   readonly selfId: string
   /** **真实发言者**的平台账号 */
@@ -1476,10 +1511,12 @@ export interface BridgeInboundPlatformFacts {
   readonly messageType: 'private' | 'group'
   /** 仅 `messageType === 'group'` 时允许出现（`ADR-139` `D01`） */
   readonly groupId?: string
+  /** WeChat only: digest of the actual source message, independently checked by the core. */
+  readonly messageId?: string
 }
 
 /** 闭集字段名（多一个键整条作废） */
-const PLATFORM_FACTS_KEYS: readonly string[] = ['transport', 'selfId', 'senderUserId', 'messageType', 'groupId']
+const PLATFORM_FACTS_KEYS: readonly string[] = ['transport', 'selfId', 'senderUserId', 'messageType', 'groupId', 'messageId']
 
 /**
  * 平台事实的**形状判据**（纯函数）。返回**具名**理由码；`undefined` = 合法。
@@ -1494,7 +1531,10 @@ export function platformFactsProblems(value: unknown): string | undefined {
   for (const key of Object.keys(record)) {
     if (!PLATFORM_FACTS_KEYS.includes(key)) return 'bridge_bad_platform_facts_key'
   }
-  if (record.transport !== 'qq') return 'bridge_bad_platform_facts_transport'
+  if (record.transport !== 'qq' && record.transport !== 'wechat') return 'bridge_bad_platform_facts_transport'
+  if (record.transport === 'qq' && record.messageId !== undefined) return 'bridge_bad_platform_facts_key'
+  if (record.transport === 'wechat' && (record.messageType !== 'group' ||
+    typeof record.messageId !== 'string' || !/^[a-f0-9]{64}$/.test(record.messageId))) return 'bridge_bad_wechat_message'
   if (typeof record.selfId !== 'string' || record.selfId.trim() === '') return 'bridge_bad_platform_facts_self'
   if (typeof record.senderUserId !== 'string' || record.senderUserId.trim() === '') {
     return 'bridge_bad_platform_facts_sender'
@@ -1861,10 +1901,12 @@ export interface BridgeCancelReading {
 }
 
 export interface BridgeWireResponse {
+  groupReply?: import('./group-reply.ts').GroupReplyDecision
   speech?: CheckedSpeechSegment
   streamStatus?: BridgeSubmitResult['streamStatus']
   expression?: SpeechExpression
   kind:
+    | 'GROUP_REPLY_DECISION'
     | 'TURN_RESULT'
     | 'SPEECH_SEGMENT'
     | 'CANCEL_RESULT'
@@ -1893,8 +1935,32 @@ export interface BridgeWireResponse {
     | 'DELIVER_REMINDER_TEXT'
     /** Lv4.5 / ADR-131 `D18`：机会报文的响应（外壳用与 `PREPARE_RESULT` 同一套解析） */
     | 'OPPORTUNITY_RESULT'
+    /**
+     * ADR-146 `D01`：**请 PC 执行端做这一次动作**（核心 → 执行端，**出站**）。
+     *
+     * ⚠️ 它与 `DELIVER_QQ_TEXT` 同类：**不是**某轮的结果，是 LG **主动**交出的一次
+     *    **已经过了网关策略**的执行请求。因此它的 `requestId` 恒为空，
+     *    外壳**不能**拿它当作某轮的结果。
+     * ⚠️ **载荷里没有任何风险额度字段**（ADR-146 `D02`）：额度由装配根给程序常量
+     *    （`main.ts:2734`），网关只读不签（`gateway.ts:343`）。
+     *    那条判断在**这行发出去之前**就做完了 —— 线上再带一个额度字段，
+     *    等于把已决定过的权限判断交回给对端改。
+     */
+    | 'DELEGATE_ACTION'
+    /**
+     * ADR-146 `D01`：`ACTION_RESULT` 的**回执**（核心 → 执行端）。
+     *
+     * ⚠️ 同一个名字在**两个方向**都出现：入站是执行端报结果，出站是核心回
+     *    "收到没有、采不采纳"。这与 `PROACTIVE_OPPORTUNITY` → `OPPORTUNITY_RESULT`
+     *    同形：**入站的每一类都要有一句应答** ——
+     *    否则执行端只能靠超时猜"我那条到底送到了没有"，而超时不区分
+     *    "网络丢了"与"核心收到了但不采纳"。
+     */
+    | 'ACTION_RESULT'
   requestId: string
   outcome: BridgeTurnOutcome | 'cancelled' | 'accepted' | 'prepared' | 'spoken' | 'generated'
+    /** ADR-146 `D05`：动作结局闭集（`unknown` 是默认值，绝不默认成功） */
+    | 'completed' | 'failed_confirmed' | 'unknown'
   code?: string
   replyText?: string
   replyId?: string
@@ -2014,6 +2080,52 @@ export async function handleBridgeMessage(
   }
   const requestId = (message as { requestId?: unknown }).requestId
   const normalizedRequestId = typeof requestId === 'string' ? requestId : ''
+
+  if (kind === 'ASSESS_GROUP_REPLY') {
+    const request = message as BridgeSubmitRequest
+    const shape = bridge.validatePrepare(request)
+    if (shape || request.platformFacts?.transport !== 'wechat' || request.platformFacts.messageType !== 'group') {
+      return { kind: 'GROUP_REPLY_DECISION', requestId: normalizedRequestId, outcome: 'rejected', code: shape ?? 'group_reply_group_required' }
+    }
+    const handler = bridge.hostAssessGroupReply
+    if (!handler) return { kind: 'GROUP_REPLY_DECISION', requestId: normalizedRequestId, outcome: 'rejected', code: 'group_reply_capability_absent' }
+    try {
+      const groupReply = await handler(request)
+      return { kind: 'GROUP_REPLY_DECISION', requestId: normalizedRequestId, outcome: 'accepted', groupReply, code: groupReply.code }
+    } catch {
+      return { kind: 'GROUP_REPLY_DECISION', requestId: normalizedRequestId, outcome: 'failed', code: 'group_reply_verification_failed' }
+    }
+  }
+
+  /*
+   * ---------------------------------------------------------------------------
+   * ACTION_RESULT（ADR-146 `D01`）—— 执行端回的一次动作结果
+   * ---------------------------------------------------------------------------
+   * ⚠️ **登记了不等于接线了。** 这一支存在的唯一目的就是**如实说没有**：
+   *   执行端没接 ⇒ 回一条具名的 `ACTION_RESULT{outcome:'unknown',
+   *   code:'action_executor_absent'}`，而不是把这一行**静默丢掉**。
+   *
+   * ⚠️ 为什么它**不**折成 `TURN_RESULT`：它带的不是轮次 id 而是 `actionId`，
+   *   折进去会让外壳把某个 requestId 误 resolve（与 `DELIVER_QQ_TEXT` 同一条理由，
+   *   见 WP0 §5.7 ①）。
+   */
+  if (kind === 'ACTION_RESULT') {
+    if (bridge.hostActionResult === undefined) {
+      return {
+        kind: 'ACTION_RESULT',
+        requestId: '',
+        outcome: 'unknown',
+        code: 'action_executor_absent',
+      }
+    }
+    const parsed = parseActionResult(message)
+    if (!parsed.ok) {
+      // 形状不合法 ⇒ 仍然回 `unknown`，**不**回 rejected（"这条消息看不懂"与
+      // "这次动作没成功"是两件事；混起来会让人以为执行端跑过了）
+      return { kind: 'ACTION_RESULT', requestId: '', outcome: 'unknown', code: parsed.rejection }
+    }
+    return await bridge.hostActionResult(parsed.value)
+  }
 
   /*
    * ---------------------------------------------------------------------------

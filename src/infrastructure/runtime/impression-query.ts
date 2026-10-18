@@ -19,10 +19,11 @@ export async function impressionQuery(db: RawDb, characterId: string, text: stri
     return '本轮印象通路：提问者关系尚未达到条件，拒绝评价他人；不能改以记忆原文、秘密细节或来源链接回答。'
   }
   const rows = await exec(db, sql`select m.user_id, m.external_id, u.display_name from user_identity_mappings m
-    join user_identities u on u.user_id=m.user_id where m.transport='qq'`, 'impression target resolution')
+    join user_identities u on u.user_id=m.user_id where m.transport in ('qq','wechat')`, 'impression target resolution')
   const matches = rows.filter(row => text.includes(String(row.external_id)) ||
     (String(row.display_name ?? '').length >= 3 && text.includes(String(row.display_name))))
-  const target = matches.length === 1 ? String(matches[0]!.user_id) : /(?:对我|我的印象|怎么看我)/.test(text) ? asker : undefined
+  const targets = [...new Set(matches.map(row => String(row.user_id)))]
+  const target = targets.length === 1 ? targets[0] : /(?:对我|我的印象|怎么看我)/.test(text) ? asker : undefined
   if (target === undefined) return '本轮印象通路：对象不明确，不猜测对象，也不读取其他人的原始记录。'
   const projection = await getRelationshipProjection(db, asCharacterId(characterId), entityRef('user', target))
   if (!projection?.state.originated) return '本轮印象通路：尚无该人的有效关系依据，不编造印象。'

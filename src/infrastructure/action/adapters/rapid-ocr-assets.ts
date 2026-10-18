@@ -15,7 +15,14 @@ export function rapidOcrRuntimeDir(): string {
 }
 
 export function defaultRapidOcrPython(): string {
-  return process.env.PROJECT_LG_RAPIDOCR_PYTHON ?? join(rapidOcrRuntimeDir(), 'venv/Scripts/python.exe')
+  /*
+   * ⚠️ 2026-10-16（服务器 Linux 适配）：缺省值的**形状**按平台挑。
+   *   环境变量优先这条**不变** ⇒ 配了 `PROJECT_LG_RAPIDOCR_PYTHON` 的既有读数完全不受影响。
+   *   不配时：win32 与今天逐字相同；Linux 才走 `bin/python`。
+   */
+  return process.env.PROJECT_LG_RAPIDOCR_PYTHON
+    ?? join(rapidOcrRuntimeDir(),
+      process.platform === 'win32' ? join('venv', 'Scripts', 'python.exe') : join('venv', 'bin', 'python'))
 }
 
 export function defaultRapidOcrModels(): string {

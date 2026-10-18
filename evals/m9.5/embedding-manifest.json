@@ -15,8 +15,10 @@
   "passagePrefix": "passage: ",
   "runtime": {
     "package": "@huggingface/transformers",
-    "version": "4.2.0",
-    "note": "D29：本阶段按路径解析已存在的 .pnpm 副本（失败关闭）；WP3 起改为隔离试验目录内正式声明。生产 package.json 保持 NONE。"
+    "version": "4.3.0",
+    "note": "2026-10-16 服务器部署修订：原文写 4.2.0 且『生产 package.json 保持 NONE』——两者都与事实不符。本机 node_modules/.pnpm 里实际可解析到的是 **4.3.0**，而生产 .env 长期跑 semantic_only，所以 4.3.0 才是**被验证过的**那个版本。现在 package.json 已正式声明 @huggingface/transformers@4.3.0（此前它只作为孤儿存在于 .pnpm，服务器上全新 pnpm install 根本不会装它 → 编码器解析失败 → 核心拒绝启动）。这一条不影响资产校验：runtime.version 只被校验『是不是字符串』（embedding-manifest.ts:101-102），不与实际安装版本比对。",
+    "previousVersionClaim": "4.2.0",
+    "resolvedFrom": "package.json dependency（第一条候选 node_modules/@huggingface/transformers），不再依赖扫 .pnpm 兜底"
   },
   "license": {
     "baseModel": "MIT",

@@ -60,14 +60,43 @@ export interface TargetResolution {
   scopeViolation: boolean
 }
 
+/**
+ * ADR-146：一次**已过策略**的委派（由装配层实现；网关只负责"调不调它"）。
+ *
+ * ⚠️ 它**不接受**风险额度字段 —— 额度在 `pre.decision` 里已经判完了
+ *    （`D02`：线上不携带额度；把已决定过的权限判断交回对端改是倒退）。
+ */
+export interface AdapterDelegator {
+  /** 把这次调用发出去；抛异常 ⇒ 委派失败（**不是**"那就本地做吧"） */
+  send(request: ActionRequest, decision: PolicyDecision): Promise<AdapterOutcome>
+}
+
 export interface ActionGatewayOptions {
-  registry: CapabilityRegistry
   ledger: ExecutionLedgerPort
   adapters: readonly CapabilityAdapter[]
   /** 装配层显式授予的权限 */
   grantedPermissions: readonly string[]
+  registry: CapabilityRegistry
   /** 本次运行允许的最高风险等级 */
   maxRiskLevel: RiskLevel
+  /**
+   * ADR-146：**执行端委派**（可选；**不装 ⇒ 逐字旧行为**）。
+   *
+   * ⚠️⚠️ **它必须在网关层，不能在适配器层** ——
+   *    `executor-port.ts:7` 明写适配器 `execute()` 的输入里
+   *    「**没有** `requestedBy`、**没有**策略结论」。
+   *    也就是说**适配器根本拿不到"允不允许"**，闸放在那里等于没有闸。
+   *    ⇒ 只有网关层有 `pre.decision`，也只有这里能决定"委派还是本地"。
+   *
+   * ⚠️ **这个函数返回 `undefined` 就走本地适配器**（今天的行为）。
+   *    实现方在"执行端不在线"时**必须**返回 `undefined` ——
+   *    电脑休眠隧道断是常态（`L-146-03`），那时 `desktop.operate`
+   *    直接失效就是**没通知任何人地改变了既有行为**。
+   *
+   * ⚠️ **委派失败绝不落回本地重做**：核心可能已提交过那一次。
+   *    重做 = 同一件事做两遍（同 `lg-stdio-client.ts` 断线拒绝的纪律）。
+   */
+  delegator?: (request: ActionRequest, decision: PolicyDecision) => AdapterDelegator | undefined
   dryRun?: boolean
   now?: () => Timestamp
   /**
@@ -658,15 +687,26 @@ export function createActionGateway(options: ActionGatewayOptions): ActionGatewa
 
     let outcome: AdapterOutcome
     try {
-      outcome = await adapter.execute({
-        actionId: request.actionId,
-        operation: request.operation,
-        target: pre.target,
-        args: request.arguments,
-        /* ADR-110 `D05`：幂等键**原样**转给适配器（它不在 args 里，模型写不出来） */
-        ...(request.idempotencyKey === undefined ? {} : { idempotencyKey: request.idempotencyKey }),
-        now,
-      })
+      /*
+       * ADR-146：委派 vs 本地 —— **在这里**二选一，而不是在适配器里。
+       * ⚠️ `delegator` 返回 `undefined`（没装 / 执行端不在线）⇒ 走下面那条，逐字旧行为。
+       * ⚠️ 注意它拿到的是 **`pre.decision`** —— 那份判定**已经在上一步跑完了**，
+       *    所以委派**不重算**任何东西，它只是"把已经允许的事换个地方做"。
+       */
+      const delegator = options.delegator?.(request, pre.decision)
+      if (delegator !== undefined) {
+        outcome = await delegator.send(request, pre.decision)
+      } else {
+        outcome = await adapter.execute({
+          actionId: request.actionId,
+          operation: request.operation,
+          target: pre.target,
+          args: request.arguments,
+          /* ADR-110 `D05`：幂等键**原样**转给适配器（它不在 args 里，模型写不出来） */
+          ...(request.idempotencyKey === undefined ? {} : { idempotencyKey: request.idempotencyKey }),
+          now,
+        })
+      }
     } catch (error) {
       const failure =
         error instanceof ActionFailureError ? error.failure : normalizeAdapterError(error)

@@ -89,12 +89,14 @@ export async function resolveInboundTurnScope(input: InboundTurnScopeInput): Pro
   }
 
   const identity = resolution.outcome.value
-  const entryKind: EntryKind = identity.room.kind === 'group' ? 'qq_group' : 'qq_private'
+  const entryKind: EntryKind = input.facts.transport === 'wechat' ? 'wechat_group'
+    : identity.room.kind === 'group' ? 'qq_group' : 'qq_private'
   const entry = resolveEntryScope({
     entryKind,
     ownerUserId: input.ownerUserId,
     resolvedInboundUserId: identity.userId,
-    ...(identity.room.kind === 'group' ? { groupId: identity.room.groupId } : {}),
+    ...(identity.room.kind === 'group' ? { groupId: input.facts.transport === 'wechat'
+      ? `wechat:${identity.room.groupId}` : identity.room.groupId } : {}),
     ...(input.groupAuthorized === undefined ? {} : { groupAuthorized: input.groupAuthorized }),
   })
 

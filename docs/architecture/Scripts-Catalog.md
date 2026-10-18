@@ -18,13 +18,13 @@
 
 | 类别 | 条目数 |
 |---|---:|
-| 已登记门 | 223 |
-| 汇总/链入口 | 17 |
+| 已登记门 | 246 |
+| 汇总/链入口 | 18 |
 | 文档入口 | 2 |
-| 内部 | 402 |
-| **合计** | **644** |
+| 内部 | 416 |
+| **合计** | **682** |
 
-`scripts/` 下**没有任何 pnpm 入口引用**的脚本文件：**265 个**（见文末）。
+`scripts/` 下**没有任何 pnpm 入口引用**的脚本文件：**285 个**（见文末）。
 
 ## 每条 lane 的入口命令
 
@@ -53,9 +53,22 @@
 
 ## 按前缀分列
 
+### `a1`（24 条）
+
+**入口**：
+- `a1:gates` — 汇总/链入口
+
+**已登记门（19）**：`a1:admin:entry:verify` · `a1:audit:verify` · `a1:auth:http:verify` · `a1:auth:verify` · `a1:cognition-reader:verify` · `a1:cognition:verify` · `a1:core-stop:verify` · `a1:effective-config:verify` · `a1:gates:verify` · `a1:goals-commitments:verify` · `a1:goals-reader:verify` · `a1:jobs-admit:verify` · `a1:jobs-store:verify` · `a1:jobs:verify` · `a1:page:verify` · `a1:query:verify` · `a1:safety-quota-reader:verify` · `a1:safety-quota:verify` · `a1:serve:verify`
+
+**内部（4）**：`a1:admin:init` · `a1:admin:serve` · `a1:jobs-admit:live:verify` · `a1:serve:db:live:verify`
+
 ### `action`（4 条）
 
 **内部（4）**：`action:audit` · `action:list` · `action:show` · `action:trace`
+
+### `admin`（1 条）
+
+**内部（1）**：`admin:audit:readback`
 
 ### `avatar`（3 条）
 
@@ -92,6 +105,10 @@
 - `db:init` — 文档入口
 
 **内部（3）**：`db:inspect` · `db:restore` · `db:snapshot`
+
+### `deploy`（3 条）
+
+**内部（3）**：`deploy:assets` · `deploy:pg:selftest` · `deploy:verify`
 
 ### `desktop-control`（3 条 · **有同名 lane**）
 
@@ -349,14 +366,14 @@
 
 **内部（4）**：`postgresql:cutover:apply` · `postgresql:goal-rebuild:apply` · `postgresql:live:smoke` · `postgresql:p02:verify`
 
-### `postlv2`（89 条 · **有同名 lane**）
+### `postlv2`（91 条 · **有同名 lane**）
 
 **入口**：
 - `postlv2:controls:gates` — 汇总/链入口
 
 **已登记门（32）**：`postlv2:affected:verify` · `postlv2:automatic-memory:recovery:verify` · `postlv2:avatar-opening:verify` · `postlv2:body:verify` · `postlv2:database-env:verify` · `postlv2:db:verify` · `postlv2:delivery:verify` · `postlv2:gate-selection:verify` · `postlv2:goal-deadline:verify` · `postlv2:goal-parallel:verify` · `postlv2:image:verify` · `postlv2:orchestration:verify` · `postlv2:oss-mechanisms:verify` · `postlv2:role-tool:path` · `postlv2:role-tool:verify` · `postlv2:s8:choice:verify` · `postlv2:s8:contracts:verify` · `postlv2:s8:daily:e2e` · `postlv2:s8:daily:verify` · `postlv2:s8:entry-lock:verify` · `postlv2:s8:gates` · `postlv2:s8:lifecycle:verify` · `postlv2:s8:measurement:verify` · `postlv2:s8:production:verify` · `postlv2:s8:reflection:verify` · `postlv2:s8:roots:verify` · `postlv2:s8:start:verify` · `postlv2:s8:state:verify` · `postlv2:s8:store:verify` · `postlv2:s8:withdraw:verify` · `postlv2:sequence-continuity:verify` · `postlv2:transport:verify`
 
-**内部（56）**：`postlv2:appearance:verify` · `postlv2:asr:verify` · `postlv2:automatic-memory:live` · `postlv2:automatic-memory:verify` · `postlv2:avatar` · `postlv2:avatar-opening:chain` · `postlv2:avatar:live2d` · `postlv2:avatar:production` · `postlv2:avatar:production:verify` · `postlv2:avatar:verify` · `postlv2:baseline` · `postlv2:bridge:verify` · `postlv2:coexist:live` · `postlv2:coexist:matrix` · `postlv2:coexist:shells` · `postlv2:coexist:verify` · `postlv2:expression:verify` · `postlv2:goal-thinking:eval` · `postlv2:image:live` · `postlv2:memory-write:live` · `postlv2:memory-write:verify` · `postlv2:mic` · `postlv2:model-memory:live` · `postlv2:model-memory:verify` · `postlv2:playback-buffer:eval` · `postlv2:qq-proactive:chain` · `postlv2:qq-proactive:live` · `postlv2:qq-proactive:measurement:verify` · `postlv2:qq-proactive:verify` · `postlv2:role-tool:activation:readback` · `postlv2:role-tool:first-use:readback` · `postlv2:role-tool:known-dirs` · `postlv2:role-tool:live` · `postlv2:role-tool:main-live` · `postlv2:role-tool:matrix` · `postlv2:role-tool:semantic:eval` · `postlv2:s7:gate` · `postlv2:s7:live` · `postlv2:s8:activation-readback` · `postlv2:s8:activation-readback:db` · `postlv2:s8:baseline` · `postlv2:s8:daily:live` · `postlv2:s8:dev-probe` · `postlv2:s8:quote:ab:live` · `postlv2:s8:semantic:eval` · `postlv2:s8:semantic:recompute` · `postlv2:semantic:production:verify` · `postlv2:semantic:verify` · `postlv2:source-root:verify` · `postlv2:source:verify` · `postlv2:speech:verify` · `postlv2:story:build` · `postlv2:story:verify` · `postlv2:text-stream:verify` · `postlv2:tts:verify` · `postlv2:world:verify`
+**内部（58）**：`postlv2:appearance:verify` · `postlv2:asr:verify` · `postlv2:automatic-memory:live` · `postlv2:automatic-memory:verify` · `postlv2:avatar` · `postlv2:avatar-opening:chain` · `postlv2:avatar:live2d` · `postlv2:avatar:production` · `postlv2:avatar:production:verify` · `postlv2:avatar:verify` · `postlv2:baseline` · `postlv2:bridge:verify` · `postlv2:coexist:live` · `postlv2:coexist:matrix` · `postlv2:coexist:shells` · `postlv2:coexist:verify` · `postlv2:delegation-wire:verify` · `postlv2:delegation:real` · `postlv2:expression:verify` · `postlv2:goal-thinking:eval` · `postlv2:image:live` · `postlv2:memory-write:live` · `postlv2:memory-write:verify` · `postlv2:mic` · `postlv2:model-memory:live` · `postlv2:model-memory:verify` · `postlv2:playback-buffer:eval` · `postlv2:qq-proactive:chain` · `postlv2:qq-proactive:live` · `postlv2:qq-proactive:measurement:verify` · `postlv2:qq-proactive:verify` · `postlv2:role-tool:activation:readback` · `postlv2:role-tool:first-use:readback` · `postlv2:role-tool:known-dirs` · `postlv2:role-tool:live` · `postlv2:role-tool:main-live` · `postlv2:role-tool:matrix` · `postlv2:role-tool:semantic:eval` · `postlv2:s7:gate` · `postlv2:s7:live` · `postlv2:s8:activation-readback` · `postlv2:s8:activation-readback:db` · `postlv2:s8:baseline` · `postlv2:s8:daily:live` · `postlv2:s8:dev-probe` · `postlv2:s8:quote:ab:live` · `postlv2:s8:semantic:eval` · `postlv2:s8:semantic:recompute` · `postlv2:semantic:production:verify` · `postlv2:semantic:verify` · `postlv2:source-root:verify` · `postlv2:source:verify` · `postlv2:speech:verify` · `postlv2:story:build` · `postlv2:story:verify` · `postlv2:text-stream:verify` · `postlv2:tts:verify` · `postlv2:world:verify`
 
 ### `productivity`（5 条 · **有同名 lane**）
 
@@ -380,6 +397,10 @@
 
 **内部（1）**：`reset`
 
+### `s1`（4 条）
+
+**已登记门（4）**：`s1:e1:verify` · `s1:isolation-stub:verify` · `s1:rejection-evidence:verify` · `s1:rejection-suite:verify`
+
 ### `scripts`（3 条 · **有同名 lane**）
 
 **入口**：
@@ -388,6 +409,10 @@
 **已登记门（1）**：`scripts:catalog:verify`
 
 **内部（1）**：`scripts:catalog`
+
+### `search`（3 条）
+
+**内部（3）**：`search:native:live` · `search:native:probe` · `search:native:verify`
 
 ### `seed-status`（1 条）
 
@@ -422,6 +447,10 @@
 
 **内部（3）**：`test` · `test:dry` · `test:guard`
 
+### `thinhost`（1 条）
+
+**内部（1）**：`thinhost:attribution`
+
 ### `typecheck`（1 条）
 
 **已登记门（1）**：`typecheck`
@@ -455,6 +484,8 @@
 - `scripts/coexist/readiness.ts`
 - `scripts/coexist/send-ctrl-c.mjs`
 - `scripts/coexist/start-background.ps1`
+- `scripts/deploy/tunnel-pc.ps1`
+- `scripts/deploy/verify-posix-killtree.ts`
 - `scripts/desktop-control/fixtures/fake-desktop-worker.py`
 - `scripts/desktop-control/reply-chain.ts`
 - `scripts/desktop-control/worker-actions-verify.py`
@@ -471,6 +502,8 @@
 - `scripts/diag-seed-db-diff.ts`
 - `scripts/diag-seed-diff.ts`
 - `scripts/diag-state-db.ts`
+- `scripts/fixtures/retired-tavily-config.ts`
+- `scripts/fixtures/retired-tavily-search-provider.ts`
 - `scripts/gate-evidence-select.ts`
 - `scripts/gates/affected-map.ts`
 - `scripts/gates/cache.ts`
@@ -587,6 +620,7 @@
 - `scripts/m9.6-emotion-corpus.ts`
 - `scripts/m9.6-jev-protocol.ts`
 - `scripts/m9.6-stats.ts`
+- `scripts/math-worker-startup-verify.ts`
 - `scripts/memory-coverage-evidence.ts`
 - `scripts/model-stream-length-readback.ts`
 - `scripts/postgresql-cutover-probe.ts`
@@ -620,6 +654,7 @@
 - `scripts/postlv2_vtuber_runtime.py`
 - `scripts/postlv2-bridge-production.ts`
 - `scripts/postlv2-bridge-sandbox.ts`
+- `scripts/postlv2-executor-run.ts`
 - `scripts/postlv2-expression-frontend.py`
 - `scripts/postlv2-expression-verify.py`
 - `scripts/postlv2-image-input-python-test.py`
@@ -662,15 +697,25 @@
 - `scripts/productivity-skills/office-generate.py`
 - `scripts/productivity-skills/reading.ts`
 - `scripts/productivity-skills/sidecar-tools.ts`
+- `scripts/public-ci.ps1`
 - `scripts/qq/start.cmd`
 - `scripts/qq/start.ps1`
 - `scripts/reminder-channels-frontend-verify.mjs`
 - `scripts/reminder-channels-shell-verify.py`
 - `scripts/scenario-json.ts`
 - `scripts/seed-m4.5-ledger-fixture.ts`
+- `scripts/semantic-empty-recall-verify.ts`
+- `scripts/semantic-encoder-pipe-verify.ts`
+- `scripts/server-process-verify.ts`
 - `scripts/test-persist-read.ts`
 - `scripts/test-persist-write.ts`
 - `scripts/text-scan.ts`
+- `scripts/thinhost-ddl-decoupling-measure.ts`
+- `scripts/thinhost-equivalence-verify.ts`
+- `scripts/thinhost-initdb-verify.ts`
+- `scripts/thinhost-steadystate-probe.ts`
+- `scripts/thinhost-surface-verify.ts`
+- `scripts/thinhost-wiring-verify.ts`
 - `scripts/utility-skills/assembly.ts`
 - `scripts/utility-skills/doc-runner.py`
 - `scripts/utility-skills/fixtures.ts`
@@ -710,5 +755,9 @@
 - `scripts/verify-m6-wp9a-calibration.ts`
 - `scripts/verify-m6-wp9a2-discrimination.ts`
 - `scripts/verify-m6-wp9b-long-dialogue.ts`
+- `scripts/verify-production-lease-platform.ts`
 - `scripts/verify-state.ts`
+- `scripts/wechat-discretion-verify.ts`
+- `scripts/wechat-group-verify.ts`
+- `scripts/wechat-main-verify.ts`
 

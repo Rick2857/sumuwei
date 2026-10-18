@@ -24,7 +24,8 @@
  *    首版交付的是可编辑文件；"排版视觉查看"另行登记为待办。
  */
 
-import { spawn } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
+import { killProcessTree } from './kill-process-tree.ts'
 import { createHash, randomBytes } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { copyFile, mkdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises'
@@ -63,8 +64,15 @@ export const OFFICE_GENERATOR_SCRIPT = join(
 /**
  * 专属 Python 解释器 —— **复用第一批建的 venv**（计划书 §1：三个库已装好）。
  * ⚠️ 刻意不新建、不复制：复制会产生第二份事实来源。
+ *
+ * ⚠️ 2026-10-16（服务器 Linux 适配 · 复核 §4 补上）：
+ *   这一段原来也是**写死的分段 `join(…,'Scripts','python.exe')`**，
+ *   而我第一轮的 S5 判据只找**单个字符串字面量** ⇒ **看不见分段 join，给了假绿**。
+ *   现在与 document-read / rapid-ocr / desktop / arxiv **同形**：
+ *   环境变量优先，缺省值按平台挑形状。
+ *   不设环境变量时，Windows 上的路径与改动前**逐字相同**。
  */
-export const OFFICE_PYTHON = join(
+export const OFFICE_PYTHON = process.env.PROJECT_LG_OFFICE_PYTHON ?? join(
   REPO_ROOT,
   'artifacts',
   'post-lv2',
@@ -72,8 +80,7 @@ export const OFFICE_PYTHON = join(
   'utility-skills-preparation',
   'python',
   'venv',
-  'Scripts',
-  'python.exe'
+  process.platform === 'win32' ? join('Scripts', 'python.exe') : join('bin', 'python')
 )
 
 export const OFFICE_LIMITS = {
@@ -107,13 +114,14 @@ function sha256(input: Buffer | string): string {
   return createHash('sha256').update(input).digest('hex')
 }
 
-function killTree(pid: number | undefined): void {
-  if (pid === undefined) return
-  try {
-    spawn('taskkill', ['/pid', String(pid), '/F', '/T'], { stdio: 'ignore', windowsHide: true })
-  } catch {
-    /* 判据是"父进程不等它"，不是"杀干净了" */
-  }
+function killTree(child: ChildProcess | undefined): void {
+  /*
+   * ⚠️ 2026-10-16：本地这份 `spawn('taskkill')` 已**删除**，改用共享的跨平台助手。
+   *   原写法在 Linux 上不是"杀不掉"，而是会在一次工具超时后**打崩整个核心**
+   *   （`spawn` 找不到命令是**异步** `'error'`，原来的 `try/catch` 接不到）。
+   *   判据仍是"父进程不等它"，不是"杀干净了"。见 `kill-process-tree.ts`。
+   */
+  killProcessTree(child)
 }
 
 export function createOfficeGenerateAdapter(options: OfficeGenerateOptions): CapabilityAdapter {
@@ -401,6 +409,10 @@ async function runGenerator(input: {
     {
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
+      /* ⚠️ 2026-10-16（服务器 Linux 适配）：非 win32 时**自建进程组**，
+         好让 `killProcessTree()` 能用 `kill(-pid)` 带走整棵树。
+         刻意只在非 win32 开 —— Windows 上 `detached: true` 会改变子进程存活语义。 */
+      detached: process.platform !== 'win32',
       /*
        * ======================================================================
        *  ⚠️ 必须显式要求 Python 用 UTF-8 说话（实测逼出来的）
@@ -430,7 +442,7 @@ async function runGenerator(input: {
   let timedOut = false
   const timer = setTimeout(() => {
     timedOut = true
-    killTree(child.pid)
+    killTree(child)
   }, input.timeoutMs)
 
   const exitCode = await new Promise<number | null>((resolvePromise) => {

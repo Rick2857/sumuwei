@@ -22,6 +22,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { cpus } from 'node:os'
 import { join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 import type { EmbeddingManifest } from './embedding-manifest.ts'
 
@@ -92,7 +93,7 @@ export interface EncoderClient {
 
 export function createEncoderClient(options: EncoderClientOptions): EncoderClient {
   const workerEntry = join(options.repoRoot, 'src/infrastructure/semantic/encoder-worker-entry.ts')
-  const tsxCli = join(options.repoRoot, 'node_modules/tsx/dist/cli.mjs')
+  const tsxLoader = join(options.repoRoot, 'node_modules/tsx/dist/loader.mjs')
   const kills: { at: number; pid: number | null }[] = []
   const exits: { at: number; code: number | null; signal: string | null }[] = []
   let lastKillAt = -1
@@ -157,11 +158,11 @@ export function createEncoderClient(options: EncoderClientOptions): EncoderClien
   const start = (): void => {
     if (child !== null) return
     if (!existsSync(workerEntry)) throw new Error(`worker 入口不存在：${workerEntry}`)
-    if (!existsSync(tsxCli)) throw new Error(`tsx CLI 不存在：${tsxCli}（本仓库用 tsx 跑 TS）`)
+    if (!existsSync(tsxLoader)) throw new Error(`tsx loader 不存在：${tsxLoader}（本仓库用 tsx 跑 TS）`)
     readyPromise = new Promise((res) => {
       readyResolve = res
     })
-    child = spawn(process.execPath, [tsxCli, workerEntry], {
+    child = spawn(process.execPath, ['--import', pathToFileURL(tsxLoader).href, workerEntry], {
       cwd: options.repoRoot,
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
@@ -169,6 +170,12 @@ export function createEncoderClient(options: EncoderClientOptions): EncoderClien
         M95_EMBEDDING_MANIFEST: join(options.repoRoot, 'evals/m9.5/embedding-manifest.json'),
       },
     }) as ChildProcessWithoutNullStreams
+    // systemd may close the worker's pipe before core shutdown; EPIPE is asynchronous, not caught by write's try/catch.
+    child.stdin.on('error', () => {
+      readyResolve?.({ ok: false, detail: 'worker stdin closed' })
+      // Pending work is settled by the exit handler, after the OS confirms reclamation.
+      killChild()
+    })
     debug('worker 已 spawn', `pid=${String(child.pid ?? 'null')} entry=${workerEntry.slice(-40)}`)
 
     let buffer = ''
@@ -367,13 +374,21 @@ export function createEncoderClient(options: EncoderClientOptions): EncoderClien
     async close() {
       closed = true
       if (child !== null) {
-        try {
-          child.stdin.write(`${JSON.stringify({ kind: 'exit' })}\n`)
-        } catch {
-          /* 已经断了 */
-        }
-        await new Promise((res) => setTimeout(res, 200))
-        killChild()
+        const stopping = child
+        await new Promise<void>((done, reject) => {
+          const cleanup = (): void => {
+            clearTimeout(killTimer); clearTimeout(deadline)
+            stopping.removeListener('exit', exited)
+          }
+          const exited = (): void => { cleanup(); done() }
+          const killTimer = setTimeout(killChild, 200)
+          const deadline = setTimeout(() => {
+            cleanup(); reject(new Error('encoder_worker_exit_unconfirmed'))
+          }, 3000)
+          stopping.once('exit', exited)
+          try { stopping.stdin.write(`${JSON.stringify({ kind: 'exit' })}\n`) }
+          catch { killChild() }
+        })
       }
     },
   }

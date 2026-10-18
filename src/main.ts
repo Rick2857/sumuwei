@@ -106,6 +106,7 @@ import {
 } from './infrastructure/telemetry/index.ts'
 import { TelemetryRecorder } from './infrastructure/telemetry/recorder.ts'
 import { ConversationRecorder } from './infrastructure/runtime/conversation-recorder.ts'
+import { createThinHostRuntime, thinHostEnabled } from './infrastructure/runtime/thin-host-factory.ts'
 /*
  * WP6.1（K-28）：对话 ingress 的**受信归因装配**。
  *
@@ -333,6 +334,8 @@ import { createExplicitMemoryIntentDetector, LlmMemoryIntentClassifier } from '.
  */
 import { runReplyGuardChain } from './kernel/app/reply-guard-chain.ts'
 import { toLookupReading, TurnBridge } from './kernel/app/bridge/turn-bridge.ts'
+import { assessGroupReply } from './kernel/app/bridge/group-reply.ts'
+import { renderSeedIdentity } from './kernel/contracts/character-definition.ts'
 import { bindSpeechExpression, decodeExpressiveSpeech, withoutAppendices, type SpeechExpression } from './kernel/contracts/expressive-speech.ts'
 import { runBridgeTransport, sessionHost, TurnCancellationRegistry } from './infrastructure/bridge/turn-bridge-transport.ts'
 import { readQqPrivateConfig } from './infrastructure/qq/private-config.ts'
@@ -340,10 +343,17 @@ import { readQqPrivateConfig } from './infrastructure/qq/private-config.ts'
 import { resolveInboundTurnScope } from './infrastructure/runtime/inbound-turn-scope.ts'
 import { admittedUserIds, authorizedMemoryIds, bindConversationRoom, currentReadScope, ownerRequestedScope, scopeMemoryCandidate, withReadScope, withoutReadScope, type ReadScope } from './infrastructure/persistence/read-scope.ts'
 import { OneBotPrivateClient } from './infrastructure/qq/onebot-private-client.ts'
+import {
+  verifyEntryHandshake,
+  ENTRY_HANDSHAKE_REJECT,
+  ENTRY_VERSION_REJECT,
+  ENTRY_PROTOCOL_VERSION,
+} from './infrastructure/qq/entry-handshake.ts'
 import { seedRelationshipOriginForNewUser } from './infrastructure/runtime/adapters.ts'
 import { asConversationEventId } from './kernel/contracts/ids.ts'
 import { impressionQuery } from './infrastructure/runtime/impression-query.ts'
-import { createHumanQqMemberUserTurnIngress, createCharacterAssistantTurnIngress } from './infrastructure/runtime/conversation-attribution.ts'
+import { createHumanQqMemberUserTurnIngress, createHumanWechatGroupUserTurnIngress, createCharacterAssistantTurnIngress } from './infrastructure/runtime/conversation-attribution.ts'
+import { readWechatConfig, WechatApi } from './infrastructure/wechat/group-client.ts'
 import type { InboundPlatformFacts } from './kernel/identity/inbound-identity.ts'
 /* post-Lv2 / ADR-110 `D07`/`D08`：主动投递登记表 + 它的两个持久层端口 */
 import { QqDeliveryRegistry } from './kernel/app/notification-delivery.ts'
@@ -412,6 +422,7 @@ import { VoiceDeliveryLedger, applyVoiceDeliveryView } from './kernel/app/bridge
  * 而 `src/kernel/action/**` 一个字都不知道它们。
  */
 import { createActionGateway, type ActionGateway } from './kernel/action/gateway.ts'
+import { ActionFailureError, actionFailure } from './kernel/action/errors.ts'
 import { createActionIntentDetector, type ActionIntent } from './kernel/action/intent-detector.ts'
 import {
   createActionTurnPort,
@@ -641,9 +652,9 @@ import { SEARCH_MODES } from './kernel/action/search-need.ts'
  * 契约住在 kernel；这里只做"把返回值翻译成报告"这一件事。
  */
 import type { ReplyGuardReport } from './kernel/contracts/reply-guard.ts'
-/* M5.5 / ADR-054：Tavily provider + 指纹 + 适配器（ADR-046 的 D-20…D-30 在此落地） */
-import { assertTavilyConfig, D20_RULING } from './infrastructure/search/tavily-config.ts'
-import { TAVILY_PROVIDER_ID, createTavilySearchProvider } from './infrastructure/search/tavily-search-provider.ts'
+/* ADR-141：复用模型供应商原生搜索，并用既有受控网页读取补充证据。 */
+import { loadDeepSeekSearchConfig, DEEPSEEK_SEARCH_PROVIDER_ID, DEEPSEEK_SEARCH_TOTAL_TIMEOUT_MS, DEEPSEEK_SEARCH_MAX_PAGES } from './infrastructure/search/deepseek-config.ts'
+import { createDeepSeekSearchProvider } from './infrastructure/search/deepseek-search-provider.ts'
 import { createSha256Fingerprinter } from './infrastructure/search/fingerprint.ts'
 import { createWebSearchAdapter } from './infrastructure/action/adapters/web-search.ts'
 import {
@@ -766,6 +777,8 @@ import {
   isDesktopCapability,
 } from './kernel/action/desktop-capability.ts'
 import { createDesktopAdapters } from './infrastructure/action/adapters/desktop-control.ts'
+import { ActionDelegation } from './kernel/app/bridge/action-delegation.ts'
+import { ExecutorClient } from './infrastructure/action/executor-client.ts'
 /*
  * post-Lv2 / ADR-110 `D05`：QQ 主动联系的**目标发送能力**。
  *
@@ -1039,12 +1052,37 @@ async function buildRuntime(userName: string): Promise<AgentRuntime> {
       : {}),
   }
 
-  const runtime = new AgentRuntime({
-    character,
-    plugins,
-    conversationLength: CONVERSATION_LENGTH,
-    settings,
-  })
+  /*
+   * 薄宿主选择（thinhost，2026-10-18）—— 缺省仍是 ElizaOS，本段逐字不变
+   *
+   * 实测（本机 + Linux 服务器配对，docs/post-lv2/ThinHost-Replacement-Attribution-2026-10-18.md）：
+   *   · 稳态空闲 CPU 1.019% → 0.009% 单核
+   *   · 上游 30s 守卫定时器 2 → 0
+   *   · 内存与启动时间基本持平（不虚报这两项）
+   *
+   * ⚠️⚠️ 这里**只能替换 runtime 这个绑定，绝不能提前 return**。
+   *    第一版写成 `if (thinHostEnabled()) { … return thin }` ⇒ 后面的
+   *    initDatabase / 生产状态机 / buildKernel 全部被跳过 ⇒
+   *    getRawDb() 抛 no_db_handle ⇒ 核心起不来（真实发生过一次故障）。
+   *    薄宿主同样要经 openDatabase() 注册适配器、走租约与 pre-open 快照。
+   */
+  const runtime: AgentRuntime = thinHostEnabled()
+    ? (() => {
+        const thin = createThinHostRuntime({
+          character: { name: character.name, id: character.id },
+          agentId: stringToUuid(`agent-${character.name}`),
+          settings,
+          conversationLength: CONVERSATION_LENGTH,
+        })
+        logger.info('[thin-host] 已选用薄 Node 宿主（ElizaOS 不参与本进程）')
+        return thin
+      })()
+    : new AgentRuntime({
+        character,
+        plugins,
+        conversationLength: CONVERSATION_LENGTH,
+        settings,
+      })
 
   /*
    * INC-01 WP3（`AT3.3`）：**初始化失败也必须 close**。
@@ -1416,7 +1454,7 @@ class ChatSession {
    * ```
    */
   private readonly turnScope: ScopeContext | undefined
-  private readonly scopedIdentity: { scope: ReadScope; externalId: string } | undefined
+  private readonly scopedIdentity: { scope: ReadScope; externalId: string; transport?: 'qq' | 'wechat' } | undefined
   /**
    * Lv4.5 / `P1`：**语音交付账**（可选；只有 `--bridge` 入口注入）。
    *
@@ -1451,6 +1489,114 @@ class ChatSession {
    * ⚠️ 它在内存里，**永不落盘、永不进账本 / trace / 开发者面**。
    */
   private readonly payloadStaging = createInMemoryPayloadStaging()
+
+  /**
+   * ADR-146：**PC 执行端连接**。
+   *
+   * ⚠️ **`undefined` = 执行端不在线**（电脑关机/休眠 ⇒ 隧道断，`L-146-03` 的必然结果）
+   *    ⇒ 网关的 `delegator` 返回 `undefined` ⇒ **走本地适配器，逐字旧行为**。
+   *    ⚠️ 这条必须成立：那时 `desktop.operate` 若直接失效，
+   *    就是**没通知任何人地改变了既有行为**。
+   * ⚠️ 至今**没有任何代码给它赋值** ⇒ 委派面尚未真正启用；
+   *    传输层（核心 → 经隧道 → PC 执行端）建起来之后才会赋值。
+   */
+  executorLink:
+    | {
+        /** 把一行委派写上线 */
+        readonly send: (payload: Record<string, unknown>) => void
+        /** ADR-146 `D06`：按轮次判是否已取消（由 `TurnCancellationRegistry` 提供） */
+        readonly isCancelled: (turnRequestId: string) => boolean
+      }
+    | undefined = undefined
+
+  /**
+   * 各入口的取消表（`D05`：打断皮套**不**取消 QQ ⇒ 每入口一份）。
+   *
+   * ⚠️ 委派的取消判据取**并集**：任一入口说"这一轮已取消" ⇒ 不委派。
+   *    ⚠️ 这是**保守方向**（宁可不发）。反过来（只查某个入口）会在
+   *    皮套那一轮被取消时仍然往 PC 发点击 —— 那是最坏的形状。
+   */
+  private readonly cancellationRegistries = new Set<TurnCancellationRegistry>()
+
+  /** 装配/拆除执行端连接（ADR-146）。**连不上就是没装** ⇒ 逐字旧行为。 */
+  attachExecutorLink(link: ChatSession['executorLink']): void {
+    this.executorLink = link
+  }
+
+  /** 只连一次（多处调用点会重复进来） */
+  private executorStarting = false
+  private executorClient: ExecutorClient | undefined
+
+  /**
+   * ADR-146：按环境变量决定**是否**连执行端。
+   *
+   * ⚠️⚠️ **缺省关**：`CHARACTER_EXECUTOR_ENABLED` 不为 `true` ⇒ 直接返回，
+   *    一个 socket 都不开。这就是"回滚 = 删那行 / 改 false"。
+   * ⚠️ **连不上 ⇒ 失败关闭**：`executorLink` 保持 `undefined`
+   *    ⇒ 网关走本地适配器，逐字旧行为；核心**不崩**、**不重试**。
+   *    （电脑休眠隧道断是常态，`L-146-03`。）
+   * ⚠️ 断开时**清空** link ⇒ 自动落回本地。
+   */
+  async attachExecutorIfConfigured(log: (message: string) => void): Promise<void> {
+    if (process.env['CHARACTER_EXECUTOR_ENABLED'] !== 'true') return
+    if (this.executorStarting || this.executorLink !== undefined) return
+    const rawPort = process.env['CHARACTER_EXECUTOR_PORT'] ?? ''
+    const token = process.env['CHARACTER_EXECUTOR_TOKEN'] ?? ''
+    const port = Number.parseInt(rawPort, 10)
+    if (!Number.isInteger(port) || port < 1024 || port > 65535) {
+      log(`[executor] CHARACTER_EXECUTOR_PORT 不合法（${rawPort}）⇒ 不连（失败关闭）`)
+      return
+    }
+    if (token === '') {
+      log('[executor] CHARACTER_EXECUTOR_TOKEN 为空 ⇒ 不连（失败关闭）')
+      return
+    }
+    this.executorStarting = true
+    const client = new ExecutorClient({
+      host: process.env['CHARACTER_EXECUTOR_HOST'] ?? '127.0.0.1',
+      port, token,
+      onResult: () => undefined,
+      onLog: (m) => log(`[executor] ${m}`),
+      onConnected: (connected) => {
+        // ⚠️ 断开 ⇒ 清空 link ⇒ 网关立刻落回本地
+        if (!connected) this.attachExecutorLink(undefined)
+      },
+    })
+    try {
+      await client.connect()
+      this.executorClient = client
+      this.attachExecutorLink({
+        send: (payload) => { void client.send(payload) },
+        isCancelled: (turnRequestId) => this.isTurnCancelledSomewhere(turnRequestId),
+      })
+      log(`[executor] 已连接 ⇒ 委派面启用（仅 desktop.operate）`)
+    } catch (error) {
+      // ⚠️ 失败关闭：**不重试**（隧道可能在几分钟后才通），也不抛（不能让核心起不来）
+      log(`[executor] 连接失败（${(error as Error).message}）⇒ 委派面未启用，走本地适配器`)
+      await client.close().catch(() => undefined)
+    } finally {
+      this.executorStarting = false
+    }
+  }
+
+  /** 关停时关掉连接 */
+  async closeExecutor(): Promise<void> {
+    await this.executorClient?.close().catch(() => undefined)
+    this.executorClient = undefined
+    this.attachExecutorLink(undefined)
+  }
+
+  registerCancellation(registry: TurnCancellationRegistry): void {
+    this.cancellationRegistries.add(registry)
+  }
+
+  /** 任一入口已取消 ⇒ 视为已取消（保守方向） */
+  isTurnCancelledSomewhere(turnRequestId: string): boolean {
+    for (const registry of this.cancellationRegistries) {
+      if (registry.isCancelled(turnRequestId)) return true
+    }
+    return false
+  }
   /** M10.1：约定识别慢路径的在飞 drain；与反思共用 A12 顺序队列。 */
   private agreementDrainInFlight: Promise<void> | undefined
   private automaticMemory: AutomaticMemoryConsumer | PostTurnModelMemoryConsumer | undefined
@@ -1514,7 +1660,7 @@ class ChatSession {
        */
       consumers?: SharedConsumerDelegate
       qqOwnerId?: string
-      scopedIdentity?: { scope: ReadScope; externalId: string }
+      scopedIdentity?: { scope: ReadScope; externalId: string; transport?: 'qq' | 'wechat' }
       /** INC-01 WP3：收尾句柄（缺省由本会话自己按 runtime 建一个） */
       shutdown?: ShutdownHandle
       /**
@@ -1572,7 +1718,7 @@ class ChatSession {
     this.worldId = stringToUuid(`world-${character.id ?? character.name}`)
     this.roomId = this.scopedIdentity === undefined || (this.turnScope?.principal.kind === 'owner' && this.turnScope.room.kind === 'private')
       ? stringToUuid(`room-dm-${userName}`) :
-      stringToUuid(`room-qq-${JSON.stringify(this.turnScope!.room)}-${this.ids.userId}`)
+      stringToUuid(`room-${this.scopedIdentity?.transport ?? 'qq'}-${JSON.stringify(this.turnScope!.room)}-${this.ids.userId}`)
 
     if (this.kernel) {
       this.gateway = this.buildGateway({ dryRun: this.dryRun })
@@ -1774,7 +1920,7 @@ class ChatSession {
       userHash8: stringToUuid(`user-${this.userName}`).slice(0, 8),
       entry: this.entryKey,
       entryScoped: this.flags.entryScopedConversations,
-    }) : asConversationId(`qq-${stringToUuid(JSON.stringify(this.turnScope!.room))}-${this.ids.userId}`)
+    }) : asConversationId(`${this.scopedIdentity?.transport ?? 'qq'}-${stringToUuid(JSON.stringify(this.turnScope!.room))}-${this.ids.userId}`)
     const recorder = new ConversationRecorder({
       db: this.kernel.stores.db,
       characterId: this.kernel.characterId,
@@ -1782,7 +1928,7 @@ class ChatSession {
       dryRun: options.dryRun,
       userName: this.userName,
       characterName: character.name,
-      transport: CHAT_ENTRY_SCOPES[this.entryKey].transport,
+      transport: this.scopedIdentity?.transport ?? CHAT_ENTRY_SCOPES[this.entryKey].transport,
       /*
        * WP6.1（K-28）：**生产 ingress 的受信归因接线点**。
        *
@@ -1795,7 +1941,8 @@ class ChatSession {
        */
       attribution: this.scopedIdentity !== undefined &&
         (this.turnScope!.principal.kind !== 'owner' || this.turnScope!.room.kind === 'group')
-        ? [createHumanQqMemberUserTurnIngress(this.turnScope!.room.kind), createCharacterAssistantTurnIngress()]
+        ? [this.scopedIdentity.transport === 'wechat' ? createHumanWechatGroupUserTurnIngress()
+          : createHumanQqMemberUserTurnIngress(this.turnScope!.room.kind), createCharacterAssistantTurnIngress()]
         : conversationAttributionForEntryMode(this.entryMode).producers,
       // M3：领域身份（已解析好）与 transport 身份（平台侧是谁）都给。
       //   userId  → 登记 user_identities（"我们这边是谁"）
@@ -2852,23 +2999,15 @@ class ChatSession {
      */
     const judgeTimeoutValid = this.flags.webSearchJudgeTimeoutMs !== undefined
     const searchEnabled = this.flags.webSearchEnabled === true && searchModeValid && judgeTimeoutValid
-    /*
-     * ADR-054 / ADR-046 `D-25`：**按模式读不同的变量名**。
-     * `--test`（干跑）走 `…_TEST_…`，真实聊天走生产名 —— 一个模式只拼一个变量名，
-     * 于是"测试缺失时回落到生产 key"在结构上不存在这条路。
-     */
-    const tavilyConfig = searchEnabled ? assertTavilyConfig({}, { isTestMode: this.dryRun === true }) : undefined
+    // 测试只认具名 DeepSeek 测试凭证，不回落主回复端点或生产 key。
+    const nativeSearchConfig = searchEnabled ? loadDeepSeekSearchConfig({ isTestMode: this.dryRun === true }) : undefined
     const webSearchAdapter =
-      searchEnabled && tavilyConfig !== undefined
+      searchEnabled && nativeSearchConfig !== undefined
         ? createWebSearchAdapter({
-            provider: createTavilySearchProvider({
-              config: tavilyConfig,
-              /*
-               * 成本**只报告**（`D-30`）：把这一次实际消耗的 credit 打出来。
-               * ⚠️ 它**不参与**任何放行/拒绝判断 —— 成本没有闸，这是刻意的。
-               */
-              onCreditsUsed: (credits) => {
-                if (credits !== null) logger.info(`[search-cost] Tavily 本次消耗 ${credits} credit`)
+            provider: createDeepSeekSearchProvider({
+              config: nativeSearchConfig,
+              onMetrics: (metrics) => {
+                logger.info(`[search-usage] native=${metrics.reportedSearchCalls ?? 'unknown'} pages=${metrics.sourceReads} pageRequests=${metrics.sourceRequestAttempts} pageFailures=${metrics.failedSourceReads}`)
               },
             }),
             fingerprint: createSha256Fingerprinter(),
@@ -3012,6 +3151,29 @@ class ChatSession {
         ? this.flags.desktopInspectEnabled
         : this.flags.desktopOperateEnabled
     )
+    /*
+     * ADR-146：跨机器委派的**装配**。
+     *
+     * ⚠️⚠️ 失败关闭的核心在这里：**执行端不在线 ⇒ `delegator` 返回 `undefined`**
+     *    ⇒ 网关走**本地适配器**，逐字旧行为。
+     *    为什么这条必须成立：电脑关机/休眠 ⇒ 隧道断 ⇒ 执行端不在线
+     *    （`L-146-03` 的必然结果）。那时 `desktop.operate` 直接失效
+     *    就是**没通知任何人地改变了既有行为**。
+     *
+     * ⚠️ 委派面只有 `desktop.operate`（裁定 `R-146` ②）：浏览器在 PC 上**是登录态**，
+     *    影响面比桌面大（可能落在已登录的网银/邮箱上）⇒ 那是"先不做"，不是"已评估为安全"。
+     *
+     * ⚠️ 闸不在这里：真正的闸是 `ActionDelegation.delegate()`，它 `allowed===false`
+     *    时**连 emit 都不碰**。这里只决定"**委派还是本地**"，不重算任何权限。
+     */
+    const executorDelegation = this.executorLink === undefined
+      ? undefined
+      : new ActionDelegation({
+        emit: (payload: Record<string, unknown>) => { this.executorLink!.send(payload) },
+        isCancelled: (turnRequestId: string) => this.isTurnCancelledSomewhere(turnRequestId),
+        delegatableCapabilities: [DESKTOP_OPERATE],
+        timeoutMs: 30_000,
+      })
     const desktopPermissions = [
       ...(this.flags.desktopInspectEnabled ? [DESKTOP_INSPECT_PERMISSION] : []),
       ...(this.flags.desktopOperateEnabled ? [DESKTOP_OPERATE_PERMISSION] : []),
@@ -3112,6 +3274,40 @@ class ChatSession {
         ],
         grantedPermissions,
         maxRiskLevel: this.flags.actionMaxRiskLevel,
+        /*
+         * ADR-146：委派 vs 本地 —— **在网关层**二选一。
+         *
+         * ⚠️ 返回 `undefined`（执行端不在线）⇒ 走本地适配器，逐字旧行为。
+         * ⚠️ **委派失败绝不落回本地重做**：核心可能已把那次委派提交进账本，
+         *    重做 = 同一件事做两遍（同断线时具名拒绝、绝不自动重发的纪律）。
+         */
+        delegator: (request, decision) => {
+          if (executorDelegation === undefined) return undefined
+          if (request.capability !== DESKTOP_OPERATE) return undefined
+          return {
+            send: async (req, dec) => {
+              const actionId = String(req.actionId)
+              const turnRequestId = this.entryKey
+              const r = executorDelegation.delegate({
+                turnRequestId,
+                actionId,
+                request: req,
+                admission: dec,
+              })
+              if (!r.ok) {
+                throw new ActionFailureError(
+                  actionFailure('execution_failed', `委派未过（${r.rejection}），未执行`),
+                )
+              }
+              return {
+                effect: {
+                  kind: 'action_delegated',
+                  detail: `已委派 ${req.capability}（${r.actionId}）到 PC 执行端（执行结局由回执持有，不回写账本）`,
+                },
+              }
+            },
+          }
+        },
         dryRun: this.dryRun,
         now: () => Date.now(),
       /*
@@ -3174,8 +3370,8 @@ class ChatSession {
           return {
             target: {
               type: 'external_service',
-              canonicalId: TAVILY_PROVIDER_ID,
-              displayName: `搜索服务（${new URL(D20_RULING.endpoint).host}）`,
+              canonicalId: DEEPSEEK_SEARCH_PROVIDER_ID,
+              displayName: '搜索服务（api.deepseek.com，含受控来源读取）',
               confidence: 'exact',
             },
             scopeViolation: false,
@@ -3588,6 +3784,21 @@ class ChatSession {
   }
 
   async open(): Promise<void> {
+    /*
+     * ADR-146：连 PC 执行端（**fire-and-forget**，绝不等它）。
+     *
+     * ⚠️⚠️ 为什么挂在这里而不是"共存入口处理器"：
+     *    服务器上的 QQ 入口走的是 **spawn 传输**（日志文案"等待独立 QQ 机器人连接"），
+     *    **不经过**共存入口那段 ⇒ 挂在那儿**永远不会被执行**（本轮实测：executor 日志 0 行）。
+     *    `open()` 是每个 ChatSession 的启动路径 ⇒ **必然执行**。
+     *
+     * ⚠️ 为什么 `void` 而不是 `await`：
+     *    执行端不在线（电脑休眠 ⇒ 隧道断，`L-146-03`）时**绝不能拖慢启动**。
+     *    而 `delegator` 是**每次动作时**求值的 ⇒ 连接什么时候落地，
+     *    委派面就什么时候启用；没落地就一直走本地（逐字旧行为）。
+     */
+    void this.attachExecutorIfConfigured((m) => logger.info(m))
+
     // 顺序有讲究：world → entity → room → participants
     await this.runtime.ensureWorldExists({
       id: this.worldId,
@@ -4575,12 +4786,13 @@ class ChatSession {
         ...(checkedImages.length ? { images: checkedImages } : {}),
         ...(imageStore ? { loadImage: (ref: string) => imageStore.load(ref) } : {}),
         turn: Object.assign(incoming, { worldObservations: storyWorldObservations, storyTurnScope }),
-        chatChannel: { current: this.entryKey, reminderChannels: reminderRuntimeChannels },
+        ...(this.scopedIdentity?.transport === 'wechat' ? {} : {
+          chatChannel: { current: this.entryKey, reminderChannels: reminderRuntimeChannels } }),
         currentInput: userText,
         recentLines: groupContext === undefined ? voiceLines : [...groupContext
           .filter(line => line.at >= Date.now() - 300_000 && line.at <= Date.now())
           .map((line, index) => ({ id: asConversationEventId(`group-buffer-${index}`), createdAt: line.at, sequence: index - 20,
-            speaker: `QQ用户${line.senderId}（未受理的群语境，不能作为长期事实）`, text: line.text })), ...voiceLines],
+            speaker: `${this.scopedIdentity?.transport === 'wechat' ? '微信' : 'QQ'}用户${line.senderId}（未受理的群语境，不能作为长期事实）`, text: line.text })), ...voiceLines],
         ...(incoming.userEvent !== undefined && !this.dryRun ? { runReminderTurn: async (lines, withdrawn, materials) => {
           const source = incoming!.userEvent!
           const current: ReminderSource = { id: String(source.id), text: userText, createdAt: source.createdAt }
@@ -6272,6 +6484,25 @@ function openingModel(): ReturnType<typeof createOpenAiProactiveOpeningPort> {
   return openingModelRef
 }
 
+function wechatReplyAssessor(kernel: KernelHandle, flags: ReturnType<typeof readKernelFlags>) {
+  const config = readWechatConfig(process.env)
+  let busy = false
+  return async (request: import('./kernel/app/bridge/turn-bridge.ts').BridgeSubmitRequest) => {
+    if (!config || !flags.contextCompilerV1 || !flags.relationshipContextEnabled) throw new Error('wechat_not_enabled')
+    if (busy) return { reply: false, code: 'group_reply_busy' }
+    busy = true
+    const startedAt = Date.now()
+    try {
+      // No session selection/archive creation here: silence must leave no conversation or memory behind.
+      await new WechatApi(config, AbortSignal.timeout(15_000)).readVerifiedSource(request.platformFacts!, request.userText)
+      return await assessGroupReply({ identity: renderSeedIdentity(kernel.definition), request, model: openingModel() })
+    } finally {
+      busy = false
+      logger.info(`[wechat] reply assessment ${Date.now() - startedAt}ms`)
+    }
+  }
+}
+
 function proactiveDeliveryChannel(db: RawDb): QqDeliveryRegistry {
   if (proactiveChannelRef === undefined) {
     proactiveChannelRef = new QqDeliveryRegistry({
@@ -6299,7 +6530,7 @@ function proactiveDeliveryChannel(db: RawDb): QqDeliveryRegistry {
 function qqSessionSelector(input: { runtime: AgentRuntime; userName: string; kernel: KernelHandle;
   flags: ReturnType<typeof readKernelFlags>; runtimeId: RuntimeId; owner: ChatSession }) {
   const sessions = new Map<string, ChatSession>()
-  return async (value: unknown): Promise<ChatSession> => {
+  return async (value: unknown, userText?: string): Promise<ChatSession> => {
     const config = readQqPrivateConfig(process.env)
     if (config.multiUserEnabled && (!input.flags.contextCompilerV1 || !input.flags.relationshipContextEnabled)) {
       throw new Error('qq_multi_user_requires_compiler_and_relationship_context')
@@ -6307,6 +6538,33 @@ function qqSessionSelector(input: { runtime: AgentRuntime; userName: string; ker
     if (value === undefined && !config.multiUserEnabled) return input.owner
     if (value === undefined || typeof value !== 'object') throw new Error('qq_platform_facts_required')
     const facts = value as import('./kernel/app/bridge/turn-bridge.ts').BridgeInboundPlatformFacts
+    if (facts.transport === 'wechat') {
+      const wechat = readWechatConfig(process.env)
+      if (!wechat || !input.flags.contextCompilerV1 || !input.flags.relationshipContextEnabled) throw new Error('wechat_not_enabled')
+      await new WechatApi(wechat).verifyFacts(facts, userText)
+      const ownerUserId = resolveIds(input.userName).userId
+      const outcome = await resolveInboundTurnScope({ db: input.kernel.stores.db, ownerUserId,
+        facts: { ...facts, botId: wechat.botId }, allowedFor: () => true,
+        deriveUserId: ({ externalId }) => externalId === wechat.ownerId ? ownerUserId : stringToUuid(`user-wechat-${externalId}`),
+        ensureArchive: true, groupAuthorized: true,
+        displayName: facts.senderUserId === wechat.ownerId ? input.userName : `微信用户${facts.senderUserId}` })
+      if (outcome.failClosed || !outcome.scope || !outcome.userId || outcome.isOwner !== (facts.senderUserId === wechat.ownerId)) {
+        throw new Error('wechat_identity_resolution_failed')
+      }
+      const key = JSON.stringify([outcome.userId, outcome.scope.room])
+      let session = sessions.get(key)
+      if (!session) {
+        if (sessions.size >= 256) sessions.delete(sessions.keys().next().value!)
+        const scope: ReadScope = { context: outcome.scope, ownerUserId, roomAuthorized: true }
+        session = new ChatSession(input.runtime, outcome.isOwner ? input.userName : `微信用户${facts.senderUserId}`, {
+          entryMode: 'interactive_human_qq_private', entryKey: 'qq_private', qqOwnerId: config.ownerId,
+          kernel: input.kernel, flags: input.flags, runtimeId: input.runtimeId,
+          consumers: input.owner.sharedConsumerDelegate(), scopedIdentity: { scope, externalId: facts.senderUserId, transport: 'wechat' } })
+        await session.open(); sessions.set(key, session)
+      }
+      return session
+    }
+    if (facts.transport !== 'qq') throw new Error('unsupported_platform_facts')
     if (facts.selfId !== config.botId || (facts.messageType !== 'private' && facts.messageType !== 'group')) throw new Error('qq_platform_facts_rejected')
     const group = facts.groupId
     if (facts.messageType === 'group' && (!config.multiUserEnabled || !group || !config.allowedGroupIds?.includes(group))) throw new Error('qq_group_not_authorized')
@@ -6355,6 +6613,7 @@ async function createCoexistenceEntryServer(input: {
    */
   readonly qqDelivery: QqDeliveryRegistry | undefined
   readonly selectQqSession?: ReturnType<typeof qqSessionSelector>
+  readonly assessWechatReply?: ReturnType<typeof wechatReplyAssessor>
 }): Promise<{ server: Server; shutdown: () => Promise<void> }> {
   const { spec, session, scheduler, delivery, qqDelivery } = input
   const localDelivery = spec.entry !== 'qq_private' && qqDelivery !== undefined ? reminderDeliveryChannel(input.db, spec.entry) : undefined
@@ -6369,10 +6628,26 @@ async function createCoexistenceEntryServer(input: {
        * ⚠️ 这一行**先于**桥协议，因此受控登记表不需要新增任何 kind。
        */
       const hello = await reader.next()
-      if (hello === undefined || hello.trim() !== `LG_ENTRY ${spec.token}`) {
-        socket.write('LG_ENTRY_REJECTED invalid_handshake\n')
+      /*
+       * ⚠️ 2026-10-17 · 服务器部署 · 远程执行缺口 2/4：原来是
+       *    `hello.trim() !== \`LG_ENTRY ${spec.token}\`` —— 那是**同机 loopback 入口**的判据，
+       *    搬去服务器跨 SSH 隧道之后前提不成立（见 entry-handshake.ts 文件头）。
+       *    现在走**摘要后定时安全比对**；三种失败对外一律同一句 `invalid_handshake`。
+       */
+      const handshake = verifyEntryHandshake(hello, spec.token)
+      if (!handshake.ok) {
+        /*
+         * ⚠️ 要点：版本类失败回**另一句**（ADR-146 `D07`）。
+         *   token 类失败一律同形（不给 oracle）；版本号不是秘密，
+         *   把版本不符说成"token 不对"只会让人去查一个根本没问题的 token。
+         */
+        const isVersionFailure = handshake.code === 'version_missing' || handshake.code === 'version_unsupported'
+        socket.write(isVersionFailure ? ENTRY_VERSION_REJECT : ENTRY_HANDSHAKE_REJECT)
         socket.destroy()
-        logger.warn(`[coexist] ${spec.entry}：握手失败（token 不符或空连接），已拒绝`)
+        logger.warn(
+          `[coexist] ${spec.entry}：握手失败（${handshake.code}` +
+          `${handshake.version === undefined ? '' : ` 对端 v${handshake.version}，本端 v${ENTRY_PROTOCOL_VERSION}`}），已拒绝`,
+        )
         return
       }
       socket.write(`LG_ENTRY_READY ${spec.entry} ${session.conversationId}\n`)
@@ -6386,10 +6661,19 @@ async function createCoexistenceEntryServer(input: {
        *    `session.send()` 的检查点（既有语义，一个字不改）。
        */
       const cancellation = new TurnCancellationRegistry()
+      /*
+       * ADR-146：把这个入口的取消表登记进 session ——
+       * 委派的取消判据取**并集**（`isTurnCancelledSomewhere`）。
+       * ⚠️ 保守方向：任一入口说"已取消"就不委派。
+       */
+      session.registerCancellation(cancellation)
+      // ⚠️ 执行端连接**不在这里**发起：这段是共存入口处理器，服务器上的 QQ 入口
+      //    走 spawn 传输**不经过**它（本轮实测 executor 日志 0 行）。
+      //    钩子在 `ChatSession.open()`（每个 session 的启动路径，必然执行）。
       const base = sessionHost(session, {
         ...(spec.entry === 'qq_private' && input.selectQqSession !== undefined ? {
-          selectSession: async (facts: unknown) => facts === undefined && !readQqPrivateConfig(process.env).multiUserEnabled
-            ? session : input.selectQqSession!(facts),
+          selectSession: async (facts: unknown, userText?: string) => facts === undefined && !readQqPrivateConfig(process.env).multiUserEnabled
+            ? session : input.selectQqSession!(facts, userText),
         } : {}),
         cancellation,
         ...(delivery === undefined ? {} : { delivery }),
@@ -6406,6 +6690,7 @@ async function createCoexistenceEntryServer(input: {
        * 独立通道，**不**排队（因此慢轮次期间取消仍然立刻可达）。
        */
       const host = { ...base }
+      if (spec.entry === 'qq_private') host.assessGroupReply = input.assessWechatReply
       const innerRunTurn = base.runTurn.bind(base)
       host.runTurn = (request) => scheduler.run(spec.entry, () => innerRunTurn(request))
       const bridge = new TurnBridge({ host })
@@ -6670,6 +6955,7 @@ async function runCoexistenceHost(input: {
     runtimeId,
   })
   await owner.open()
+  await warmSemanticEncoderForChat()
   const consumers = owner.sharedConsumerDelegate()
   const selectQqSession = qqSessionSelector({ runtime, userName, kernel, flags, runtimeId, owner })
 
@@ -6717,7 +7003,8 @@ async function runCoexistenceHost(input: {
       })
       await session.open()
       reminderSenders.set(spec.entry, session)
-      const entryServer = await createCoexistenceEntryServer({ spec, db: kernel.stores.db, session, scheduler, delivery, qqDelivery, selectQqSession })
+      const entryServer = await createCoexistenceEntryServer({ spec, db: kernel.stores.db, session, scheduler, delivery, qqDelivery, selectQqSession,
+        assessWechatReply: wechatReplyAssessor(kernel, flags) })
       /*
        * ⚠️ **QQ 入口**那一条会话就是主动发送的执行体（它有网关 + 它是本入口的会话）。
        *    皮套／控制台不参与自主关心；明确提醒则由保存的渠道选择执行体。
@@ -8048,8 +8335,8 @@ async function main(): Promise<void> {
                   : 'CHARACTER_WEB_SEARCH_ENABLED=false：能力已登记，但未授予 web:search、未构造适配器'
               ),
           note:
-            `M5.5 · provider=${TAVILY_PROVIDER_ID} · ` +
-            `一次搜索 1 次请求 / 0 重试 / 硬超时 ${D20_RULING.hardTimeoutMs}ms / 结果 ≤ ${D20_RULING.maxResults} · ` +
+            `M5.5 · provider=${DEEPSEEK_SEARCH_PROVIDER_ID} · ` +
+            `模型请求 ≤1 / 0 重试 / 总期限 ${DEEPSEEK_SEARCH_TOTAL_TIMEOUT_MS}ms / 网页 ≤${DEEPSEEK_SEARCH_MAX_PAGES}（每页重定向 ≤1） · ` +
             `M5.5.1 · mode=${flags.webSearchMode ?? 'INVALID'} · 判定 ≤1 次/轮（显式与自动共用）`,
         },
         /*
@@ -8340,6 +8627,8 @@ async function main(): Promise<void> {
        */
       supersedeUnplayed: ({ by, reason }) => delivery.markSuperseded({ by, reason }).length,
     })
+    if (qqPrivate !== undefined && kernel !== undefined) host.assessGroupReply = wechatReplyAssessor(kernel, flags)
+    await warmSemanticEncoderForChat()
     const bridge = new TurnBridge({ host })
     /*
      * Lv4.5 / `P3`：**有限插话**的开关由 `CHARACTER_INTERJECTION_ENABLED` 决定（代码缺省 off）。
@@ -8763,6 +9052,17 @@ function semanticEncoderShared(options: {
   }
   return semanticEncoderForExit
 }
+let semanticWarmup: Promise<void> | undefined
+async function warmSemanticEncoderForChat(): Promise<void> {
+  if (semanticEncoderForExit === undefined) return
+  semanticWarmup ??= (async () => {
+    const startedAt = Date.now()
+    const reading = await semanticEncoderForExit!.warmup()
+    logger.info(`[semantic] startup warmup ${reading.ok ? 'ready' : 'degraded'} ${Date.now() - startedAt}ms`)
+  })()
+  await semanticWarmup
+}
+
 async function closeSemanticEncoderForExit(): Promise<void> {
   if (semanticEncoderExitDone) return
   semanticEncoderExitDone = true

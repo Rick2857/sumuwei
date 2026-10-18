@@ -49,7 +49,7 @@ import {
   type CapabilityRegistry,
 } from '../src/kernel/action/capability-registry.ts'
 import type { CapabilityAdapter } from '../src/kernel/action/executor-port.ts'
-import { createActionGateway, type ActionGateway } from '../src/kernel/action/gateway.ts'
+import { createActionGateway, type ActionGateway, type ActionGatewayOptions } from '../src/kernel/action/gateway.ts'
 import { createActionIntentDetector } from '../src/kernel/action/intent-detector.ts'
 import { createActionTurnPort, type ActionTurnPort } from '../src/kernel/action/action-turn.ts'
 import { createActionRequest, hasSideEffect, type ActionRequest, type RiskLevel } from '../src/kernel/action/action-request.ts'
@@ -122,6 +122,13 @@ export interface ActionTestBedOptions {
   dryRun?: boolean
   /** 沙箱根绝对路径（缺省是本测试台自己的临时目录） */
   sandboxRoot?: string
+  /**
+   * **覆盖**目标解析（缺省 = 沙箱梯子，逐字不变）。
+   *
+   * 用途：非沙箱能力族（例如 `qq_private_owner`）需要装配层给出自己那一支 resolver；
+   * 缺省不传 ⇒ 本测试台的行为与既有 M4.5 验收脚本**完全一致**。
+   */
+  resolveTarget?: ActionGatewayOptions['resolveTarget']
 }
 
 export interface ActionTestBed {
@@ -207,14 +214,16 @@ export async function createActionTestBed(options: ActionTestBedOptions): Promis
     maxRiskLevel: options.maxRiskLevel ?? 'R1',
     dryRun: options.dryRun === true,
     now: () => Date.now(),
-    resolveTarget: async ({ request, operation }) =>
-      resolveActionTarget({
-        targetType: 'sandbox_file',
-        ...(request.target !== undefined ? { declared: request.target } : {}),
-        hints: typeof request.arguments.path === 'string' ? [request.arguments.path] : [],
-        listEntries: () => listSandboxEntries(sandboxOptions),
-        allowMissing: operation !== undefined && hasSideEffect(operation.sideEffect),
-      }),
+    resolveTarget:
+      options.resolveTarget ??
+      (async ({ request, operation }) =>
+        resolveActionTarget({
+          targetType: 'sandbox_file',
+          ...(request.target !== undefined ? { declared: request.target } : {}),
+          hints: typeof request.arguments.path === 'string' ? [request.arguments.path] : [],
+          listEntries: () => listSandboxEntries(sandboxOptions),
+          allowMissing: operation !== undefined && hasSideEffect(operation.sideEffect),
+        })),
   })
 
   const turnPort = createActionTurnPort({

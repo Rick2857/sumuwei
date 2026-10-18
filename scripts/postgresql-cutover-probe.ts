@@ -14,6 +14,7 @@
  */
 import 'dotenv/config'
 
+import { spawnSync } from 'node:child_process'
 import { mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 
@@ -52,6 +53,39 @@ if (credentials === undefined) {
 const password = credentials.LG_PG_MIGRATE_PASSWORD
 const url = `postgresql://lg_migrate:${encodeURIComponent(password)}@127.0.0.1:${PG_HOST_PORT}/${targetDb}`
 
+/**
+ * ⚠️ **容器名不许硬编码**（2026-10-14 实测修）。
+ *
+ * ```text
+ * 事实：生产端口 55432 今天由 `lg-postgresql-production`（卷 `lg-postgresql-production-20261014`）持有；
+ *      而 WP7 记录当时的目标容器是 `lg-postgresql-trial`（卷 `lg-postgresql-data`，现为**停止**状态）。
+ * 症状：硬编码 trial ⇒ 本探针的三个 `raw()` 读数落在**另一个实例**上
+ *      （实测 `conversationEvents=0` / `characterProjections=0` / `currentDatabase=""`）
+ *      ⇒ `ok:false` 是**读数打错实例**，**不是**数据缺失：
+ *      同一时刻在端口持有者上直接 SQL 读到 conversation_events=550 / character_projections=29 /
+ *      character_domain_events=473，且内核经适配器读到 **473** 条领域事件。
+ * ⇒ 判据改为"**谁发布这个端口就用谁**"，并留 `LG_PG_CONTAINER` 显式覆盖口。
+ * ```
+ */
+const resolvePgContainer = (): string => {
+  const explicit = process.env.LG_PG_CONTAINER?.trim()
+  if (explicit !== undefined && explicit !== '') return explicit
+  const listed = spawnSync('docker', ['ps', '--filter', `publish=${PG_HOST_PORT}`, '--format', '{{.Names}}'], {
+    encoding: 'utf8',
+    timeout: 30_000,
+  })
+  const name = (listed.stdout ?? '').split('\n').map((line) => line.trim()).filter((line) => line !== '')[0]
+  if (name === undefined) {
+    console.error(
+      `拒绝：没有任何运行中的容器发布端口 ${PG_HOST_PORT}（生产 PG 没起来，或它跑在别处）。\n` +
+        '  显式指定：设 LG_PG_CONTAINER=<容器名> 再跑。'
+    )
+    process.exit(2)
+  }
+  return name
+}
+const pgContainer = resolvePgContainer()
+
 /*
  * ⚠️ 生产库**不是** `lg_test_*` ⇒ 不能用 `isolateDatabase`（它的判据要求测试前缀）。
  *    但**纵深防御照旧**：把 `PGLITE_DATA_DIR` 指到一个临时目录 —— 万一适配器回退成 PGlite，
@@ -81,7 +115,7 @@ try {
   const events = await domainEventsFor(kernel.stores.db, characterId)
 
   const raw = (sqlText: string): string =>
-    psql({ container: 'lg-postgresql-trial', user: 'lg_migrate', password: credentials.LG_PG_MIGRATE_PASSWORD, database: targetDb, sql: sqlText }).out
+    psql({ container: pgContainer, user: 'lg_migrate', password: credentials.LG_PG_MIGRATE_PASSWORD, database: targetDb, sql: sqlText }).out
 
   readings.characterId = String(characterId)
   readings.domainEventsViaKernel = events.length

@@ -10,6 +10,8 @@ tmp/
 !.env.example
 !.env.qq.example
 !.env.test.example
+!.env.server.example
+!.env.wechat.example
 !experiments/omni-realtime/.env.local.example
 .npmrc.local
 .venv/

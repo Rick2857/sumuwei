@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "listId": "a1-read-surfaces",
+  "title": "A1 只读面清单（R-A1-2 批准的五个面 + 用户 2026-10-14 追加的第六个面 core_status；冻结档）",
+  "provenance": {
+    "adr": "docs/adr/ADR-135-admin-backend-minimal.md",
+    "contract": "docs/post-lv2/Admin-Backend-Acceptance-Contract.md",
+    "plan": "docs/post-lv2/Multi-User-QQ-Group-and-Admin-Execution-Addendum-2026-10-12.md §6",
+    "ruling": "用户 2026-10-14 批准 R-A1-2（批准新增必要的只读 DTO，但**先冻结清单**）",
+    "note": "本文件的 id / path / fields 必须与 src/infrastructure/admin/query-ports.ts 的 ADMIN_READ_SURFACES **双向一致**（门里有判据）。加第六个面必须显式改两处 + 更新本文件的 sha256。"
+  },
+  "rule": "改面集合（增/删/改 id、路径、字段闭集、密钥许可）必须显式更新本文件与冻结档，且门必须复跑；不许「顺手加一个面」。",
+  "surfaces": [
+    { "id": "core_status", "path": "/api/core-status", "title": "核心状态", "fields": ["presence", "label", "heldCount", "unavailable"], "mayContainSecrets": false },
+    { "id": "cognition", "path": "/api/cognition", "title": "认知状态", "fields": ["characterId", "affect", "relationships", "beliefs", "watermarks"], "mayContainSecrets": false },
+    { "id": "goals_commitments", "path": "/api/goals-commitments", "title": "目标与承诺", "fields": ["openGoals", "completedGoals", "openCommitments", "settledCommitments"], "mayContainSecrets": false },
+    { "id": "jobs", "path": "/api/jobs", "title": "后台任务", "fields": ["jobId", "kind", "state", "startedAt", "finishedAt", "failureReason"], "mayContainSecrets": false },
+    { "id": "safety_quota", "path": "/api/safety-quota", "title": "安全与额度", "fields": ["riskCeiling", "quotaWindow", "quotaUsed", "quotaLimit", "recentDenials"], "mayContainSecrets": false },
+    { "id": "effective_config", "path": "/api/effective-config", "title": "有效配置", "fields": ["flag", "value", "source", "masked"], "mayContainSecrets": true }
+  ],
+  "notCovered": [
+    "本文件只冻结**清单**：它不主张任何面已有实现（今天五个面全部 `surface_not_wired`）",
+    "页面与渲染（WP2 后续切片）· 写面（WP4 起）· 生产激活（独立授权）"
+  ]
+}

@@ -359,8 +359,8 @@ const M55_FILES = [
   'src/kernel/contracts/external-evidence.ts',
   'src/infrastructure/action/adapters/web-search.ts',
   /* ADR-054：provider 由本地 SearXNG 换成 Tavily（文件随之改名） */
-  'src/infrastructure/search/tavily-search-provider.ts',
-  'src/infrastructure/search/tavily-config.ts',
+  'src/infrastructure/search/deepseek-search-provider.ts',
+  'src/infrastructure/search/deepseek-config.ts',
   'src/infrastructure/search/fingerprint.ts',
   'src/infrastructure/search/recording-fetch.ts',
   'src/infrastructure/search/fixture-search-provider.ts',

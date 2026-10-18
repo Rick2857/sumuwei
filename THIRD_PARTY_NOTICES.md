@@ -4,6 +4,10 @@ Su Muwei (sumuwei; formerly Project LG) source and documentation are distributed
 
 The JavaScript dependency versions and transitive package graph are recorded in `pnpm-lock.yaml`. The distribution uses packages including ElizaOS, PGlite, Drizzle ORM, Mozilla Readability, Tesseract.js, InkJS, Math.js, rss-parser, Croner, and Promptfoo. Their copyright and license files are supplied by their respective packages when installed.
 
+The server edition explicitly declares `@huggingface/transformers` 4.3.0 (Apache-2.0, as declared by its installed package). Model weights and optional native runtime binaries are not bundled. The WeChat adapter talks to an independently supplied bridge; no bridge implementation, image, login state or vendor application is redistributed here.
+
+The optional thin host declares node-postgres `pg` 8.23.1 (MIT, as declared by its installed package) and its TypeScript type package. It does not redistribute a PostgreSQL server or its data.
+
 Reminder calendar parsing additionally uses [chrono-node 2.10.3](https://github.com/wanasit/chrono), under the MIT license. Its package supplies the upstream license; no dependency runtime files are bundled. AstrBot future-task and Home Assistant calendar-offset interfaces informed the reminder design; their implementations and runtimes are not bundled.
 
 Optional `tools/avatar-3d` and `experiments/omni-realtime` dependencies have separate package-lock.json files: Three.js 0.180.0, three-vrm 3.5.5 and ws 8.22.0 retain their MIT licenses. Playwright is an optional test dependency under Apache-2.0. No dependency runtime files are bundled. The explicit example downloader fetches a pinned VRM Public License 1.0 model for local use; that model is not part of the source distribution. Aoba/other VRM assets require their own applicable terms, independently of these library licenses.

@@ -40,8 +40,16 @@ export function desktopControlRuntimeDir(): string {
 }
 
 export function defaultDesktopControlPython(): string {
-  return (
-    process.env.PROJECT_LG_DESKTOP_PYTHON ?? join(desktopControlRuntimeDir(), 'venv/Scripts/python.exe')
+  /*
+   * ⚠️ 2026-10-16（服务器 Linux 适配）：缺省值的**形状**按平台挑。
+   *   环境变量优先这条**不变** ⇒ 既有读数完全不受影响。
+   * ⚠️ 桌面控制在**服务器上是关闭**的（上游 windows-mcp 依赖 dxcam/comtypes/pywin32，
+   *   没有 Linux 对应物）⇒ 这条路径在服务器上**不会被真正走到**。
+   *   但形状仍然要写对，否则"关着"与"配错了"两种状态会读起来一模一样。
+   */
+  return process.env.PROJECT_LG_DESKTOP_PYTHON ?? join(
+    desktopControlRuntimeDir(),
+    process.platform === 'win32' ? join('venv', 'Scripts', 'python.exe') : join('venv', 'bin', 'python')
   )
 }
 

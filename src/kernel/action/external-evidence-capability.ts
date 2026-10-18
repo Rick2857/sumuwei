@@ -59,7 +59,7 @@ export function createExternalEvidenceCapabilityDefinitions(): readonly Capabili
       operations: [
         {
           name: WEB_SEARCH_OPERATION,
-          description: `把 query 交给已配置的本地搜索服务（结果 ≤ ${EVIDENCE_LIMITS.maxResultLimit} 条）`,
+          description: `原生搜索并受控读取最多 2 个来源页面（每页重定向 ≤1，证据 ≤ ${EVIDENCE_LIMITS.maxResultLimit} 条）`,
           sideEffect: 'read',
           riskLevel: 'R1',
         },

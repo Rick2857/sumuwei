@@ -1,12 +1,13 @@
 /** Formal QQ entry; .env remains the sole production model and database configuration. */
 import { config, parse } from 'dotenv'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { assertProductionAvatarEnvironment } from '../postlv2-production-env.ts'
 import { readQqPrivateConfig } from '../../src/infrastructure/qq/private-config.ts'
 import { OneBotPrivateClient } from '../../src/infrastructure/qq/onebot-private-client.ts'
 import { LgStdioClient } from '../../src/infrastructure/qq/lg-stdio-client.ts'
+import { readWechatConfig, WechatGroupClient } from '../../src/infrastructure/wechat/group-client.ts'
 
 const root = process.env.LG_3D_OPERATION_ROOT === undefined
   ? resolve(import.meta.dirname, '../..') : resolve(process.env.LG_3D_OPERATION_ROOT)
@@ -14,6 +15,11 @@ assertProductionAvatarEnvironment(process.env, root)
 const production = config({ path: resolve(root, '.env'), override: true, quiet: true })
 const qqEnv = parse(readFileSync(resolve(root, '.env.qq')))
 for (const [key, value] of Object.entries(qqEnv)) if (key.startsWith('QQ_')) process.env[key] = value
+const wechatFile = resolve(root, '.env.wechat')
+if (existsSync(wechatFile)) {
+  for (const [key, value] of Object.entries(parse(readFileSync(wechatFile)))) if (key.startsWith('WECHAT_')) process.env[key] = value
+}
+const wechatConfig = readWechatConfig(process.env)
 assertProductionAvatarEnvironment(process.env, root)
 const settings = readQqPrivateConfig(process.env)
 if (!production.parsed?.OPENAI_API_KEY?.trim()) throw new Error('QQ requires .env OPENAI_API_KEY')
@@ -64,7 +70,9 @@ if (process.argv.includes('--check')) {
     return reading
   })
   let stopped = false
-  const stop = (): void => { stopped = true }
+  const wechat = wechatConfig === undefined ? undefined : new WechatGroupClient(wechatConfig,
+    request => lg.submit(request), reading => console.log(JSON.stringify(reading)), request => lg.assessGroupReply(request))
+  const stop = (): void => { stopped = true; wechat?.stop() }
   process.once('SIGINT', stop)
   process.once('SIGTERM', stop)
   // The shared production supervisor closes this pipe before draining the core.
@@ -73,8 +81,16 @@ if (process.argv.includes('--check')) {
     process.stdin.once('end', stop)
   }
   lg.process?.once('close', stop)
+  let wechatLoop: Promise<void> | undefined
   try {
     await lg.ready
+    if (wechat) wechatLoop = (async () => {
+      while (!stopped) {
+        try { await wechat.poll() }
+        catch { console.log(JSON.stringify({ event: 'wechat_poll_unavailable' })) }
+        if (!stopped) await delay(3000)
+      }
+    })()
     console.log(
       coexistConnect === undefined
         ? 'LG 已就绪，等待独立 QQ 机器人连接。'
@@ -92,7 +108,9 @@ if (process.argv.includes('--check')) {
       await delay(3000)
     }
   } finally {
+    stop()
     await client.close()
+    await wechatLoop
     const code = await lg.close()
     if (code !== 0) process.exitCode = 1
   }

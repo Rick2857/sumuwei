@@ -1597,6 +1597,360 @@ export const PL2_GATES: readonly GateSpec[] = [
     why: '复用群夹具；真 --coexist 核心、两个临时 TCP 端口和单一隔离库；不启停生产服务。',
   },
   {
+    id: 'a1:auth:verify',
+    title: 'A1 / WP1：管理后台认证原语（scrypt 存储串 · 会话摘要 · 同源/CSRF · 登录限速）',
+    argv: tsx('scripts/a1-auth-primitives-verify.ts'),
+    entry: 'scripts/a1-auth-primitives-verify.ts',
+    tags: ['post-lv2', 'a1'],
+    resources: { parallel: 'safe' as const },
+    why:
+      '**纯进程内**（只调 `src/infrastructure/admin/auth.ts` 的纯函数 + 注入时钟）：零 I/O / 零网络 / 零数据库 / 不占端口 / 不写证据。' +
+      '正控（存储串形状含**全部**参数 · 正确口令通过 · 令牌高熵且摘要确定 · 同源放行 · CSRF 两处一致放行 · 限速计数如实）+ ' +
+      '负控（错口令 / 空口令 / 截断串 / 改前缀 / 改 N / 改 keylen / 改哈希段 / 非字符串 / 空令牌 / 空摘要 / 长度不符摘要 / ' +
+      'cross-site / Origin 不符 / scheme 不符 / 缺 Origin 的写请求 / 缺 Host / 非法 URL / 端口不同 / CSRF 缺一或不等 / 限速锁定 / 非法限速参数 **逐条具名判红**）+ 恢复。' +
+      '⚠️ 它**不**主张"登录已可用"：HTTP 接线与 cookie 属性要等 WP1b 的真 server 门（`a1:auth:http:verify`）。' +
+      '⚠️ 已知边界：首版限速是**单机单管理员**档，不抗分布式爆破（登记在案）。',
+  },
+  {
+    id: 'a1:auth:http:verify',
+    title: 'A1 / WP1b：认证入口真 HTTP 门（登录/会话/登出 · 同源/CSRF/限速/超时）',
+    argv: tsx('scripts/a1-auth-http-verify.ts'),
+    entry: 'scripts/a1-auth-http-verify.ts',
+    tags: ['post-lv2', 'a1'],
+    resources: { parallel: 'serial' as const },
+    why:
+      '**真 server + 真请求**（`src/infrastructure/admin/server.ts`，只 loopback、`listen(0)` 随机端口、**零数据库 / 零核心依赖**）：' +
+      '正控（正确口令 ⇒ 200 · cookie 带 HttpOnly/SameSite=Strict/Path=/ · `/session` 读回已登录与到期时刻 · ' +
+      'CSRF cookie 非 HttpOnly · 两令牌不同 · 登出真的删会话 · 停机后端口真的关掉）+ ' +
+      '负控（错口令 401 且不下发 cookie · 跨站 Origin 403 · 缺 Origin 的写请求 403 · 登出缺 CSRF 403 · ' +
+      '伪造会话未登录 · 超大体 413 · 未知路径/错方法 404 · 达阈值连**正确口令**也 429 · 会话过期未登录 **逐条判红**）+ 恢复。' +
+      '⚠️ 只覆盖**认证面**：业务面从 WP2 起；**不**主张生产激活，也**不**构成多用户隔离主张。',
+  },
+  {
+    id: 'a1:admin:entry:verify',
+    title: 'A1 / WP1c：可运营入口门（凭证初始化 · 真 CLI · 端到端登录 · 换口令）',
+    argv: tsx('scripts/a1-admin-entry-verify.ts'),
+    entry: 'scripts/a1-admin-entry-verify.ts',
+    tags: ['post-lv2', 'a1'],
+    resources: { parallel: 'serial' as const },
+    why:
+      '**真 CLI 子进程 + 真 server**（`scripts/a1-admin.ts` 的 `init`；`createAdminAuthServer`）：' +
+      '只写 `%TEMP%` 临时目录、只连 loopback、**零数据库 / 零核心依赖**。' +
+      '正控（`init --password-file` 退出码 0 · 文件里**无明文** · CLI 输出无明文无哈希 · 读回哈希能验正确口令 · ' +
+      '端到端登录 200 且拿到 HttpOnly cookie）+ ' +
+      '负控（目录在仓库树内 · 已存在无 force · 口令过短/为空 · 非 TTY 且无口令文件 · `serve` 无凭证 · ' +
+      '坏 JSON 凭证 **逐条具名判红**）+ 恢复（`--force` ⇒ 旧口令失效、新口令可用、旧文件备份成 `.bak`）。' +
+      '⚠️ 只覆盖"初始化 + 起服务 + 登录"这条链；业务面（WP2 起）与生产激活（独立授权）不在内。',
+  },
+  {
+    id: 'a1:query:verify',
+    title: 'A1 / WP2：只读面契约与边界（冻结清单 · 依赖边界 · 认证前置 · 形状收口）',
+    argv: tsx('scripts/a1-query-surface-verify.ts'),
+    entry: 'scripts/a1-query-surface-verify.ts',
+    tags: ['post-lv2', 'a1'],
+    resources: { parallel: 'serial' as const },
+    why:
+      '**真 server + 桩端口**（`createAdminAuthServer({ports})`）：只连 loopback、**零数据库 / 零核心依赖**（这正是被守的性质）。' +
+      '静态判据：清单闭集（恰好五个面 · 路径唯一 · 字段不重复 · 只有 `effective_config` 允许密钥）· TS 清单与 `evals/a1/read-surfaces.json` **双向一致** · ' +
+      '**依赖边界**（`src/infrastructure/admin/**` 不 import 数据库/drizzle/elizaos/持久层 ⇒ "不新建第二套真相"可判）· 只读路由先判会话。' +
+      '运行时：未登录 401（无匿名可读）· 已登录 200 且形状是冻结那套 · 闭集外字段被丢掉 · 未接线 501 具名（不用空数组冒充）· ' +
+      '端口抛错 500 具名且**不回吐异常** · 未知面 404（未登录也 404，不泄露面清单）+ 恢复。' +
+      '⚠️ 只覆盖**契约与边界**：真端口实现与页面是 WP2 后续切片；**不**主张页面可用，也**不**构成多用户隔离主张。',
+  },
+  {
+    id: 'a1:effective-config:verify',
+    title: 'A1 / WP2：`effective_config` 真端口（只读汇总 + 密钥遮蔽 · 缺口 B8）',
+    argv: tsx('scripts/a1-effective-config-verify.ts'),
+    entry: 'scripts/a1-effective-config-verify.ts',
+    tags: ['post-lv2', 'a1'],
+    resources: { parallel: 'serial' as const },
+    why:
+      '**纯函数 + 真 server**（`src/infrastructure/admin-ports/effective-config.ts`）：`.env` 文本与 `process.env` **由门注入** ' +
+      '⇒ **不碰真实 `.env`**；只连 loopback、零数据库 / 零核心依赖。' +
+      '正控（解析合法键 · 引号剥离 · source 优先级 env>file>default · 普通值不遮 · 端到端 501→200）+ ' +
+      '负控（注释/坏行忽略 · 密钥键遮 · **无辜键名 + 密钥形状值也遮** · `.env` 口令遮 · **整份读数与 HTTP 响应里无明文** · ' +
+      '空值不产生行 **逐条判红**）+ 恢复（无辜键 + 普通值不遮 ⇒ 判据是活的，不是恒遮）。' +
+      '⚠️ 只覆盖配置面：其余四个面仍未接线、页面未做；生产激活需独立授权。',
+  },
+  {
+    id: 'a1:serve:verify',
+    title: 'A1 / WP2：装配根真命令端到端（`a1:admin:serve` ⇒ 登录 ⇒ 真读数 ⇒ 未接面如实 501）',
+    argv: tsx('scripts/a1-serve-verify.ts'),
+    entry: 'scripts/a1-serve-verify.ts',
+    tags: ['post-lv2', 'a1'],
+    resources: { parallel: 'serial' as const },
+    why:
+      '**真子进程 + 真 HTTP**（`scripts/a1-admin.ts serve`）：临时凭证目录、只 loopback、**零数据库 / 零核心依赖**。' +
+      '它守的是**装配根**（上一轮的真缺口：端口存在但 `serve` 没注入 ⇒ 真服务里仍是 501）。' +
+      '正控（`init` 退出码 0 · 起服务并打印 loopback URL · 启动横幅如实分列已接/未接面 · 登录 200 · ' +
+      '`/api/effective-config` **200 且行数 > 0** · 行形状是冻结闭集 · 至少一行 `source=env` · 停机后子进程退出）+ ' +
+      '负控（被遮行值恒为 `******` · 真响应无密钥形状明文 · **未接面如实 501** · 未登录 401）。' +
+      '⚠️ 只覆盖"装配根接上一个面"：其余四个面与页面未做；生产激活需独立授权。',
+  },
+  {
+    id: 'a1:safety-quota:verify',
+    title: 'A1 / WP2：`safety_quota` 真端口（配置侧真读 · 账本侧**如实 unavailable**）',
+    argv: tsx('scripts/a1-safety-quota-verify.ts'),
+    entry: 'scripts/a1-safety-quota-verify.ts',
+    tags: ['post-lv2', 'a1'],
+    resources: { parallel: 'serial' as const },
+    why:
+      '**纯函数 + 真 server**（`src/infrastructure/admin-ports/safety-quota.ts`）：账本 reader 是**注入的桩** ⇒ 零数据库；只连 loopback。' +
+      '正控（风险上限闭集三档原样 · 额度上限数字原样/缺省 0 · 配置侧读数是真的 · 接了账本 ⇒ 用量与最近拒绝是真数）+ ' +
+      '负控（**没接账本 ⇒ `null` + `unavailable` 具名，不用 0 冒充** · 账本抛错 ⇒ 同样 unavailable 且不带异常细节 · ' +
+      '风险上限/额度上限非法值 ⇒ 如实标 `invalid`（不猜不吞）· 最近拒绝条数有界 **逐条判红**）+ 恢复。' +
+      '⚠️ 生产里账本侧**尚未接线** ⇒ 真服务里那两个字段会如实进 `unavailable`；页面与其余面未做。',
+  },
+  {
+    id: 'a1:jobs:verify',
+    title: 'A1 / WP2：`jobs` 真端口（cursor 分页 · 缺口 B9 · 客户端错误 400 而非 500）',
+    argv: tsx('scripts/a1-jobs-verify.ts'),
+    entry: 'scripts/a1-jobs-verify.ts',
+    tags: ['post-lv2', 'a1'],
+    resources: { parallel: 'serial' as const },
+    why:
+      '**纯函数 + 真 server**（`src/infrastructure/admin-ports/jobs.ts`）：reader 是**注入的桩** ⇒ 零数据库；只连 loopback。' +
+      '正控（两页能翻且不重叠 · 缺省 20 · 字段闭集 · 失败任务的 `failureReason` 是原因码 · 没有下一页就**没有** `nextCursor`）+ ' +
+      '负控（`limit=99999` 夹到 50 · 坏游标 ⇒ 端口抛 `bad_cursor` 且服务端回 **400 而不是 500** · ' +
+      '没接 reader ⇒ 空数组 + `unavailable: [jobs]`（不冒充"没有任务"）· reader 抛错 ⇒ 向上抛由服务端映射 500 **逐条判红**）+ 恢复。' +
+      '⚠️ reader 是桩：生产里任务来源尚未接线（持久化 jobId 属 WP4）⇒ 真服务里该面如实 `unavailable`。',
+  },
+  {
+    id: 'a1:goals-commitments:verify',
+    title: 'A1 / WP2：`goals_commitments` 真端口（四个计数 · 不知道就给 null 而不是 0）',
+    argv: tsx('scripts/a1-goals-commitments-verify.ts'),
+    entry: 'scripts/a1-goals-commitments-verify.ts',
+    tags: ['post-lv2', 'a1'],
+    resources: { parallel: 'serial' as const },
+    why:
+      '**纯函数 + 真 server**（`src/infrastructure/admin-ports/goals-commitments.ts`）：reader 是**注入的桩** ⇒ 零数据库；只连 loopback。' +
+      '正控（接了 reader ⇒ 四个计数是真数，**0 也是真数** · 行形状是冻结闭集 · 端到端 200）+ ' +
+      '负控（没接 reader ⇒ 四个字段全 `null` **且四个名字逐个进 `unavailable`** · reader 抛错 ⇒ 同形且不带异常细节 · ' +
+      '计数非法（负数/小数/字符串/NaN）⇒ **只把坏的那些**列进 `unavailable` · 未登录 401 **逐条判红**）+ 恢复。' +
+      '⚠️ 生产 reader（复用既有投影）尚未接线 ⇒ 真服务里该面如实 `unavailable`；页面未做。',
+  },
+  {
+    id: 'a1:page:verify',
+    title: 'A1 / WP2：首版管理页（空壳 · 不含数据/密钥 · 只调冻结清单路径）',
+    argv: tsx('scripts/a1-page-verify.ts'),
+    entry: 'scripts/a1-page-verify.ts',
+    tags: ['post-lv2', 'a1'],
+    resources: { parallel: 'serial' as const },
+    why:
+      '**纯函数 + 真 server**（`src/infrastructure/admin/page.ts`）：零数据库 / 零核心依赖；只连 loopback。' +
+      '正控（渲染是纯函数逐字相同 · 完整 HTML 文档 · 脚本调用路径恰好是冻结清单那五个 · `unavailable` 渲染成「不可用」' +
+      '· `GET /` 200 且 text/html 且 no-store · `/index.html` 与 `/` 逐字相同 · 带会话读数据面 200）+ ' +
+      '负控（页面**不含**任何配置值/密钥 · 不含写接口 · HTML 转义判据是活的 · **页面本身不需要会话**（空壳）· ' +
+      '未登录读数据面 401 · 页面不含那一面**有区分度**的读数值 **逐条判红**）。' +
+      '⚠️ **渲染是否正确本门不证**（首版没有真浏览器量具）⇒ 需人看一眼，**不算已验收**。',
+  },
+  {
+    id: 'a1:cognition:verify',
+    title: 'A1 / WP2：`cognition` 真端口（五个面至此全部接线 · 缺格逐个具名）',
+    argv: tsx('scripts/a1-cognition-verify.ts'),
+    entry: 'scripts/a1-cognition-verify.ts',
+    tags: ['post-lv2', 'a1'],
+    resources: { parallel: 'serial' as const },
+    why:
+      '**纯函数 + 真 server**（`src/infrastructure/admin-ports/cognition.ts`）：reader 是**注入的桩** ⇒ 零数据库；' +
+      '**不重算认知**（只呈现既有投影，`D01`）；只连 loopback。' +
+      '正控（接了 reader ⇒ 五格真读数 · 行形状是冻结闭集 · 端到端 200）+ ' +
+      '负控（没接 reader ⇒ 五格全 `null` **且五个名字逐个进 `unavailable`** · reader 抛错 ⇒ 同形且不带异常细节 · ' +
+      '部分缺格 ⇒ **只把缺的那些**列进 `unavailable` · **空串身份不当身份报出去** · 未登录 401 **逐条判红**）+ 恢复。' +
+      '⚠️ 生产认知 reader（复用既有投影）尚未接线 ⇒ 真服务里该面如实 `unavailable`；页面人审未做。',
+  },
+  {
+    id: 'a1:gates:verify',
+    title: 'A1 / WP6 最小切片：A1 门表自洽（登记/入口/反向覆盖/measured_count 声明）',
+    argv: tsx('scripts/a1-gates-verify.ts'),
+    entry: 'scripts/a1-gates-verify.ts',
+    tags: ['post-lv2', 'a1'],
+    resources: { parallel: 'safe' as const },
+    why:
+      '**纯进程内**：只读 `package.json` 与 `ALL_GATES` + 各门入口文件；零数据库 / 零模型 / 零出网 / 不占端口 / 不写证据。' +
+      '正控（A1 门表非空 · 每道门 `why` 够具体 · `entry` 文件真的存在 · 有同名脚本 · 脚本指向**同一个**入口 · ' +
+      '**反向**覆盖：`package.json` 里的 `a1:*:verify` 全部登记在 manifest · 每道门都声明了 `measured_count`）+ ' +
+      '负控（判据是活的：能认出指向不存在的入口）。' +
+      '⚠️ 它只证"**门表自洽**"：**不跑**那些门、**不主张**它们通过（那是各门自己的读数与 `gates:run`）。',
+  },
+  {
+    id: 'a1:goals-reader:verify',
+    title: 'A1 / WP2：`goals_commitments` 真 reader（计数映射穷举 · 只读边界 · null≠0）',
+    argv: tsx('scripts/a1-goals-reader-verify.ts'),
+    entry: 'scripts/a1-goals-reader-verify.ts',
+    tags: ['post-lv2', 'a1'],
+    resources: { parallel: 'safe' as const },
+    why:
+      '**纯函数 + 结构判据**（`src/infrastructure/admin-readers/goals-commitments.ts`）：**零数据库** / 零模型 / 零出网 / 不占端口 / 不写证据。' +
+      '正控（计数映射**穷举**：6 个目标状态 × 7 种承诺情形，逐组合断言进哪一格 · 空集四个都是真 0 · 装上 reader ⇒ 真数无 `unavailable`）+ ' +
+      '负控（无承诺的行**不动**两个承诺计数（`null` ≠ "已结清 0"）· `expired`/`broken` 不合并 · 代码里不出现写侧三函数 · 不 import 折叠模块 · ' +
+      'reader 不在 `admin-ports/**` · 不装 reader ⇒ 四个 `null` + 具名 **逐条判红**）+ 恢复（两条路径可分）。' +
+      '⚠️ 判据**先剥注释再找**（本仓库同型踩坑第四次：第一版被我自己注释里的函数名判红）。' +
+      '⚠️ 本门**不碰数据库**：真库读数要等装配根注入真 `db` ⇒ 今天真服务里该面仍是如实 `unavailable`。',
+  },
+  {
+    id: 'a1:safety-quota-reader:verify',
+    title: 'A1 / WP2：`safety_quota` reader 映射半（拒绝态映射 · message 永不出现 · 时间戳归一）',
+    argv: tsx('scripts/a1-safety-quota-reader-verify.ts'),
+    entry: 'scripts/a1-safety-quota-reader-verify.ts',
+    tags: ['post-lv2', 'a1'],
+    resources: { parallel: 'safe' as const },
+    why:
+      '**纯函数 + 结构判据**（`src/infrastructure/admin-readers/safety-quota.ts`）：零数据库 / 零模型 / 零出网 / 不写证据。' +
+      '正控（拒绝态 ⇒ `reason = failure.code` · 数字 `Timestamp` **归一成 ISO 串** · `at` 取 `finishedAt ?? requestedAt`）+ ' +
+      '负控（**`message` 永不出现**（哪怕带目标与令牌）· 输出**只有** `reason`/`at` 两个键 · 非拒绝态不混进来 · ' +
+      '缺/空白 `code` ⇒ 回落 `status`（不编造）· limit 在映射层**再夹一次**（25 条输入才看得出上限）· ' +
+      '**代码**里不出现 `append*`/`countQuotaUsage`/`.message` **逐条判红**）+ 恢复。' +
+      '⚠️ 判据**先剥注释再找**（同型坑第五次）。' +
+      '⚠️ `used()`（日额度，按策略时区）那一半**尚未落地** ⇒ 真服务里该面仍是如实 `unavailable`。',
+  },
+  {
+    id: 'a1:cognition-reader:verify',
+    title: 'A1 / WP2：`cognition` reader 选择半（三类投影选择 · `belief:origin` 必须排除 · 不重算）',
+    argv: tsx('scripts/a1-cognition-reader-verify.ts'),
+    entry: 'scripts/a1-cognition-reader-verify.ts',
+    tags: ['post-lv2', 'a1'],
+    resources: { parallel: 'safe' as const },
+    why:
+      '**纯函数 + 结构判据**（`src/infrastructure/admin-readers/cognition.ts`）：零数据库 / 零模型 / 零出网 / 不写证据。' +
+      '正控（`affect` 精确命中单行投影 · `relationships`/`beliefs` 前缀命中 · 水位按键排序只留安全整数 · 五格原样呈现）+ ' +
+      '负控（⚠️ **`belief:origin` 必须排除**（朴素前缀过滤会多报一条）· `affect` **不许**用前缀命中 · 缺行 ⇒ `null`/空数组不编造 · ' +
+      '空 characterId ⇒ `null` · 非整数 revision 丢弃 · **代码**里不 import 折叠/认知引擎与写侧入口 **逐条判红**）+ 恢复。' +
+      '⚠️ 本门**不碰数据库**：真 `db` 注入（`listProjections`/`projectionRevisions`/`getProjection`）是下一步。',
+  },
+  {
+    id: 'a1:audit:verify',
+    title: 'A1 / WP3：控制面审计（身份来源可分 · 落库失败失败关闭 · payload 无正文/密钥）',
+    argv: tsx('scripts/a1-audit-verify.ts'),
+    entry: 'scripts/a1-audit-verify.ts',
+    tags: ['post-lv2', 'a1'],
+    resources: { parallel: 'safe' as const },
+    why:
+      '**桩 db + 纯结构判据**（`src/infrastructure/dev/control-audit.ts`）：零数据库 / 零模型 / 零出网 / 不写证据。' +
+      '正控（有身份 ⇒ `initiatorSource=developer-identity-evidence` · 无身份 ⇒ `unknown-runtime-unresolved` · 两者**必须不同** · ' +
+      '`actor`/`authority` 常量未被带偏）+ ' +
+      '负控（**落库失败失败关闭**：桩 db 抛错 ⇒ `record()` **必须抛** · 白名单外命令类型 ⇒ 必须抛 · ' +
+      '`payload` 里无正文/密钥字段 **逐条判红**）+ 结构（白名单判据与 canonical 必要性判据都在场）。' +
+      '⚠️ 用桩 db：本门**不**主张审计真的落库成功（那要 live 门 + 真库）。' +
+      '⚠️ 实测确认：`SERVICE`/`admin-console` 的信封**通过** `assertAttributionNecessity({family:\'developer_control\'})`（用户 2026-10-14 裁定的种类可用）。',
+  },
+  {
+    id: 'a1:jobs-store:verify',
+    title: 'A1 / WP4：`admin_jobs` 仓储（隔离库三段式：replay / conflict / 终态不可改 / 不自动重跑）',
+    argv: tsx('scripts/a1-jobs-store-verify.ts'),
+    entry: 'scripts/a1-jobs-store-verify.ts',
+    tags: ['post-lv2', 'a1'],
+    resources: { parallel: 'serial' as const },
+    why:
+      '**一次性隔离库**（`isolateDatabase` 的 PGlite 目录沙箱；**从不**打开真实库）。' +
+      '正控（首次登记 ⇒ `create` · 落库后 `pending` · 同键同参数 ⇒ **`replay` 且返回原任务** · 按 `jobId` 读回 · ' +
+      '推进到 `succeeded` 带 `resultRef`）+ ' +
+      '负控（同键**不同参数** ⇒ `conflict` 不返回新任务 · **终态不可再改**：`succeeded` 之后推进原样返回）+ ' +
+      '恢复（`running` ⇒ `interrupted` 待核验 · 再跑一次改 **0** 条 ⇒ **不自动重跑**）。' +
+      '⚠️ **跑法**：本门用目录沙箱 ⇒ 必须在**没有 `.env` 的 cwd** 下驱动，并钉死后端' +
+      "（`CHARACTER_DB_BACKEND=pglite` + 清空 `POSTGRES_URL`/`DATABASE_URL`/`PGLITE_DATA_DIR`/`PROJECT_LG_SANDBOX`/`LG_PG_EXPECT_DATABASE`）；" +
+      '从仓库 cwd 跑 ⇒ `.env` 的 `POSTGRES_URL` 漏进来 ⇒ 具名拒绝（`检测到 PostgreSQL 连接串，但…没有显式选 postgres`）；' +
+      '后端不是 `pglite` 时本门**具名 NOT RUN（exit 2）**。',
+  },
+  {
+    id: 'a1:core-stop:verify',
+    title: 'A1 / G6：核心停机窗口（离线可读的面逐个 200 · 写操作如实拒绝 · 管理面不依赖核心）',
+    argv: tsx('scripts/a1-core-stop-verify.ts'),
+    entry: 'scripts/a1-core-stop-verify.ts',
+    tags: ['post-lv2', 'a1'],
+    resources: { parallel: 'safe' as const },
+    why:
+      '**契约 §5/§7 里那个至今空着的退出门**（`A1-G6`）。全部离线；**从不**碰真实库（不连库，只连端口）。' +
+      '正控（**核心没在跑**这一默认状态下：五个离线可读面逐个 **200**（不是 501/503）· 页面 200 · ' +
+      '未登录读数据面 401（鉴权与离线是两回事））+ ' +
+      '负控（**写操作如实拒绝**：POST/PUT/DELETE/PATCH 对数据面逐个**非 2xx** · ' +
+      '声明的写面集合**为空** ⇒ "拒绝"是结构事实不是口头承诺）+ ' +
+      '结构（管理面**不 import 核心/运行时** ⇒ "核心起来之后读数依然可读"是结构事实，不是猜测）。' +
+      '⚠️ **不主张**的部分如实标 NOT RUN：真实 PG 上"核心停 → 起 → 再读"端到端（需真核心与真库）· ' +
+      '`presence=online` 读数（PGlite 回答不了资格锁问题）。',
+  },
+  {
+    id: 'a1:jobs-admit:verify',
+    title: 'A1 / WP4：受控写面 `jobs.admit`（幂等 create/replay/conflict · 审计失败关闭 · 三闸负控）',
+    argv: tsx('scripts/a1-jobs-admit-verify.ts'),
+    entry: 'scripts/a1-jobs-admit-verify.ts',
+    tags: ['post-lv2', 'a1'],
+    resources: { parallel: 'safe' as const },
+    why:
+      '**桩**判据（audit / admit 都是桩）：**零数据库**。用户 2026-10-14 裁定的**唯一**写面。' +
+      '正控（首次登记 ⇒ **201 `created`** 且 `state=pending` ⇒ **受理 ≠ 执行成功** · ' +
+      '同键同参数（**键序不同**）⇒ 200 `replayed` 且**同一个 jobId** · 审计被调用且 operator=已认证身份）+ ' +
+      '负控（**未登录 401** · 跨站 Origin 403 · 无 CSRF 403 · 缺幂等键 400（**不**替调用方编）· ' +
+      '同键**不同参数** ⇒ **409 `idempotency_conflict`** · ⚠️ **审计写不进 ⇒ 抛 `audit_unavailable` 且 `admit` 一次都没被调用**（失败关闭，本门最要紧的一条））+ ' +
+      '恢复（审计恢复后登记成功，此前那次失败**没有**留下任务）。' +
+      '⚠️ 桩**直接用真 `parameterFingerprint`**（第一版用 `JSON.stringify` 比 ⇒ 键序不同被误判冲突 ⇒ 红的是桩）。',
+  },
+  {
+    id: 's1:rejection-suite:verify',
+    title: 'S1 拒绝套件完整性（形状冻结 · 与 S0 契约双向对账 · 负控可判红）',
+    argv: tsx('scripts/s1-rejection-suite-verify.ts'),
+    entry: 'scripts/s1-rejection-suite-verify.ts',
+    tags: ['post-lv2', 's1'],
+    resources: { parallel: 'safe' as const },
+    why:
+      '**纯进程内**：只读 `evals/s1/*.json` 与 `docs/post-lv2/Rejection-Safety-Contract.md`；' +
+      '零数据库 / 零模型 / 零出网 / 不占端口 / 不写证据 / 不改工作树。' +
+      '正控（19 条拒绝用例 + 6 条正控 · 7 类 8 面全覆盖 · 冻结哈希一致）+ ' +
+      '负控（删一类 / 重复 id / 未知字段 / 自造用例 / 摘必选 / 漏用例 / 覆盖缺口 / 改写零失败口径 / 哈希漂移 **逐条必须判红**）+ 恢复。' +
+      '⚠️ 它只冻结**套件形状**：**不**执行任何用例、**不**主张拒绝能力已通过（那是 S1 执行门 E-1…E-4）。',
+  },
+  {
+    id: 's1:rejection-evidence:verify',
+    title: 'S1 证据面归属（每个拒绝用例由 E-1…E-4 的哪个面给读数 · 指名门必须存在）',
+    argv: tsx('scripts/s1-rejection-evidence-verify.ts'),
+    entry: 'scripts/s1-rejection-evidence-verify.ts',
+    tags: ['post-lv2', 's1'],
+    resources: { parallel: 'safe' as const },
+    why:
+      '**纯进程内**：只读 `evals/s1/rejection-suite.json`、`evals/s1/rejection-evidence-plan.json` 与 `ALL_GATES`；' +
+      '零数据库 / 零模型 / 零出网 / 不占端口 / 不写证据 / 不改工作树。' +
+      '正控（19 条归属与套件一一对应 · 四个证据面都有用例依赖 · e1Complete 只允许 T-RJ1-04 · 指名门真实存在）+ ' +
+      '负控（漏覆盖 / 自造用例 / 空证据面 / 声称 E-1 不指名门 / 指不存在的门 / 谎报 e1Complete / 重复条目 / 面写错 **逐条判红**）+ 恢复。' +
+      '⚠️ 它只回答"**谁负责给读数**"：不执行用例、不主张任何面已有读数。',
+  },
+  {
+    id: 's1:e1:verify',
+    title: 'S1 / E-1：冻结拒绝套件的离线程序面读数（逐用例 · 三段式 · 无挂钩具名）',
+    argv: tsx('scripts/s1-e1-program-cases.ts'),
+    entry: 'scripts/s1-e1-program-cases.ts',
+    tags: ['post-lv2', 's1'],
+    resources: { parallel: 'serial' as const, evidenceWrites: ['artifacts/s1'] },
+    why:
+      '**纯进程内**（只调 `src/kernel/contracts/scope.ts` 的纯判定函数）：零数据库 / 零模型 / 零出网 / 不占端口；证据只写 `artifacts/s1/`。' +
+      '读冻结套件前先按 `rejection-suite.freeze.json` 的 sha256 **逐字节**核对，核不上 ⇒ 具名 `suite_freeze_mismatch` 且 EXIT 2（不出读数）。' +
+      '正控（15 条 E-1 用例逐条三段式：该拒的真的拒 · 量具是活的（该过的能过 / 连原主人也不能的更强形状）· 补上条件即翻转）+ ' +
+      '负控（漏覆盖 / 自造用例 / 未登记操作 / 伪造身份来源 / 缺 target 的涉他操作 / character_internal 回人 / 缺标签提升为公共 **逐条判红**）+ 恢复。' +
+      '⚠️ **只**回答"离线程序面今天成立不成立"：回复面（E-3）与副作用面（E-2）的实测**不在**本门，' +
+      '`notRun` 里的三条用例是**具名**的（额度未实现 / 无干净挂钩），且**不**主张 S1 零失败发布门通过。',
+  },
+  {
+    id: 's1:isolation-stub:verify',
+    title: 'S1 隔离桩（E-2 第一切片：真实权限链 + 一次性沙箱目标 · 权限/逃逸/风险/干跑）',
+    argv: tsx('scripts/s1-isolation-stub-verify.ts'),
+    entry: 'scripts/s1-isolation-stub-verify.ts',
+    tags: ['post-lv2', 's1'],
+    resources: { parallel: 'serial' as const, evidenceWrites: ['artifacts/post-lv2'] },
+    why:
+      '**真实装配的隔离桩**（`scripts/action-harness.ts`：隔离库 + 能力登记表 + Policy + Gateway + 账本 + **一次性 %TEMP% 沙箱目录**）；' +
+      '零模型 / 零出网。正控（沙箱在 %TEMP% 且库全新 · 路径逃逸被拒且无逃逸文件 · 干跑无副作用 · 恢复后再次成功）+ ' +
+      '负控①未授予写权限 ⇒ 真的被拒（`missing_permission`）且无文件、账本无成功行 + ' +
+      '负控②授予后**真的**写出来（证明量具是活的）+ ' +
+      '负控③同一 R2 能力在 `maxRiskLevel=R3` 下**真的执行**（证明 R1 下的拒绝是风险闸做的）。' +
+      '⚠️ 策略结论读自 `result.error.details.decision`（探针校准；`error.code` 是映射后的失败码）。' +
+      '⚠️ 只覆盖**文件类**；shell/桌面、凭证外传、数据库修改、越权 QQ 发送、后台任务授权复查**未覆盖**（见证据 notCoveredClasses）。' +
+      '⚠️ `.env` 为 postgres 后端时本门**具名 NOT RUN**。',
+  },
+  /*
+   * ⚠️ **2026-10-05 追加 1 道**（`L-S8-30` 入口侧 / `ADR-107` `R-2a′`）：
+   * 上面那 10 道的分列读数（**8 PASS · 2 FAIL**，2026-10-04）是**当时的**读数，不回写；
+   * 本道是显式开局入口 `story:start` 的专属门，**独立成条**（自带 `why`）。
+   */
+  {
     id: 'postlv2:s8:start:verify',
     title:
       'S8 显式开局入口（`L-S8-30` 入口侧：正控 / 幂等 / 单活跃 run 负控 / 形状负控 / 终局后恢复）',

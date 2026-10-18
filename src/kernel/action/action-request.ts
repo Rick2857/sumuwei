@@ -143,6 +143,27 @@ export interface ActionEffect {
      * ⚠️ 指纹用的是**正文指纹**（`notificationTextFingerprint`），正文本身**永不进账本**（`D09`）。
      */
     | 'message_sent'
+    /**
+     * A1 / WP4：**登记了一个后台任务**（管理控制台 `admin.jobs.admit` / `register`）。
+     *
+     * ⚠️ 逐字读法：它说的是"**已登记**"，**不**是"已执行"。今天**没有执行器**去跑它
+     *    ⇒ 状态停在 `pending`；界面文案是「已提交（尚未执行）」（`jobStateLabel('pending')`）。
+     *    把"已登记"说成"已完成"就是本仓库最忌讳的那种表述漂移。
+     * ⚠️ `fingerprint` 用的是 **jobId**；**参数取值永不进账本**（与 `D09` 同一条纪律）。
+     * ⚠️ 先例：`message_sent` 当初就是为 QQ 投递**新增**的 —— 这个闭集是**按需扩**的，
+     *    不是"只能来自最初那批用例"。
+     */
+    | 'job_registered'
+    /**
+     * ADR-146：**委派给 PC 执行端执行**。
+     *
+     * ⚠️ 逐字读法：它说的是"**已把请求交出去**"，**不**是"PC 那边做完了"。
+     *    执行结局（`completed` / `rejected` / `failed_confirmed` / `unknown`）
+     *    由 `ACTION_RESULT` 回执持有，**不回写**这条 —— 与 `message_sent` 同一条纪律：
+     *    账本是"她做过什么"的账，不是远端状态表。
+     * ⚠️ 按上面 `message_sent` 的先例**新增**（"这个闭集按需扩"），不是替换既有值。
+     */
+    | 'action_delegated'
   /** 人类可读说明 */
   detail?: string
   /** 机器可比对的指纹（如文件内容的 sha256 前缀）—— "外部状态真的变了吗"的判据 */

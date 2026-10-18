@@ -11,7 +11,7 @@
  * 安全判断**不在本文件**：全部在 `src/kernel/action/restricted-math.ts`
  * （AST 类型白名单 + 函数名白名单 + 节点数/深度/整数幂指数上限 + 有限性/结果长度）。
  * 本文件只负责三件工程事实：
- *   ① 把算式放进一个**能杀掉**的子进程，2 秒不返回就终结它（且记 `timeout`，**不是** success）
+ *   ① 把算式放进一个**能杀掉**的子进程：启动最多 10 秒，就绪后求解最多 2 秒
  *   ② 把结果翻译成 `TurnContent`（`kind: 'calculation'`）—— 含算式、精确值、展示文本、
  *      有效数字位数、是否有限精度、节点数/深度
  *   ③ 失败时归一成 `ActionFailure`（**没有半截答案**：拒绝就是拒绝）
@@ -19,7 +19,8 @@
  * ⚠️ 结果**不写长期记忆**：`TurnContent` 是当轮内存载体（`action-result.ts` 的类型边界）。
  */
 
-import { spawn } from 'node:child_process'
+import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { killProcessTree } from './kill-process-tree.ts'
 import { createHash } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -51,6 +52,8 @@ const HERE = dirname(fileURLToPath(import.meta.url))
 const WORKER_ENTRY = join(HERE, 'math-calculate-worker.ts')
 
 export interface MathCalculateOptions {
+  /** 独立进程加载依赖的上限；与求解计时分开，缺省 10000ms。 */
+  startupTimeoutMs?: number
   /** 求解墙钟上限（缺省 2000ms，计划书 §3.1） */
   timeoutMs?: number
   /** 测试注入点：换成别的执行器实现（**不改变生产缺省**） */
@@ -60,13 +63,14 @@ export interface MathCalculateOptions {
 interface WorkerReading {
   outcome: RestrictedMathOutcome | null
   timedOut: boolean
+  phase: 'startup' | 'evaluate'
   exitCode: number | null
   ms: number
   stderr: string
 }
 
 /**
- * 默认执行器：Node 22 原生剥离类型 + 2 秒硬超时 + **杀掉进程树**。
+ * 默认执行器：启动有界；收到就绪后才传算式并开始 2 秒求解硬超时。
  *
  * ⚠️ Windows 上 `child.kill()` 只杀直接子进程，因此用 `taskkill /T /F`
  *    把整棵树带走。这不是洁癖：留下一个仍在算的孙进程等于"超时"这件事没有被真的执行。
@@ -74,13 +78,26 @@ interface WorkerReading {
 async function runWorkerProcess(input: {
   expression: string
   timeoutMs: number
+  startupTimeoutMs: number
 }): Promise<WorkerReading> {
   const startedAt = Date.now()
   const child = spawn(
     process.execPath,
     ['--experimental-strip-types', '--disable-warning=ExperimentalWarning', WORKER_ENTRY],
-    { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true }
-  )
+    {
+      stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
+      windowsHide: true,
+      /*
+       * ⚠️ 2026-10-16（服务器 Linux 适配）：非 win32 时**自建进程组**。
+       *   这样 `killProcessTree()` 才能用 `kill(-pid)` 带走整棵树 ——
+       *   与 Windows 上 `taskkill /T` 的意图逐条对得上。
+       *   ⚠️ **刻意只在非 win32 开**：Windows 上 `detached: true` 会让子进程
+       *   在父进程退出后**继续存活**并另开控制台 ⇒ 那是本机上的行为回归。
+       *   ⇒ Windows 路径逐字不变。
+       */
+      detached: process.platform !== 'win32',
+    }
+  ) as ChildProcessWithoutNullStreams
 
   let stdout = ''
   let stderr = ''
@@ -93,14 +110,22 @@ async function runWorkerProcess(input: {
     stderr += chunk
   })
 
-  child.stdin.write(`${JSON.stringify({ expression: input.expression })}\n`)
-  child.stdin.end()
-
   let timedOut = false
-  const timer = setTimeout(() => {
+  let phase: WorkerReading['phase'] = 'startup'
+  const expire = (): void => {
     timedOut = true
-    killTree(child.pid)
-  }, input.timeoutMs)
+    killTree(child)
+  }
+  let timer = setTimeout(expire, input.startupTimeoutMs)
+  child.stdin.on('error', () => { /* 超时终结后的 EPIPE 不得影响父进程。 */ })
+  child.on('message', (message) => {
+    if (timedOut || phase !== 'startup' || message === null || typeof message !== 'object' ||
+        (message as { type?: unknown }).type !== 'math_ready') return
+    clearTimeout(timer)
+    phase = 'evaluate'
+    timer = setTimeout(expire, input.timeoutMs)
+    child.stdin.end(`${JSON.stringify({ expression: input.expression })}\n`)
+  })
 
   const exitCode = await new Promise<number | null>((resolvePromise) => {
     child.on('close', (code) => resolvePromise(code))
@@ -117,16 +142,17 @@ async function runWorkerProcess(input: {
       outcome = null
     }
   }
-  return { outcome, timedOut, exitCode, ms: Date.now() - startedAt, stderr }
+  return { outcome, timedOut, phase, exitCode, ms: Date.now() - startedAt, stderr }
 }
 
-function killTree(pid: number | undefined): void {
-  if (pid === undefined) return
-  try {
-    spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true })
-  } catch {
-    /* 杀不掉也不能让父进程崩：真正的判据是"父进程不等它" */
-  }
+function killTree(child: ChildProcess | undefined): void {
+  /*
+   * ⚠️ 2026-10-16：本地那份 `spawn('taskkill')` 已**删除**，改用共享的跨平台助手。
+   *   原写法在 Linux 上不是"杀不掉"，而是会在一次工具超时后**打崩整个核心**
+   *   （`spawn` 找不到命令是**异步** `'error'`，原来的 `try/catch` 接不到）。
+   *   见 `kill-process-tree.ts` 的完整说明。
+   */
+  killProcessTree(child)
 }
 
 function sha256(text: string): string {
@@ -137,6 +163,7 @@ export function createMathCalculateAdapter(
   options: MathCalculateOptions = {}
 ): CapabilityAdapter {
   const timeoutMs = options.timeoutMs ?? RESTRICTED_MATH_LIMITS.timeoutMs
+  const startupTimeoutMs = options.startupTimeoutMs ?? 10_000
 
   return {
     capabilityId: MATH_CALCULATE,
@@ -151,12 +178,14 @@ export function createMathCalculateAdapter(
       const run =
         options.runWorker ??
         (async (request: { expression: string; timeoutMs: number }) => {
-          const reading = await runWorkerProcess(request)
+          const reading = await runWorkerProcess({ ...request, startupTimeoutMs })
           if (reading.timedOut) {
             throw new ActionFailureError(
               actionFailure(
                 'timeout',
-                `受限计算在 ${String(request.timeoutMs)}ms 内没有返回，执行器已被终结`
+                reading.phase === 'startup'
+                  ? `受限计算启动在 ${String(startupTimeoutMs)}ms 内未完成，执行器已被终结`
+                  : `受限计算在 ${String(request.timeoutMs)}ms 内没有返回，执行器已被终结`
               )
             )
           }

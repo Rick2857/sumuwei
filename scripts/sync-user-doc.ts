@@ -27,13 +27,12 @@
  */
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { homedir } from 'node:os'
 
 /** 权威源（项目内，进 git） */
 const SOURCE = resolve('docs/苏沐薇-使用说明.txt')
 /** 投影目标（桌面） */
 const TARGET = resolve(
-  process.env.USERPROFILE ?? homedir(),
+  process.env.USERPROFILE ?? 'C:/Users/user',
   'Desktop/苏沐薇-使用说明.txt'
 )
 

@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 
 export const PRODUCTION_CONTAINER = 'lg-postgresql-production'
-export const PRODUCTION_VOLUME = 'lg-omni-production-data'
+export const PRODUCTION_VOLUME = 'lg-postgresql-production-20261014'
 
 export function assertProductionPostgres(target: string): void {
   const url = new URL(target)

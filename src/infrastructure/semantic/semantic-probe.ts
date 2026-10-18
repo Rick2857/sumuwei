@@ -206,6 +206,9 @@ export function createSemanticProbe(options: SemanticProbeOptions): MemorySemant
       if (matching.length > 1) return failed('generation_mismatch')
       const serving = matching[0] as PublishedGeneration
 
+      // With no eligible candidates there can be no score; preserve index diagnostics without encoding a query.
+      if (input.memoryIds.length === 0) return failed('missing_score')
+
       /* ④ 编码查询句（用清单里的 `query:` 前缀 —— E5 的约定，写错会静默降质） */
       const encoded = await options.encoder.encode([`${options.manifest.queryPrefix}${input.text}`])
       if (!encoded.ok) return failed(semanticReasonOf(encoded.reason))

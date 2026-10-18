@@ -487,12 +487,42 @@ async function initDatabaseInner(
     )
   }
 
-  // 关键：先建表，再让 initialize() 去查表
-  await runtime.runPluginMigrations()
+  // -------------------------------------------------------------------------
+  // 启动 DDL 解耦（thinhost S1，2026-10-18）
+  // -------------------------------------------------------------------------
+  // 归因实测（本机 + Linux 服务器，full/thin 两档配对）：
+  //   `runPluginMigrations()` 是启动期**唯一**的大头 —— 服务器档 +234 MB / +9.1 s，
+  //   且它**与宿主无关**：换成薄宿主（去掉 bootstrap/openai）照样付这笔钱
+  //   （+255 MB / +8.9 s）。同时实测插件模块本身只占 ~5.7 MB。
+  //   ⇒ 真正的收益点是"启动不再跑 DDL"，不是"换掉 ElizaOS 宿主"。
+  //
+  // 策略（**默认行为逐字不变**）：先只读地列一次表。
+  //   · plugin-sql 需要的 6 张表**已全部存在** ⇒ 跳过 runPluginMigrations()。
+  //     风险：若某张表的**列**被外部改过，启动不再修正它。
+  //     代价是有界的 —— 那属于"schema 被外部改动"，由显式维护入口
+  //     （`pnpm migrate:apply` / `--migrate`）负责修，不是启动的职责。
+  //   · 任一张缺失 ⇒ 照旧跑 runPluginMigrations()（首次启动 / 老库升级路径不变）。
+  //
+  // ⚠️ 刻意**不**引入新环境开关：开关会让"默认走哪条路"变成配置事实，
+  //    而这里两条路的**可观察后果**完全不同（要不要 CREATE 权限），必须由
+  //    "表在不在"这个**可核对的事实**决定，而不是由某个人记得设了变量。
+  const tablesBefore = await listTables(adapter)
+  const requiredBefore = ['agents', 'memories', 'rooms', 'participants', 'entities', 'worlds']
+  const missingBefore = requiredBefore.filter((t) => !tablesBefore.includes(t))
+
+  if (missingBefore.length === 0) {
+    logger.info(
+      `[db] schema 已就绪（${tablesBefore.length} 张表，plugin 表齐全）→ 跳过启动 DDL` +
+        `（schema 变更请走显式维护入口）`
+    )
+  } else {
+    // 缺表：保留原有的建表路径，逐字不变。
+    await runtime.runPluginMigrations()
+  }
 
   const tables = await listTables(adapter)
   // 1.7.2 的消息存放在统一的 memories 表（按 type='message' 区分），没有单独的 messages 表
-  const required = ['agents', 'memories', 'rooms', 'participants', 'entities', 'worlds']
+  const required = requiredBefore
   const missing = required.filter((t) => !tables.includes(t))
   if (missing.length > 0) {
     throw new Error(
@@ -501,7 +531,7 @@ async function initDatabaseInner(
     )
   }
 
-  logger.info(`数据库就绪: ${adapterName}，已建 ${tables.length} 张表`)
+  logger.info(`数据库就绪: ${adapterName}，共 ${tables.length} 张表`)
 
   // -------------------------------------------------------------------------
   // Character Kernel schema（M2.5 + M3）

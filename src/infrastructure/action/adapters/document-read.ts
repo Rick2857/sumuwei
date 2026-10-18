@@ -20,7 +20,8 @@
  * ⚠️ 转换器**不保留**页码时**不生成虚构定位**：`facts` 里只说转换器**实际给出**的结构。
  */
 
-import { spawn } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
+import { killProcessTree } from './kill-process-tree.ts'
 import { createHash } from 'node:crypto'
 import { readFile, stat } from 'node:fs/promises'
 import { extname, dirname, join, resolve } from 'node:path'
@@ -45,8 +46,17 @@ const REPO_ROOT = resolve(HERE, '..', '..', '..', '..')
 
 /** 转换器入口（与本批的 Python 环境一起交付；见 `scripts/utility-skills/doc-runner.py`） */
 export const DEFAULT_DOC_RUNNER = join(REPO_ROOT, 'scripts', 'utility-skills', 'doc-runner.py')
-/** 专属 venv 的解释器（装配层可覆盖；缺省是准备期确定的那个路径） */
-export const DEFAULT_DOC_PYTHON = join(
+/**
+ * 专属 venv 的解释器（装配层可覆盖；缺省是准备期确定的那个路径）
+ *
+ * ⚠️ 2026-10-16（服务器 Linux 适配 · 复核 §4 补上）：
+ *   这一段原来是**写死的分段 `join(…,'Scripts','python.exe')`**。
+ *   ⚠️ 我第一轮的 S5 判据只找**单个字符串字面量**里的 `Scripts/python.exe`，
+ *      **看不见分段 join** ⇒ 那道门给了假绿。本条现在与 rapid-ocr / desktop / arxiv **同形**：
+ *      `PROJECT_LG_DOC_PYTHON` 优先，缺省值按平台挑形状。
+ *   不设环境变量时，Windows 上的路径与改动前**逐字相同**。
+ */
+export const DEFAULT_DOC_PYTHON = process.env.PROJECT_LG_DOC_PYTHON ?? join(
   REPO_ROOT,
   'artifacts',
   'post-lv2',
@@ -54,8 +64,7 @@ export const DEFAULT_DOC_PYTHON = join(
   'utility-skills-preparation',
   'python',
   'venv',
-  'Scripts',
-  'python.exe'
+  process.platform === 'win32' ? join('Scripts', 'python.exe') : join('bin', 'python')
 )
 
 export const DOCUMENT_LIMITS = {
@@ -254,6 +263,10 @@ async function runConverter(input: {
   const child = spawn(input.pythonPath, [input.runnerPath, '--ext', `.${input.format}`], {
     stdio: ['pipe', 'pipe', 'pipe'],
     windowsHide: true,
+    /* ⚠️ 2026-10-16（服务器 Linux 适配）：非 win32 时**自建进程组**，
+       好让 `killProcessTree()` 能用 `kill(-pid)` 带走整棵树。
+       刻意只在非 win32 开 —— Windows 上 `detached: true` 会改变子进程存活语义。 */
+    detached: process.platform !== 'win32',
   })
   let stdout = ''
   let stderr = ''
@@ -271,7 +284,7 @@ async function runConverter(input: {
   let timedOut = false
   const timer = setTimeout(() => {
     timedOut = true
-    killTree(child.pid)
+    killTree(child)
   }, input.timeoutMs)
 
   const exitCode = await new Promise<number | null>((resolvePromise) => {
@@ -319,13 +332,14 @@ async function runConverter(input: {
   }
 }
 
-function killTree(pid: number | undefined): void {
-  if (pid === undefined) return
-  try {
-    spawn('taskkill', ['/pid', String(pid), '/F', '/T'], { stdio: 'ignore', windowsHide: true })
-  } catch {
-    /* 见 math-calculate 的同名函数：真正的判据是父进程不等它 */
-  }
+function killTree(child: ChildProcess | undefined): void {
+  /*
+   * ⚠️ 2026-10-16：本地这份 `spawn('taskkill')` 已**删除**，改用共享的跨平台助手。
+   *   原写法在 Linux 上不是"杀不掉"，而是会在一次工具超时后**打崩整个核心**
+   *   （`spawn` 找不到命令是**异步** `'error'`，原来的 `try/catch` 接不到）。
+   *   见 `kill-process-tree.ts`。
+   */
+  killProcessTree(child)
 }
 
 function sha256(bytes: Buffer | string): string {

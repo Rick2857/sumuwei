@@ -1881,11 +1881,11 @@ const math06: GroupRunner = {
      *
      * 正确形状：**用真实执行器**，给它一个大到足以超过硬超时的算式。
      * 实测代价：`node --import tsx` spawn + mathjs import 约 1.2–1.4 s，
-     * 因此 `timeoutMs: 400` 会让第一跳（spawn）就超时 —— 而那正是生产会遇到的形态
-     * （冷启动 > 上限时如实记 `timeout`，而不是等它算完）。
+     * 启动与求解已分开计时；用 1ms 的求解预算验证真实终结，
+     * 不再依赖某台机器加载 mathjs 必须慢于 400ms。
      */
     const timedOut = await entry.bed.say({
-      options: mathOptions({ mathTimeoutMs: 400 }),
+      options: mathOptions({ mathTimeoutMs: 1 }),
       text: '帮我算一下 2^999 是多少',
       replyText: '我算出来了，等于 2。',
     })

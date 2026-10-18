@@ -35,3 +35,21 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Typecheck and offline regression
         run: pnpm ci:offline
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.3
+      - name: Install pinned pnpm
+        run: npm install --global pnpm@12.4.1
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Fresh isolated offline regression
+        run: pnpm ci:offline
+      - name: Linux process lifecycle and diagnostics
+        run: pnpm deploy:verify

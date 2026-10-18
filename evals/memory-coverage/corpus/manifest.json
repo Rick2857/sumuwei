@@ -1,13 +1,13 @@
 {
   "schemaVersion": "memory-coverage-corpus-manifest@1",
-  "corpusVersion": "memory-coverage-corpus@public-20261012",
+  "corpusVersion": "memory-coverage-corpus@1",
   "itemCount": 47,
   "corpusFile": "evals/memory-coverage/corpus/memory-coverage-corpus.jsonl",
-  "corpusSha256": "571af0cd15460afe6ef06f48b596efb4d0507b48f79b9c1ec6ea7430e0617446",
+  "corpusSha256": "8d67ae9c6ab3e29ad5dfba67c1dbc0e3817afc538968a8c592d2873cf9e244a1",
   "corpusBytes": 18079,
   "sha256Definition": "对**归一化后**的内容求 sha256（CRLF → LF）。理由见 `.gitattributes`：本机 `core.autocrlf = true`，不归一化会让「别人 clone 之后语料变成 CRLF」造成**误报**。内容真的变了仍然会 FAIL。",
-  "frozenAt": "2026-10-12",
-  "frozenBy": "Sanitized public distribution; prior approvals apply to the original corpus only.",
+  "frozenAt": "2026-09-30",
+  "frozenBy": "M9.5 启用计划 WP0 的后续（D-6 裁定的『记忆体量』线 = M9.7）· 用户 2026-09-30 依次授权 WP0、WP1 增量 1、WP1 增量 2",
   "gate": "memory-coverage:verify",
   "provenanceKinds": {
     "registry-example:<key>": "该槽位 `examples` 里的**逐字**句子，前面补一个意图关键词。⚠️ 登记表的 examples 是**内容短语**（不带『记住』）⇒ 照原样**走不到**显式路径；补关键词是本门的统一约定。",
@@ -57,13 +57,6 @@
       "boundary": "⚠️ **其中一条是有意的覆盖损失**：`mc-registry-0006`（「我不是计算机专业的」）原先记下的是**虚词取值**「的」，现在如实回 `content_unresolved`。依据任务书 §19「Coverage 不完美可以接受，False Success 不可接受」：一条会被召回、会被展示给模型的错记忆，比「她如实说没抓住」更坏。根因（**登记不修**）：线索表**表达不了 qualifier / 否定**。另一条（`mc-probe-0001`）是**收益**：疑问词取值被挡住 ⇒ 那条问句假阳**不再落库**（`L-M97-02` 收窄，**未关闭**）。",
       "accounting": "⚠️ **更正一处我自己写错的账**（2026-09-30 核对 git 历史）：rev 4 的 `registrySweep` 声明 `reachable 17 / unreachable 4`，而按**当时的语料实际数**应为 **`reachable 18 / unreachable 3`**（18 = 17 个 `registry_example` + `mc-unresolved-0006` —— 它是 `person.hometown` 的逐字例子，但类名是 `person_slot`；3 = `mc-registry-0011/0016/0017`）。**两个字段各错 1，而合计 21 是对的** ⇒ 错的是**分列**，不是总数。rev 5 起按「**哪些语料覆盖了 declared example**」显式对账：reachable = 16（`registry_example`）+ 1（`mc-unresolved-0006`）= 17；unreachable = 4（`mc-registry-0006/0011/0016/0017`）；合计 21 = declaredExamples。",
       "evidence": "ADR-080 · `docs/memory-coverage/M9.7-Value-Boundary-Round1-Handoff.md`"
-    },
-    {
-      "rev": "public-20261012",
-      "oldSha256": "8d67ae9c6ab3e29ad5dfba67c1dbc0e3817afc538968a8c592d2873cf9e244a1",
-      "what": "Replace private nickname and education examples with fictional values for the public distribution. Expectations and substitutions are applied consistently.",
-      "why": "Public distribution sanitization; original private repository remains unchanged.",
-      "lineEndings": "Fingerprint measured over LF-normalized bytes, as required by sha256Definition."
     }
   ],
   "expectedByClass": {
@@ -89,12 +82,7 @@
     "declaredExamples": 21,
     "reachable": 17,
     "unreachable": 4,
-    "unreachableIds": [
-      "mc-registry-0006",
-      "mc-registry-0011",
-      "mc-registry-0016",
-      "mc-registry-0017"
-    ],
+    "unreachableIds": ["mc-registry-0006", "mc-registry-0011", "mc-registry-0016", "mc-registry-0017"],
     "accounting": "reachable = 16（`registry_example`）+ 1（`mc-unresolved-0006` —— 它是 `person.hometown` 的逐字例子，但类名是 `person_slot`）；unreachable = 4；合计 21 = declaredExamples。",
     "note": "⚠️ 这**不是**「登记表承诺过可抽」的违约：`memory-invariants.md` §16.10 逐字写着线索表的不完整是**被设计允许的**。这组读数的用途是**特征化 + 基线**：它是「扩线索表」这条方向的**待办清单**，也是改完之后**前后对照**的起点。⚠️ 分母 21 = 11 个原槽位的 17 个 examples + 2 个新槽位（`person.birthday` / `person.hometown`）的 4 个。⚠️ `mc-registry-0006` 是**取值边界线**（ADR-080）之后**从可达变成不可达**的那一条 —— **有意的覆盖损失**，见 `revisions[4].boundary`。",
     "stillUnreachable": [
@@ -138,6 +126,5 @@
       "what": "后台自动路径（`CHARACTER_MEMORY_BACKGROUND_ENABLED`）的任何说法",
       "why": "该路径 NOT-WIRED，且按 `C-3` 建议**明确排除**在本里程碑之外（归 TD-19）。⚠️ `mc-probe-0001` 那条假阳**今天够不到生产**，正因为这条路径没接线 —— 它一旦接线就会变成现实风险。"
     }
-  ],
-  "originalFrozenAt": "2026-09-30"
+  ]
 }

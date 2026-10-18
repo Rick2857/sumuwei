@@ -42,14 +42,14 @@ import { validateSearchQuery } from '../src/kernel/action/search-port.ts'
 import {
   buildTavilySearchRequest,
   createTavilySearchProvider,
-} from '../src/infrastructure/search/tavily-search-provider.ts'
+} from './fixtures/retired-tavily-search-provider.ts'
 import {
   TAVILY_ALLOWED_BODY_FIELDS,
   TAVILY_ALLOWED_HEADER_NAMES,
   TAVILY_API_KEY_ENV,
   loadTavilyConfig,
   type TavilyConfig,
-} from '../src/infrastructure/search/tavily-config.ts'
+} from './fixtures/retired-tavily-config.ts'
 import { createRecordingFetch } from '../src/infrastructure/search/recording-fetch.ts'
 
 const ROOT = resolve('.')
@@ -615,7 +615,7 @@ section('§3 结构性边界：记录器不记值 · 凭证只在头 · 上下�
 check(
   '★ provider 模块**不读**环境变量、不用 logger / console（凭证只有一个入口：`tavily-config.ts`）',
   (() => {
-    const source = readSource('src/infrastructure/search/tavily-search-provider.ts')
+    const source = readSource('scripts/fixtures/retired-tavily-search-provider.ts')
     const code = stripComments(source)
     return !code.includes('process.env') && !code.includes('console.') && !code.includes('logger')
   })(),

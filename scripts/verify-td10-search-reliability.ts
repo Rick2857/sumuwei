@@ -55,7 +55,7 @@ import {
   createTavilySearchProvider,
   failureForTavilyHttpStatus,
   parseTavilyResponse,
-} from '../src/infrastructure/search/tavily-search-provider.ts'
+} from './fixtures/retired-tavily-search-provider.ts'
 import {
   D20_RULING,
   TAVILY_ALLOWED_BODY_FIELDS,
@@ -65,7 +65,7 @@ import {
   TAVILY_TEST_API_KEY_ENV,
   loadTavilyConfig,
   type TavilyConfig,
-} from '../src/infrastructure/search/tavily-config.ts'
+} from './fixtures/retired-tavily-config.ts'
 import { createRecordingFetch } from '../src/infrastructure/search/recording-fetch.ts'
 
 const ROOT = resolve('.')

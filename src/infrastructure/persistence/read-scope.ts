@@ -50,13 +50,13 @@ export function scopeMemoryCandidate(candidate: MemoryCandidate): MemoryCandidat
   return { ...candidate, proposedId: asMemoryId(`${candidate.proposedId}:room-${suffix}`) }
 }
 export async function admittedUserIds(db: RawDb, ownerUserId: string): Promise<readonly string[]> {
-  const rows = await exec(db, sql`select distinct user_id from user_identity_mappings where transport = 'qq'`, 'read trusted cognition participants')
+  const rows = await exec(db, sql`select distinct user_id from user_identity_mappings where transport in ('qq', 'wechat')`, 'read trusted cognition participants')
   return [...new Set([ownerUserId, ...rows.map(row => String(row.user_id))])]
 }
 export async function ownerRequestedScope(db: RawDb, scope: ReadScope, text: string): Promise<ReadScope> {
   if (scope.context.principal.kind !== 'owner' || scope.context.room.kind !== 'private') return scope
   const rows = await exec(db, sql`select m.user_id, m.external_id, u.display_name from user_identity_mappings m
-    join user_identities u on u.user_id=m.user_id where m.transport='qq'`, 'resolve explicitly mentioned people')
+    join user_identities u on u.user_id=m.user_id where m.transport in ('qq','wechat')`, 'resolve explicitly mentioned people')
   const targets = [...new Set(rows.filter(row => String(row.user_id) !== scope.ownerUserId &&
     (text.includes(String(row.external_id)) || (String(row.display_name ?? '').length >= 3 && text.includes(String(row.display_name)))))
     .map(row => String(row.user_id)))]

@@ -114,7 +114,7 @@ export type InboundIdentityOutcome =
   | { readonly ok: true; readonly value: ResolvedInboundIdentity }
   | { readonly ok: false; readonly code: IdentityRejectionCode; readonly detail: string }
 
-const SUPPORTED_TRANSPORTS: readonly string[] = ['qq']
+const SUPPORTED_TRANSPORTS: readonly string[] = ['qq', 'wechat']
 const SUPPORTED_MESSAGE_TYPES: readonly string[] = ['private', 'group']
 
 function reject(code: IdentityRejectionCode, detail: string): InboundIdentityOutcome {
@@ -149,7 +149,7 @@ export function resolveInboundIdentity(
   }
 
   // ③ 消息类型闭集
-  if (!SUPPORTED_MESSAGE_TYPES.includes(facts.messageType)) {
+  if (!SUPPORTED_MESSAGE_TYPES.includes(facts.messageType) || (facts.transport === 'wechat' && facts.messageType !== 'group')) {
     return reject('unsupported_message_type', `未支持的 message_type：${String(facts.messageType)}`)
   }
 
@@ -204,7 +204,7 @@ export function resolveInboundIdentity(
   const isOwner = userId === policy.ownerUserId
   const principal: Principal = isOwner
     ? { kind: 'owner', userId, verifiedBy: 'config_binding' }
-    : { kind: 'user', userId, verifiedBy: 'onebot_inbound' }
+    : { kind: 'user', userId, verifiedBy: facts.transport === 'wechat' ? 'wechat_inbound' : 'onebot_inbound' }
 
   return {
     ok: true,

@@ -116,7 +116,8 @@ export function createWebSearchAdapter(options: WebSearchAdapterOptions): Capabi
         kind: 'adapter',
         detail:
           `搜索完成：${evidence.length} 条可用证据` +
-          `${rejected > 0 ? `（丢弃 ${rejected} 条：非 HTTPS / 缺字段 / 重复）` : ''}`,
+          `${rejected > 0 ? `（另有 ${rejected} 条未形成证据）` : ''}` +
+          (outcome.metrics ? `；模型请求 ${outcome.requestCount}，原生搜索 ${outcome.metrics.reportedSearchCalls ?? 'unknown'}，网页读取 ${outcome.metrics.sourceReads}，网页请求尝试 ${outcome.metrics.sourceRequestAttempts}，读取失败 ${outcome.metrics.failedSourceReads}` : ''),
         ref: options.provider.id,
       }
 
@@ -140,6 +141,9 @@ export function createWebSearchAdapter(options: WebSearchAdapterOptions): Capabi
       }
 
       return {
+        ...(outcome.metrics && outcome.metrics.failedSourceReads > 0 ? {
+          partial: { completed: evidence.length, total: outcome.items.length, detail: '部分来源正文未能读取' },
+        } : {}),
         effect:
           evidence.length > 0
             ? {

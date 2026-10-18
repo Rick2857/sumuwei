@@ -12,9 +12,10 @@
  * ```text
  * 父进程（适配器）                      子进程（本文件）
  *   spawn(node --experimental-strip-types 本文件)  →
+ *   IPC    → {type:'math_ready'}（依赖加载完成；父进程启动限时 10 秒）
  *   stdin  ← {"expression": "0.1+0.2"}    读一行 JSON
  *   stdout → {"ok":true,"value":"0.3"}    受限校验 + 求值 + 写一行 JSON
- *   2s 未回 ⇒ kill（连同它的整个进程树）
+ *   收到算式后 2s 未回 ⇒ kill（连同它的整个进程树）
  * ```
  *
  * ⚠️ 本文件**只**做一件事：把受限核心的结果翻译成一行 JSON。
@@ -33,6 +34,7 @@ async function readStdin(): Promise<string> {
   return Buffer.concat(chunks).toString('utf8')
 }
 
+process.send?.({ type: 'math_ready' })
 const raw = await readStdin()
 let expression = ''
 try {

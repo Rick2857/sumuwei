@@ -71,6 +71,24 @@ export const LOCAL_FILE_LIMITS = {
 } as const
 
 /**
+ * 这台机器的平台，喂给 kernel 的路径判据。
+ *
+ * ⚠️ 2026-10-16（服务器 Linux 适配 · 复核 §4）：
+ *   `inspectLocalPath()` 的 `platform` 是**显式参数**，`local-path.ts:121` 的缺省是 **`'win32'`**，
+ *   而本适配器两个调用点**都没传** ⇒ 在 Linux 上会用 **Windows 路径文法**
+ *   去判一个 POSIX 路径（盘符 / 反斜杠 / UNC），结果必然是"拒绝一切合法路径"。
+ *
+ *   ⇒ **判据在哪读环境**是有讲究的：kernel 不读（`local-path.ts:113` 那段理由成立：
+ *   "这条路径在这台机器上意味着什么必须能被离线穷举"），**适配器读**
+ *   （它本来就在组装层，隔壁 `rapid-ocr-assets.ts` 也这么干）。
+ *
+ *   ⚠️ Windows 上本函数返回 `'win32'`，与改动前的隐式缺省**逐字相同**。
+ */
+function hostPlatform(): 'win32' | 'posix' {
+  return process.platform === 'win32' ? 'win32' : 'posix'
+}
+
+/**
  * 解析本机绝对路径 + **重解析点守卫**。
  *
  * ⚠️ 这是**唯一**把"用户给的字符串"变成"要碰的真实路径"的地方；
@@ -81,7 +99,7 @@ export async function resolveLocalAbsolutePath(raw: string): Promise<{
   /** realpath 之后的最终位置（用于"最终位置是不是还在本地卷"的判据） */
   finalPath: string
 }> {
-  const verdict = inspectLocalPath(raw)
+  const verdict = inspectLocalPath(raw, { platform: hostPlatform() })
   if (!verdict.ok) {
     throw new ActionFailureError(
       actionFailure('permission_denied', `本机文件域拒绝这个路径：${verdict.detail}`)
@@ -106,7 +124,7 @@ export async function resolveLocalAbsolutePath(raw: string): Promise<{
   let finalPath = absolutePath
   if (existsSync(ancestor)) {
     const real = await realpath(ancestor)
-    const realVerdict = inspectLocalPath(real)
+    const realVerdict = inspectLocalPath(real, { platform: hostPlatform() })
     if (!realVerdict.ok) {
       throw new ActionFailureError(
         actionFailure(

@@ -409,20 +409,35 @@ function runtimeChecks(): void {
    * 放行口拒绝 MAINTENANCE_INJECTION"。ADR-093 `D09` 追加了第四个登记值
    * `STORY_DERIVED`（由**已提交的世界账本**经封闭故事规则形成，且只对
    * `interaction_kind = user_choice` 且绑定到当前真实用户的提交成立）。
-   * ⇒ 判据改为**四值** + 放行口接受**三值**，而 `MAINTENANCE_INJECTION`
-   * **仍然失败关闭**（U-M7-07 那条没放宽）。
+   *
+   * ⚠️ **判据修正（2026-10-14，U1/WP3 `ADR-136` 方案 A）**：追加第五个登记值
+   * `NEW_USER_BASELINE`（**系统**在新用户首次幂等建档时给的起点 0.2/0.2 ——
+   * 既不是"用户授权的设定基线"，也不是"由互动推导"）。
+   * ⇒ 判据改为**五值具名闭集 + 放行口接受四值**，`MAINTENANCE_INJECTION` **仍然失败关闭**。
+   * ⚠️ 这里**不**用 `length >= 4` 这类放宽写法：闭集长大后必须**显式**写进这条断言。
    */
+  const expectedOriginKinds: readonly string[] = [
+    'SETTING_BASELINE',
+    'INTERACTION_DERIVED',
+    'MAINTENANCE_INJECTION',
+    'STORY_DERIVED',
+    'NEW_USER_BASELINE',
+  ]
+  const originKindsExact =
+    RELATIONSHIP_ORIGIN_KINDS.length === expectedOriginKinds.length &&
+    expectedOriginKinds.every((kind) => (RELATIONSHIP_ORIGIN_KINDS as readonly string[]).includes(kind))
   const injectionRejected =
     !originKindAcceptedByM7('MAINTENANCE_INJECTION') &&
     originKindAcceptedByM7('SETTING_BASELINE') &&
     originKindAcceptedByM7('INTERACTION_DERIVED') &&
-    originKindAcceptedByM7('STORY_DERIVED')
+    originKindAcceptedByM7('STORY_DERIVED') &&
+    originKindAcceptedByM7('NEW_USER_BASELINE')
   record(
     'P11',
-    'originKind 四值全登记；MAINTENANCE_INJECTION 登记但 M7 放行口拒绝，STORY_DERIVED 可放行（U-M7-07 失败关闭 + ADR-093 D09）',
-    '4 值 · injection=false',
-    `${String(RELATIONSHIP_ORIGIN_KINDS.length)} 值 · injectionAccepted=${String(originKindAcceptedByM7('MAINTENANCE_INJECTION'))}`,
-    RELATIONSHIP_ORIGIN_KINDS.length === 4 && injectionRejected,
+    'originKind 五值具名闭集；MAINTENANCE_INJECTION 登记但 M7 放行口拒绝，STORY_DERIVED / NEW_USER_BASELINE 可放行（U-M7-07 失败关闭 + ADR-093 D09 + ADR-136 A）',
+    '5 值（具名）· injection=false',
+    `${String(RELATIONSHIP_ORIGIN_KINDS.length)} 值 · injectionAccepted=${String(originKindAcceptedByM7('MAINTENANCE_INJECTION'))} · newUserAccepted=${String(originKindAcceptedByM7('NEW_USER_BASELINE'))}`,
+    originKindsExact && injectionRejected,
   )
 
   const codesUnique = new Set(RELATIONSHIP_REJECTION_CODES.map((s) => s.code)).size === RELATIONSHIP_REJECTION_CODES.length

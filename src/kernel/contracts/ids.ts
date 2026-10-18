@@ -170,10 +170,10 @@ export type SchemaVersion = number
 // ---------------------------------------------------------------------------
 
 /** 允许出现在 ID 里的字符：字母数字与 `-` `_` `:`，避免日志里出现不可读字符 */
-function assertSafePart(part: string, label: string): void {
-  if (!/^[A-Za-z0-9_:-]{1,120}$/.test(part)) {
+function assertSafePart(part: string, label: string, maxLength = 120): void {
+  if (!/^[A-Za-z0-9_:-]+$/.test(part) || part.length > maxLength) {
     throw new Error(
-      `${label} 含有不适合放进 ID 的字符：${JSON.stringify(part)}（只允许字母数字与 _ - :，长度 1..120）`
+      `${label} 含有不适合放进 ID 的字符：${JSON.stringify(part)}（只允许字母数字与 _ - :，长度 1..${maxLength}）`
     )
   }
 }
@@ -276,7 +276,8 @@ export function makeObservationId(sourceEventId: string): ObservationId {
   if (typeof sourceEventId !== 'string' || sourceEventId.trim() === '') {
     throw new KernelError('validation_error', 'empty_id', 'Observation 的派生来源不能为空')
   }
-  assertSafePart(sourceEventId, 'sourceEventId')
+  // A complete cev ID has two 120-character parts plus prefix, separators and a 16-digit safe sequence.
+  assertSafePart(sourceEventId, 'sourceEventId', 262)
   return `obs:${sourceEventId}` as ObservationId
 }
 

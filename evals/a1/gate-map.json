@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "mapId": "a1-contract-gate-map",
+  "title": "A1：契约 §7 的六个退出门 ↔ 切片门的对应表",
+  "provenance": {
+    "contract": "docs/post-lv2/Admin-Backend-Acceptance-Contract.md §7",
+    "adr": "docs/adr/ADR-135-admin-backend-minimal.md",
+    "note": "这张表是**人写死的映射**（不是从门名猜的）：'哪道门服务于哪个契约门'是设计判断。门 a1:gates:verify 会校验它（指名门必须真实存在、每道在册门至少服务一个契约门）。"
+  },
+  "contractGates": [
+    {
+      "id": "A1-G1",
+      "title": "架构判据：管理 API 只调既有服务；禁止项不可达",
+      "servedBy": ["a1:query:verify", "a1:gates:verify", "a1:serve:verify", "a1:goals-reader:verify", "a1:safety-quota-reader:verify", "a1:cognition-reader:verify"]
+    },
+    {
+      "id": "A1-G2",
+      "title": "认证与授权：跨站写 / 伪造会话 / 越权各自判红",
+      "servedBy": ["a1:auth:verify", "a1:auth:http:verify", "a1:admin:entry:verify"]
+    },
+    {
+      "id": "A1-G3",
+      "title": "审计：身份非 Unknown；不含密钥/正文；落库失败失败关闭",
+      "servedBy": ["a1:audit:verify"]
+    },
+    {
+      "id": "A1-G4",
+      "title": "页面一致性：每页显示 = 程序事实；密钥不回显",
+      "servedBy": ["a1:page:verify", "a1:effective-config:verify", "a1:serve:verify", "a1:safety-quota:verify", "a1:goals-commitments:verify", "a1:cognition:verify"]
+    },
+    {
+      "id": "A1-G5",
+      "title": "三态与长任务：分页/错误/离线 + jobId 断线读回 + 幂等",
+      "servedBy": ["a1:jobs:verify", "a1:jobs-store:verify", "a1:jobs-admit:verify", "a1:query:verify"]
+    },
+    {
+      "id": "A1-G6",
+      "title": "核心停机窗口：离线面可读 · 写如实拒绝 · 恢复",
+      "servedBy": ["a1:core-stop:verify"],
+      "emptyReason": "**部分覆盖**（2026-10-14 补上门）：核心停机时五个离线可读面逐个 200 · 写操作逐个非 2xx · 管理面不依赖核心。**仍未覆盖**（门里具名 NOT RUN）：真实 PG 上「核心停 → 起 → 再读」端到端（需真核心与真库）· `presence=online` 读数（PGlite 回答不了资格锁问题）"
+    }
+  ],
+  "notCovered": [
+    "本表只做**归属**：它不跑门、不主张任何门通过（那是各门自己的读数与 pnpm a1:gates）",
+    "A1-G6 没有机器判据（如实留空）"
+  ]
+}

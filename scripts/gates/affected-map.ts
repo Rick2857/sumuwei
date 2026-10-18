@@ -134,6 +134,11 @@ export const AFFECTED_RULES: readonly AffectedRule[] = [
     gates: ['u1:entry-scope:verify'],
   },
   {
+    what: '`src/infrastructure/admin/**`（A1 管理后台）、`admin-ports/**`（端口）、`admin-readers/**`（真数据源 reader）、`evals/a1/**`（只读面冻结清单）或它自己的门',
+    match: ['src/infrastructure/admin/**', 'src/infrastructure/admin-ports/**', 'src/infrastructure/admin-readers/**', 'evals/a1/**', 'scripts/a1-auth-primitives-verify.ts', 'scripts/a1-auth-http-verify.ts', 'scripts/a1-admin-entry-verify.ts', 'scripts/a1-query-surface-verify.ts', 'scripts/a1-effective-config-verify.ts', 'scripts/a1-serve-verify.ts', 'scripts/a1-safety-quota-verify.ts', 'scripts/a1-jobs-verify.ts', 'scripts/a1-goals-commitments-verify.ts', 'scripts/a1-page-verify.ts', 'scripts/a1-cognition-verify.ts', 'scripts/a1-gates-verify.ts', 'scripts/a1-goals-reader-verify.ts', 'scripts/a1-safety-quota-reader-verify.ts', 'scripts/a1-cognition-reader-verify.ts', 'scripts/a1-audit-verify.ts', 'scripts/a1-core-stop-verify.ts', 'scripts/a1-jobs-admit-verify.ts', 'scripts/a1-jobs-store-verify.ts', 'scripts/a1-admin.ts'],
+    gates: ['a1:auth:verify', 'a1:auth:http:verify', 'a1:admin:entry:verify', 'a1:query:verify', 'a1:effective-config:verify', 'a1:serve:verify', 'a1:safety-quota:verify', 'a1:jobs:verify', 'a1:goals-commitments:verify', 'a1:page:verify', 'a1:cognition:verify', 'a1:gates:verify', 'a1:goals-reader:verify', 'a1:safety-quota-reader:verify', 'a1:cognition-reader:verify', 'a1:audit:verify', 'a1:core-stop:verify', 'a1:jobs-admit:verify', 'a1:jobs-store:verify'],
+  },
+  {
     what: '`src/kernel/app/bridge/turn-bridge.ts`（受控登记表 / 桥协议）或它自己的门',
     match: ['src/kernel/app/bridge/turn-bridge.ts', 'scripts/u1-bridge-platform-facts-verify.ts'],
     gates: ['u1:bridge-facts:verify', 'postlv2:transport:verify', 'kernel:test'],
@@ -142,6 +147,21 @@ export const AFFECTED_RULES: readonly AffectedRule[] = [
     what: '`src/kernel/recall/ports.ts` 或召回检索实现（`memory-retrieval-store.ts`）',
     match: ['src/kernel/recall/**', 'src/infrastructure/persistence/memory-retrieval-store.ts'],
     gates: ['u1:g18-wiring:verify', 'kernel:test', 'kernel:verify'],
+  },
+  {
+    what: '`evals/s1/**`（S1 拒绝套件）或它自己的门',
+    match: ['evals/s1/**', 'scripts/s1-rejection-suite-verify.ts', 'scripts/s1-rejection-evidence-verify.ts'],
+    gates: ['s1:rejection-suite:verify', 's1:rejection-evidence:verify', 's1:e1:verify'],
+  },
+  {
+    what: '`scripts/s1-isolation-stub-verify.ts`（S1 隔离桩 E-2）或它复用的 `action-harness.ts`',
+    match: ['scripts/s1-isolation-stub-verify.ts', 'scripts/action-harness.ts'],
+    gates: ['s1:isolation-stub:verify'],
+  },
+  {
+    what: '`scripts/s1-e1-program-cases.ts`（S1 / E-1 离线程序面读数）或它判定的作用域契约',
+    match: ['scripts/s1-e1-program-cases.ts', 'src/kernel/contracts/scope.ts'],
+    gates: ['s1:e1:verify', 'u1:scope:verify'],
   },
   {
     what: '`src/kernel/context/sections.ts`、`src/kernel/app/turn-gateway.ts`（prompt 相关）',

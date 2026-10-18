@@ -1,0 +1,22 @@
+[Unit]
+Description=Su Muwei server edition (one cognitive core)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lg
+Group=lg
+WorkingDirectory=/opt/project-lg
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node /opt/project-lg/node_modules/tsx/dist/cli.mjs /opt/project-lg/scripts/qq/chat.ts
+Restart=on-failure
+RestartSec=5
+KillMode=control-group
+TimeoutStopSec=120
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -11,6 +11,7 @@
  *   node_modules/.bin/tsx scripts/kernel-tests.ts Context    # 只跑名字含 Context 的
  */
 
+import assert from 'node:assert/strict'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -25,12 +26,14 @@ import {
   canEvidenceExternalFact,
   createContextCompiler,
   createConversationEvent,
+  conversationObservationFrom,
   createDefaultDomainEventRegistry,
   createProposal,
   emptyProjection,
   idempotencyKeyFor,
   isSelfExpressionOnly,
   makeConversationEventId,
+  makeObservationId,
   renderSeedIdentity,
   seedFingerprint,
   sortSections,
@@ -80,6 +83,32 @@ test('非法 ID 片段被拒绝（而不是静默产出坏 id）', () => {
     badSequenceThrew = true
   }
   expect.ok(badSequenceThrew, '序号 0 不是合法坐标，应当被拒绝')
+})
+
+test('复合事件 ID：长群会话在三位及四位序号后仍可转换为观测', () => {
+  const characterId = asCharacterId('00000000-0000-4000-8000-000000000001')
+  const conversationId = asConversationId(`qq-${'a'.repeat(36)}-${'b'.repeat(36)}`)
+  for (const sequence of [1, 99, 100, 999, 1000, 1043, Number.MAX_SAFE_INTEGER]) {
+    const event = createConversationEvent({ characterId, conversationId,
+      conversationSequence: 1, sequence, type: 'user_message', actorType: 'user',
+      actorId: 'synthetic-user', content: '合成群聊输入' })
+    const observation = conversationObservationFrom(event)
+    assert.equal(observation.id, `obs:${event.id}`)
+    assert.deepEqual(observation.sourceEventIds, [event.id])
+  }
+})
+
+test('复合事件 ID：完整长度有界，片段上限与非法字符拒绝保持不变', () => {
+  const id = makeConversationEventId(asCharacterId('c'.repeat(120)),
+    asConversationId('r'.repeat(120)), Number.MAX_SAFE_INTEGER)
+  assert.equal(id.length, 262)
+  assert.equal(makeObservationId(id), `obs:${id}`)
+  for (const value of ['', 'x'.repeat(263), `${id} `, 'unsafe/path', 'unsafe\npath']) {
+    assert.throws(() => makeObservationId(value))
+  }
+  assert.throws(() => asCharacterId('c'.repeat(121)))
+  assert.throws(() => asConversationId('r'.repeat(121)))
+  assert.equal(makeObservationId('cev:old:dm:1'), 'obs:cev:old:dm:1')
 })
 
 test('来源一致性：type 与 actorType 必须匹配', () => {

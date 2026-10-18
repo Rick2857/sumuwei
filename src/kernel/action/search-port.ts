@@ -18,9 +18,10 @@
  * 1. **输入只有三样**：`query` / `limit` / `locale`。端口类型里没有记忆、
  *    prompt、人设、历史对话、userId、traceId 的位置 —— 那些东西**在类型上**
  *    就送不出去（ADR-045 D-19 §4 的禁止清单，D-31 沿用）。
- * 2. **一次搜索恰好一次请求**：`requestCount` 必须由实现**如实上报**
+ * 2. **一次搜索恰好一次 provider 请求**：`requestCount` 必须由实现**如实上报**
  *    （`1`；自动重试 `0`）。它出现在结果里而不是只写在文档里，是为了让
- *    "有没有偷偷重试"成为**可断言的事实**。
+ *    "有没有偷偷重试"成为**可断言的事实**。ADR-141 的有界网页读取另计 metrics，
+ *    不把一次模型请求等同于一次实际搜索或全部 HTTP 流量。
  * 3. **失败也如实上报**：超时 / 解析失败 / provider 报错一律归一到既有
  *    `ActionFailure` 码（`timeout` / `validation_failed` / `execution_failed`），
  *    绝不返回一个"看起来成功但没有结果"的形状。
@@ -58,6 +59,15 @@ export interface SearchProviderCall extends SearchQuery {
 }
 
 /** provider 成功时的结果（`items` 是**未验证**的原始条目，见 `SearchEvidenceItem`） */
+/** ADR-141: model dispatch count and bounded page reads are distinct observations. */
+export interface SearchProviderMetrics {
+  nativeToolCalls: number | null
+  reportedSearchCalls: number | null
+  sourceReads: number
+  sourceRequestAttempts: number
+  failedSourceReads: number
+}
+
 export interface SearchProviderSuccess {
   ok: true
   items: SearchEvidenceItem[]
@@ -65,6 +75,7 @@ export interface SearchProviderSuccess {
   requestCount: number
   /** provider 界面上被丢掉的条目数（例如非 HTTPS）—— 如实报出，不静默丢 */
   rejectedItems: number
+  metrics?: SearchProviderMetrics
 }
 
 /** provider 失败时的结果（**同样带请求数**：超时也是发生过一次请求的） */
@@ -73,6 +84,7 @@ export interface SearchProviderFailure {
   failure: ActionFailure
   requestCount: number
   rejectedItems: number
+  metrics?: SearchProviderMetrics
 }
 
 export type SearchProviderOutcome = SearchProviderSuccess | SearchProviderFailure

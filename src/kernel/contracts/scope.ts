@@ -35,7 +35,7 @@ import { KernelError } from './ids.ts'
 export type OwnerVerifiedBy = 'config_binding' | 'admin_session'
 
 /** 普通用户身份的可信来源。**昵称/群名片/会话 ID/自报身份都不在列**。 */
-export type UserVerifiedBy = 'onebot_inbound' | 'admin_session'
+export type UserVerifiedBy = 'onebot_inbound' | 'wechat_inbound' | 'admin_session'
 
 export interface OwnerPrincipal {
   readonly kind: 'owner'
@@ -373,7 +373,7 @@ export function evaluateScopeAccess(input: ScopeAccessInput): ScopeDecision {
     const allowed =
       context.principal.kind === 'owner'
         ? verifiedBy === 'config_binding' || verifiedBy === 'admin_session'
-        : verifiedBy === 'onebot_inbound' || verifiedBy === 'admin_session'
+        : verifiedBy === 'onebot_inbound' || verifiedBy === 'wechat_inbound' || verifiedBy === 'admin_session'
     if (!allowed) {
       checks.push({ name: 'identity_verified', ok: false, detail: `verifiedBy 不可信：${String(verifiedBy)}` })
       return deny('identity_unverified', '身份来源不可信（不接受自报身份）', checks)

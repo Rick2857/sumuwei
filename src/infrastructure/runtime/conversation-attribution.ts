@@ -282,12 +282,20 @@ export function createHumanQqPrivateUserTurnIngress(): ConversationAttributionPr
 
 /** Authenticated QQ member ingress. The caller has already checked account and membership. */
 export function createHumanQqMemberUserTurnIngress(roomKind: 'private' | 'group'): ConversationAttributionProducer {
-  const adapterId = `qq-${roomKind}-member`
+  return createHumanPlatformMemberIngress(`qq-${roomKind}-member`)
+}
+
+/** Only the independently verified, group-only WeChat path may construct this producer. */
+export function createHumanWechatGroupUserTurnIngress(): ConversationAttributionProducer {
+  return createHumanPlatformMemberIngress('wechat-group-member')
+}
+
+function createHumanPlatformMemberIngress(adapterId: string): ConversationAttributionProducer {
   return Object.freeze({ producerId: `${adapterId}-user-turn`, family: 'user_message' as ConversationFamily,
     attest(facts: ConversationIngressFacts): TrustedAttributionContext {
       guardFacts(facts); requirePresenter(facts, adapterId)
       if (!facts.userId || facts.userId !== facts.presenterActorId) throw new KernelError('validation_error',
-        'attribution_presenter_mismatch', 'QQ speaker must match the resolved domain user')
+        'attribution_presenter_mismatch', 'Platform speaker must match the resolved domain user')
       const principal = { kind: 'USER', id: facts.userId } as const
       return buildTrustedAttributionContext({ family: 'user_message', characterId: facts.characterId,
         actorEvidence: attestActorFromDecisionPoint({ adapterId, principal }),

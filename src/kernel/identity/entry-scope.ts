@@ -32,9 +32,9 @@
 import type { Principal, Room, ScopeContext } from '../contracts/scope.ts'
 
 /** 入口种类（闭集；调用方负责把自己的 transport 映射到这里） */
-export type EntryKind = 'qq_private' | 'qq_group' | 'avatar_local' | 'cli_local'
+export type EntryKind = 'qq_private' | 'qq_group' | 'wechat_group' | 'avatar_local' | 'cli_local'
 
-export const ENTRY_KINDS: readonly EntryKind[] = ['qq_private', 'qq_group', 'avatar_local', 'cli_local']
+export const ENTRY_KINDS: readonly EntryKind[] = ['qq_private', 'qq_group', 'wechat_group', 'avatar_local', 'cli_local']
 
 export interface EntryScopeInput {
   readonly entryKind: EntryKind
@@ -143,7 +143,8 @@ export function resolveEntryScope(input: EntryScopeInput): EntryScopeOutcome {
   const isOwner = resolved === input.ownerUserId
   return {
     scope: {
-      principal: isOwner ? ownerPrincipal(input.ownerUserId) : userPrincipal(resolved),
+      principal: isOwner ? ownerPrincipal(input.ownerUserId) : input.entryKind === 'wechat_group'
+        ? { kind: 'user', userId: resolved, verifiedBy: 'wechat_inbound' } : userPrincipal(resolved),
       purpose: 'external_query',
       /* ⚠️ 群入口的 room **始终**是那个群（不因提问者是原主人而变成私聊） */
       room: { kind: 'group', groupId },

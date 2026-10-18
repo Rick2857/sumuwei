@@ -164,7 +164,7 @@ export function digestTree(root: string, exclude: readonly string[] = VOLATILE_E
 }
 
 // ---------------------------------------------------------------------------
-// 跨进程独占租约（Windows named pipe；随进程终止由 OS 释放）
+// 跨进程独占租约（Windows named pipe / Linux abstract socket；由 OS 自动释放）
 // ---------------------------------------------------------------------------
 
 /** dataDir → 规范形式（resolve + 去尾分隔符 + Windows 下小写，因为路径大小写不敏感） */
@@ -176,7 +176,10 @@ export function normalizeDataDir(dataDir: string): string {
 /** 租约管道名：由规范化后的 dataDir 派生 ⇒ 同一目录必然同一个管道 */
 export function leasePipeName(dataDir: string): string {
   const hash = createHash('sha256').update(normalizeDataDir(dataDir), 'utf8').digest('hex').slice(0, 32)
-  return `\\\\.\\pipe\\project-lg-pglite-${hash}`
+  if (process.platform === 'win32') return `\\\\.\\pipe\\project-lg-pglite-${hash}`
+  // 不落到文件系统：异常退出不会留下 socket，systemd PrivateTmp 也不会分裂租约。
+  if (process.platform === 'linux') return `\0project-lg-pglite-${hash}`
+  throw new ProductionDbLeaseError(`production_db_lease_failed：未支持的租约平台 ${process.platform}（失败关闭）`)
 }
 
 /**

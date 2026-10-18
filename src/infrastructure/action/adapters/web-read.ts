@@ -462,6 +462,7 @@ function ipv6ToBytes(input: string): number[] | undefined {
 export type WebReadResolver = (host: string) => Promise<readonly string[]>
 
 export interface WebReadConnectRequest {
+  signal?: AbortSignal
   /** **已校验并固定**的地址。连接只允许用它，不许再解析 */
   address: string
   family: 4 | 6
@@ -532,7 +533,7 @@ export function buildPinnedHttpsRequestOptions(
       Connection: 'close',
     },
     rejectUnauthorized: true,
-    signal: AbortSignal.timeout(remaining),
+    signal: request.signal ? AbortSignal.any([request.signal, AbortSignal.timeout(remaining)]) : AbortSignal.timeout(remaining),
     ...(options.trustedCa !== undefined ? { ca: [...options.trustedCa] } : {}),
   }
 }
@@ -667,6 +668,7 @@ export interface WebReadHop {
 }
 
 export interface WebReadFetchRequest {
+  signal?: AbortSignal
   /** 已经准入的 URL（获取阶段会对**每一跳**重新准入） */
   url: string
   /** 整次操作的绝对期限（解析 + 所有跳 + 读取共用一个） */
@@ -731,6 +733,7 @@ export function createPinnedHttpsFetcher(deps: PinnedHttpsFetcherDeps = {}): Web
     let current = request.url
 
     for (;;) {
+      request.signal?.throwIfAborted()
       // ① 每一跳都重新准入（重定向目标与首个 URL 走同一条路）
       const admitted = admit(current)
       if (!admitted.ok) {
@@ -777,6 +780,7 @@ export function createPinnedHttpsFetcher(deps: PinnedHttpsFetcherDeps = {}): Web
       const pinned = classifications[0] as AddressClassification
       const connection = await withDeadline(
         connect({
+          ...(request.signal ? { signal: request.signal } : {}),
           address: pinned.address,
           family: pinned.family === 6 ? 6 : 4,
           port: WEB_READ_ALLOWED_PORT,
@@ -1057,6 +1061,12 @@ async function withDeadline<T>(
     (value) => ({ kind: 'ok' as const, value }),
     (error: unknown) => ({ kind: 'error' as const, error })
   )
+  let onAbort: () => void
+  const abort = new Promise<{ kind: 'aborted' }>(resolve => {
+    onAbort = () => resolve({ kind: 'aborted' })
+    request.signal?.addEventListener('abort', onAbort, { once: true })
+    if (request.signal?.aborted) onAbort()
+  })
   let timer: ReturnType<typeof setTimeout> | undefined
   const timeout = new Promise<{ kind: 'timeout' }>((resolve) => {
     timer = setTimeout(() => {
@@ -1065,7 +1075,8 @@ async function withDeadline<T>(
     if (typeof timer.unref === 'function') timer.unref()
   })
   try {
-    const result = await Promise.race([settled, timeout])
+    const result = await Promise.race([settled, timeout, abort])
+    if (result.kind === 'aborted') throw request.signal?.reason ?? new Error('web_read_cancelled')
     if (result.kind === 'ok') return result.value
     // 工作自己的失败（DNS 查不到 / 连接被拒 / 证书不匹配）原样交给上层归一
     if (result.kind === 'error') throw result.error
@@ -1077,6 +1088,7 @@ async function withDeadline<T>(
     })
   } finally {
     if (timer !== undefined) clearTimeout(timer)
+    request.signal?.removeEventListener('abort', onAbort!)
   }
 }
 

@@ -8,15 +8,14 @@ import { parse } from 'dotenv';
 
 loadEnvFile(process.env.OMNI_PRODUCTION_VOICE_ENV_FILE || fileURLToPath(new URL('.env.local', import.meta.url)));
 const local = process.env.LG_3D_OPERATION_ROOT
-  ? process.env.LG_3D_OPERATION_ROOT + '/artifacts/post-lv2/local/omni-production/'
-  : fileURLToPath(new URL('../../artifacts/post-lv2/local/omni-production/', import.meta.url));
+  ? process.env.LG_3D_OPERATION_ROOT + '/artifacts/post-lv2/local/activation-3d-omni-20261014/'
+  : fileURLToPath(new URL('../../artifacts/post-lv2/local/activation-3d-omni-20261014/', import.meta.url));
 mkdirSync(local, { recursive: true });
 const log = local + 'production-core.local.log';
 const sentinel = local + 'STOP';
 if (existsSync(sentinel)) unlinkSync(sentinel);
 const operationRoot = process.env.LG_3D_OPERATION_ROOT || fileURLToPath(new URL('../../', import.meta.url));
-const qqConfigPath = resolve(operationRoot, '.env.qq');
-const qqEnv = Object.fromEntries(Object.entries(existsSync(qqConfigPath) ? parse(readFileSync(qqConfigPath, 'utf8')) : {})
+const qqEnv = Object.fromEntries(Object.entries(parse(readFileSync(resolve(operationRoot, '.env.qq'), 'utf8')))
   .filter(([key]) => key.startsWith('QQ_')));
 const tokens = qqEnv.QQ_MULTI_USER_ENABLED === 'true'
   ? JSON.parse(readFileSync(resolve(operationRoot, 'artifacts/post-lv2/local/coexist-runtime/entry-tokens.json'), 'utf8')) : undefined;

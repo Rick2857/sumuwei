@@ -44,6 +44,10 @@ import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { MIGRATIONS } from '../src/infrastructure/persistence/migrations.ts'
+
+/** 树声明的**最新** kernel schema 版本（断言与它对齐 ⇒ 不再写死数字） */
+const LATEST_KERNEL_SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version
 
 import {
   PG_CONTAINER,
@@ -344,11 +348,16 @@ if (credentials !== undefined && instanceUp) {
     assert.ok(gateStep.ok, `迁移闸没有拦住：${gateStep.detail ?? ''}`)
   })
 
-  check('G02.1c 显式放行后从零可运行：PgDatabaseAdapter + 51 表 + kernel v18 + pgvector 0.8.7', () => {
+  check(`G02.1c 显式放行后从零可运行：PgDatabaseAdapter + 51 表 + kernel v${String(LATEST_KERNEL_SCHEMA_VERSION)} + pgvector 0.8.7`, () => {
     assert.ok(freshRun.ok, `探针整体未通过：${JSON.stringify(freshRun.error ?? freshRun.steps)}`)
     assert.equal(freshRun.adapterName, 'PgDatabaseAdapter')
     assert.equal(freshRun.tableCount, 18, '插件表数')
-    assert.equal(freshRun.kernelSchemaVersion, 18, 'kernel schema 版本')
+    /*
+     * ⚠️ **不要写死版本号**（2026-10-14 修）：这里原来硬编码 `18`，而树早已到 **19** ⇒
+     *    断言在无人察觉的情况下腐坏（本门需要测试库目标，本机 `NOT RUN`，所以一直没暴露）。
+     *    改成与 `MIGRATIONS` 的**最后一条**对齐：DB 必须处在**树声明的最新版本**。
+     */
+    assert.equal(freshRun.kernelSchemaVersion, LATEST_KERNEL_SCHEMA_VERSION, 'kernel schema 版本（与树一致）')
     assert.equal(freshRun.pgSpecific?.vectorExtension, '0.8.7')
   })
 

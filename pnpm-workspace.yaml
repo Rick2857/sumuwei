@@ -24,6 +24,7 @@
 #                         显式拒绝并在此登记（pnpm 12 的 `ERR_PNPM_IGNORED_BUILDS`
 #                         要求每个带脚本的依赖都有一个明确取值）。
 allowBuilds:
+  '@huggingface/transformers': false
   esbuild: true
   '@swc/core': false
   '@playwright/browser-chromium': false

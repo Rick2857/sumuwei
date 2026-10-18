@@ -10,6 +10,7 @@ import { OneBotPrivateClient } from '../../src/infrastructure/qq/onebot-private-
 import { LgStdioClient } from '../../src/infrastructure/qq/lg-stdio-client.ts'
 import { isolateDatabase, cleanupSandbox, PRODUCTION_DB_DIR } from '../../src/dev/sandbox.ts'
 import { digestTree, openRawPGlite } from '../../src/infrastructure/persistence/production-db-safety.ts'
+import { MIGRATIONS } from '../../src/infrastructure/persistence/migrations.ts'
 
 process.env.CHARACTER_DB_BACKEND='pglite'
 process.env.POSTGRES_URL='';process.env.DATABASE_URL=''
@@ -61,6 +62,15 @@ const model=createServer(async(request,response)=>{
 await new Promise<void>(done=>model.listen(0,'127.0.0.1',done))
 const features=Object.fromEntries([...readFileSync(resolve(root,'src/kernel/app/flags.ts'),'utf8').matchAll(/\b(CHARACTER_[A-Z0-9_]*ENABLED)\b/g)].map(match=>[match[1]!,'false']))
 const sandbox=isolateDatabase('qq-group-verify').dir
+// Real deployments already have long event histories; start beyond the old ID-length failure.
+const seed=await openRawPGlite(sandbox)
+try {
+  const counterDdl=MIGRATIONS.flatMap(migration=>migration.statements)
+    .find(statement=>statement.startsWith('create table if not exists character_sequence_counters '))
+  assert(counterDdl)
+  await seed.exec(counterDdl)
+  await seed.exec("insert into character_sequence_counters (character_id,next_sequence) values ('00000000-0000-4000-8000-000000000001',1042)")
+} finally {await seed.close()}
 const coreEnv={...process.env,...features,...env,
   CHARACTER_DB_BACKEND:'pglite',POSTGRES_URL:'',DATABASE_URL:'',PGLITE_DATA_DIR:sandbox,PROJECT_LG_SANDBOX:sandbox,
   LG_PG_EXPECT_DATABASE:'',LG_PG_EXPECT_USER:'',LG_PG_EXPECT_DATABASE_PREFIX:'',LG_PG_EXPECT_USER_PREFIX:'',
@@ -79,7 +89,10 @@ const host=coexist ? await (await import('../coexist/harness.ts')).startCoexistH
 if(host) await host.ready
 const lg=new LgStdioClient(root,coreEnv,host?{connect:{host:'127.0.0.1',port:host.qqPort,token:host.qqToken}}:{})
 const logs:{event:string;requestId?:string}[]=[]
-const client=new OneBotPrivateClient(settings,request=>lg.submit(request),reading=>logs.push(reading))
+const outcomes:string[]=[]
+const client=new OneBotPrivateClient(settings,async request=>{
+  const response=await lg.submit(request);outcomes.push(response.outcome);return response
+},reading=>logs.push(reading))
 let id=0, checks=0
 const waitFor=async(test:()=>boolean)=>{for(let i=0;i<1000;i++){if(test())return;await delay(10)}throw new Error('group fixture timeout')}
 const emit=(user:string,text:string,group?:string,extra:Record<string,unknown>={})=>{
@@ -91,6 +104,7 @@ const formal=async(user:string,text:string,group?:string,extra:Record<string,unk
   const n=sent.length;emit(user,text,group,extra);await waitFor(()=>sent.length>n);await client.drain()
   assert.equal(sent.at(-1)!.action,group?'send_group_msg':'send_private_msg')
   assert.equal(String(sent.at(-1)!.params[group?'group_id':'user_id']),group??user)
+  assert.equal(outcomes.at(-1),'replied','a generic failure notice is not a successful core reply')
   assert(!sent.at(-1)!.params.message[0].data.text.includes('这轮连接失败'))
   checks++
 }
@@ -153,14 +167,15 @@ try{
     assert.equal(relations.length,3);assert(relations.filter(row=>row.state.originKind==='NEW_USER_BASELINE').length===2);checks++
     const affect=(await db.query("select projection_type from character_projections where projection_type='affect:character'")).rows
     assert.equal(affect.length,1);checks++
-    const events=(await db.query("select actor_id,content_originator_id from conversation_events where actor_type='user'")).rows as Record<string,any>[]
-    assert(events.every(row=>row.actor_id===row.content_originator_id));checks++
+    const events=(await db.query("select sequence,actor_id,content_originator_id from conversation_events where actor_type='user'")).rows as Record<string,any>[]
+    assert(events.every(row=>row.actor_id===row.content_originator_id))
+    assert(events.length>0&&events.every(row=>Number(row.sequence)>=1043));checks++
     const audits=(await db.query('select count(*)::int as count from scope_read_audit')).rows as {count:number}[]
     assert(audits[0]!.count>0);checks++
   }finally{await db.close()}
   assert.equal(digestTree(PRODUCTION_DB_DIR).treeSha256,before);checks++
   const out=resolve(root,'artifacts/post-lv2',`qq-group-verify-${Date.now()}`);mkdirSync(out,{recursive:true})
-  writeFileSync(resolve(out,'result.json'),JSON.stringify({status:'PASS',checks,transport:coexist?'coexist-tcp':'stdio',scope:'real OneBot fixture + real main.ts + isolated DB',
+  writeFileSync(resolve(out,'result.json'),JSON.stringify({status:'PASS',checks,transport:coexist?'coexist-tcp':'stdio',scope:'real OneBot fixture + real main.ts + isolated DB',initialCharacterSequence:1043,
     productionDatabaseOpened:false,productionTreeUnchanged:true,realQq:'NOT RUN',externalModel:'NOT RUN'},null,2))
   console.log(`PASS QQ group end-to-end ${checks} checks; ${out}`)
 }catch(error){

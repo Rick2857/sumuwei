@@ -89,7 +89,7 @@ import {
   buildTavilySearchRequest,
   createTavilySearchProvider,
   parseTavilyResponse,
-} from '../src/infrastructure/search/tavily-search-provider.ts'
+} from './fixtures/retired-tavily-search-provider.ts'
 import {
   D20_RULING,
   PROVIDER_PRICE_FACTS,
@@ -102,7 +102,7 @@ import {
   loadTavilyConfig,
   type TavilyConfig,
   type TavilyDeclarationInput,
-} from '../src/infrastructure/search/tavily-config.ts'
+} from './fixtures/retired-tavily-config.ts'
 import { createFixtureSearchProvider, fixtureTimeoutOutcome } from '../src/infrastructure/search/fixture-search-provider.ts'
 /* M5.5 WP5：上下文与预算（编译器、section、额度、现实判定） */
 import {
@@ -877,8 +877,8 @@ function readSourceStripped(relativePath: string): string {
 check(
   '★ 静态：**only** 配置模块读环境变量，且只读两个**具名**变量（没有"扫描整个 env"的写法）',
   (() => {
-    const config = readSourceStripped('src/infrastructure/search/tavily-config.ts')
-    const provider = readSourceStripped('src/infrastructure/search/tavily-search-provider.ts')
+    const config = readSourceStripped('scripts/fixtures/retired-tavily-config.ts')
+    const provider = readSourceStripped('scripts/fixtures/retired-tavily-search-provider.ts')
     /* provider 模块**不许**碰环境变量（凭证由配置层注入） */
     if (provider.includes('process.env')) return false
     if (!config.includes('process.env')) return false
@@ -890,9 +890,9 @@ check(
 )
 check(
   '★ 静态：搜索层不含任何打印（没有 console./logger）',
-  !readSourceStripped('src/infrastructure/search/tavily-config.ts').includes('console.') &&
-    !readSourceStripped('src/infrastructure/search/tavily-search-provider.ts').includes('console.') &&
-    !readSourceStripped('src/infrastructure/search/tavily-search-provider.ts').includes('logger'),
+  !readSourceStripped('scripts/fixtures/retired-tavily-config.ts').includes('console.') &&
+    !readSourceStripped('scripts/fixtures/retired-tavily-search-provider.ts').includes('console.') &&
+    !readSourceStripped('scripts/fixtures/retired-tavily-search-provider.ts').includes('logger'),
   '两个模块都不打印（已去注释后扫描）'
 )
 check(
@@ -946,7 +946,7 @@ check(
     D20_RULING.costEnforcement === 'none' &&
     /* 把单价"抬到很贵"重跑加载：必须**照常成功** */
     loadTavilyConfig({ apiKey: SYNTHETIC_API_KEY }).ok === true &&
-    !readSourceStripped('src/infrastructure/search/tavily-config.ts').includes('maxCostPerSearchUsd'),
+    !readSourceStripped('scripts/fixtures/retired-tavily-config.ts').includes('maxCostPerSearchUsd'),
   `declared=${PROVIDER_PRICE_FACTS.usdPerCredit} USD/credit · enforced=${String(PROVIDER_PRICE_FACTS.enforced)} · recordedAt=${PROVIDER_PRICE_FACTS.recordedAt}`
 )
 
@@ -2206,6 +2206,8 @@ section('§10 静态残留扫描（hosted provider 的 import / endpoint / key �
  *    而"实现里没有第二套 provider"这一条已经由上面的文件清单判据独立覆盖。
  */
 const FORBIDDEN_CODE_TOKENS: readonly string[] = [
+  'tavily-search-provider',
+  'api.tavily.com',
   'searxng-search-provider',
   'search-config.ts',
   'SEARXNG',
@@ -2285,9 +2287,9 @@ check(
         'fingerprint.ts',
         'fixture-search-provider.ts',
         'recording-fetch.ts',
-        'tavily-config.ts',
-        'tavily-search-provider.ts',
-      ].join(',')
+        'deepseek-config.ts',
+        'deepseek-search-provider.ts',
+      ].sort().join(',')
     )
   })(),
   readdirSync(join(ROOT, 'src', 'infrastructure', 'search')).sort().join(', ')

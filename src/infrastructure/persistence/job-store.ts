@@ -200,17 +200,41 @@ export async function markJobRunning(db: RawDb, id: JobId, now = Date.now()): Pr
   }
 }
 
+/**
+ * 把 `error` 与**闭集具名** `cause` 拼成 `last_error` 那一格的内容。
+ *
+ * 抽成**纯函数**是为了能被门直接单测（`finishJob` 本身要一个已打开的库）。
+ *
+ * 三条性质，任何一条被改坏都必须被门抓住：
+ * ① **不传 `cause` ⇒ 逐字返回 `error`**（既有调用方与既有读数完全不受影响）；
+ * ② 不传 `error` ⇒ `undefined`（那一格写 `null`，与今天一致）；
+ * ③ `cause` 为**空串**时视同**不传**（`''` 不该产生 `xxx:` 这种半截串）。
+ */
+export function composeJobError(error: string | undefined, cause: string | undefined): string | undefined {
+  if (error === undefined) return undefined
+  if (cause === undefined || cause === '') return error
+  return `${error}:${cause}`
+}
+
+/**
+ * 结束一个任务。
+ *
+ * ⚠️ `cause`（2026-10-16 新增，**可选**）：`last_error` 是**单列**，所以原因以
+ *   `'<error>:<cause>'` 的形式**拼接**在同一格里（规则见 `composeJobError`）。
+ *   `cause` 必须是**闭集具名码**，**不是**异常原文（隐私纪律见调用点）。
+ */
 export async function finishJob(
   db: RawDb,
   id: JobId,
   status: Extract<JobStatus, 'completed' | 'failed'>,
-  options: { error?: string; now?: Timestamp } = {}
+  options: { error?: string; now?: Timestamp; cause?: string } = {}
 ): Promise<void> {
+  const composed = composeJobError(options.error, options.cause)
   await exec(
     db,
     sql`update character_jobs
         set status = ${status}, finished_at = ${options.now ?? Date.now()},
-            last_error = ${options.error ?? null}
+            last_error = ${composed ?? null}
         where id = ${id}
         returning id`,
     '结束任务'

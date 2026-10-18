@@ -12,8 +12,60 @@ import { applyAcceptedEvents } from '../persistence/event-store.ts'
 import { createNativeMemoryStore } from '../persistence/memory-store.ts'
 import { scopeForConversation, scopeMemoryCandidate, withReadScope, withoutReadScope } from '../persistence/read-scope.ts'
 import { advanceWatermark, enqueueJob, finishJob, getWatermark, hasProcessedOperation, markJobRunning } from '../persistence/job-store.ts'
-import { AUTOMATIC_MEMORY_PROCESSOR, AUTOMATIC_MEMORY_VERSION } from '../model/langmem-memory-extractor.ts'
+import { AUTOMATIC_MEMORY_PROCESSOR, AUTOMATIC_MEMORY_VERSION, LangMemWorkerFailure } from '../model/langmem-memory-extractor.ts'
 import { AUTOMATIC_MEMORY_FAILURE_LIMIT, automaticMemoryRetryCounts, automaticMemorySourceKey } from './automatic-memory-control.ts'
+
+/**
+ * 自动记忆失败的**具名原因**（闭集，2026-10-16）。
+ *
+ * ⚠️ 为什么加它：容量测试里出现 2 个 `automatic_memory_extraction_or_commit_failed`
+ *   且**当时无法定位** —— 因为本文件原来写的是 `catch {}`，**异常被整个丢掉**。
+ *   现在保留一个**闭集具名码**：它足够定位，且**不含任何用户内容**。
+ *
+ * 纪律（与本仓库既有做法同型）：
+ * · 只放**具名码**与（worker 失败时的）**退出码**；
+ * · **不放** stderr 正文、**不放** stdout、**不放**用户原话、**不放**模型回复。
+ * · `unknown` 是**诚实的兜底**，不是"什么都塞进来"的口子。
+ */
+export type AutomaticMemoryFailureCause =
+  | 'extractor_worker_timeout'
+  | 'extractor_worker_cancelled'
+  | 'extractor_worker_exit_nonzero'
+  | 'extractor_worker_spawn_failed'
+  | 'extractor_worker_output_over_budget'
+  | 'extractor_worker_stdin_failed'
+  | 'extractor_worker_aborted'
+  | 'source_budget'
+  | 'malformed_output'
+  | 'transaction_unavailable'
+  | 'late_write_fenced'
+  | 'unknown'
+
+/** 把一个异常映射成**闭集**具名码；**永远**不把 `error.message` 原文带出去。 */
+export function automaticMemoryFailureCauseOf(error: unknown): AutomaticMemoryFailureCause {
+  if (error instanceof LangMemWorkerFailure) {
+    switch (error.reason) {
+      case 'timeout': return 'extractor_worker_timeout'
+      case 'cancelled': return 'extractor_worker_cancelled'
+      case 'exit_nonzero': return 'extractor_worker_exit_nonzero'
+      case 'spawn_failed': return 'extractor_worker_spawn_failed'
+      case 'output_over_budget': return 'extractor_worker_output_over_budget'
+      case 'stdin_failed': return 'extractor_worker_stdin_failed'
+      default: return 'extractor_worker_aborted'
+    }
+  }
+  if (error instanceof Error) {
+    if (error.name === 'AbortError') return 'extractor_worker_cancelled'
+    switch (error.message) {
+      case 'automatic_memory_source_budget': return 'source_budget'
+      case 'automatic_memory_malformed_output': return 'malformed_output'
+      case 'automatic_memory_transaction_unavailable': return 'transaction_unavailable'
+      case 'late_write_fenced': return 'late_write_fenced'
+      default: break
+    }
+  }
+  return 'unknown'
+}
 
 export interface AutomaticMemoryReading {
   status: 'cutover' | 'completed' | 'failed' | 'retry_exhausted'
@@ -30,6 +82,12 @@ export interface AutomaticMemoryReading {
   blockedSourceSequence?: number
   failures?: number
   recoveries?: number
+  /**
+   * ⚠️ **只在 `status === 'failed'` 时出现**：这一拍的**闭集**具名失败原因。
+   * 形状见 `AutomaticMemoryFailureCause`。**不含任何用户内容。**
+   * 加它的理由：那 2 个"定位不了"的失败（见 `automaticMemoryFailureCauseOf`）。
+   */
+  cause?: AutomaticMemoryFailureCause
 }
 
 /** A single shared consumer. Native ledger, jobs, validator, events and reducer stay authoritative. */
@@ -169,9 +227,18 @@ export class AutomaticMemoryConsumer {
         createdMemoryIds: outcome.created.map((record) => String(record.id)),
         rejected: outcome.rejections.length + extraction.candidates.length - outcome.candidates })
       return true
-    } catch {
-      await finishJob(db, job.id, 'failed', { error: 'automatic_memory_extraction_or_commit_failed' })
-      this.input.onReading({ status: 'failed', throughSequence: stored.processedThroughSequence, created: 0, rejected: 0 })
+    } catch (error) {
+      /*
+       * ⚠️ 2026-10-16：原来是 `catch {}` —— **异常被整个丢掉**。
+       *   于是容量测试里那 2 个失败"定位不了"：**信息在抛出点就没了**。
+       *   现在保留一个**闭集具名码**（`automaticMemoryFailureCauseOf`），
+       *   它足以定位，且**不含任何用户内容**（不放 stderr / stdout / 原话 / 回复）。
+       *
+       * 顶层 `error` 字符串**逐字不变** ⇒ 既有读数与门不受影响。
+       */
+      const cause = automaticMemoryFailureCauseOf(error)
+      await finishJob(db, job.id, 'failed', { error: 'automatic_memory_extraction_or_commit_failed', cause })
+      this.input.onReading({ status: 'failed', throughSequence: stored.processedThroughSequence, created: 0, rejected: 0, cause })
       return false
     }
     }
