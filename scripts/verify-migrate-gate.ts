@@ -30,14 +30,18 @@
  * 跑法：tsx scripts/verify-migrate-gate.ts
  */
 
+import type { AgentRuntime } from '../src/infrastructure/runtime/eliza-types.ts'
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
+import { applyKernelMigrations as __applyKernelMigrations, getRawDb as __getRawDb } from '../src/infrastructure/persistence/db.ts'
+
 import 'dotenv/config'
 
 import { cpSync, existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { AgentRuntime } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+
+
 import { sql } from 'drizzle-orm'
 
 import { character } from '../src/character/index.ts'
@@ -171,21 +175,20 @@ console.log(`  已复制为副本：${workDir}（真实库全程未被打开写�
 process.env.PGLITE_DATA_DIR = workDir
 
 const makeRuntime = (): AgentRuntime =>
-  new AgentRuntime({
-    character,
-    plugins: [sqlPlugin],
-    conversationLength: 16,
+  createThinHostRuntime({
+    character: character,
     settings: {
       OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? '',
       OPENAI_BASE_URL: process.env.OPENAI_BASE_URL ?? 'https://api.deepseek.com',
       OPENAI_LARGE_MODEL: process.env.OPENAI_LARGE_MODEL ?? 'deepseek-flash',
       OPENAI_SMALL_MODEL: process.env.OPENAI_SMALL_MODEL ?? 'deepseek-flash',
     },
+    conversationLength: 16,
   })
 
 const setupRuntime = makeRuntime()
-await setupRuntime.registerPlugin(sqlPlugin)
-await setupRuntime.runPluginMigrations()
+await setupRuntime.registerPlugin(undefined as never)
+await await __applyKernelMigrations(__getRawDb(setupRuntime))
 
 const db = getRawDb(setupRuntime)
 // 回退一格：删掉 0003 建的东西与它的迁移记录，制造"有待应用迁移"
@@ -204,7 +207,7 @@ console.log('  已把副本的迁移表回退到 v2（模拟"有待应用迁移"
 const blockedRuntime = makeRuntime()
 let refusal: { code?: string } | undefined
 try {
-  await initDatabase(blockedRuntime, sqlPlugin)
+  await initDatabase(blockedRuntime)
 } catch (err) {
   refusal = err as { code?: string }
 }

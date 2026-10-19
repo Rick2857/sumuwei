@@ -34,13 +34,15 @@
  *  · 不调模型、不出站；纯本地读写沙箱。
  *  · 计数型自检：每条测量都有非零分母（AGENTS §6.8）。
  */
+import type { Character } from '../src/infrastructure/runtime/eliza-types.ts'
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
 import 'dotenv/config'
 
 import { isolateDatabase } from '../src/dev/sandbox.ts'
 isolateDatabase('m7-wp0-admission', { keep: false })
 
-import { AgentRuntime, type Character } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+
+
 
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
@@ -166,8 +168,11 @@ function staticCodeFacts(): Check[] {
 // ---------------------------------------------------------------------------
 
 async function main(): Promise<void> {
-  const runtime = new AgentRuntime({ character: character as Character, plugins: [], settings: {} })
-  await initDatabase(runtime, sqlPlugin)
+  const runtime = createThinHostRuntime({
+    character: character,
+    settings: {},
+  })
+  await initDatabase(runtime)
   await runtime.initialize()
   const kernel = await initKernel(runtime, {
     definition: characterDefinitionFromCharacter(character),

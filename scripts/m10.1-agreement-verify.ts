@@ -23,6 +23,7 @@
  * ```
  */
 
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
 import 'dotenv/config'
 
 import { isolateDatabase } from '../src/dev/sandbox.ts'
@@ -32,8 +33,8 @@ import { execFileSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
-import { AgentRuntime } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+
+
 
 import { createM11RunId, openM11RunDir, writeM11Manifest, M11_MANIFEST_VERSION } from './m11-evidence.ts'
 import { character } from '../src/character/index.ts'
@@ -205,8 +206,11 @@ record(
 /* ---------------------------------------------------------------------------
  * B / E：真库（隔离）
  * ------------------------------------------------------------------------- */
-const agentRuntime = new AgentRuntime({ character, plugins: [] })
-await initDatabase(agentRuntime, sqlPlugin)
+const agentRuntime = createThinHostRuntime({
+    character: character,
+    settings: {},
+  })
+await initDatabase(agentRuntime)
 const db = getRawDb(agentRuntime)
 
 const goalEvents = async (): Promise<string[]> =>

@@ -502,10 +502,10 @@ const dbCode = stripComments(dbSource)
 const initIndex = dbCode.indexOf('export async function initDatabase(')
 check(
   'T24',
-  '静态：中央闸在 `initDatabase()` 里且**先于** `runtime.registerPlugin(sqlPlugin)`；闸判据包含真实库重叠判定',
+  '静态：中央闸在 `initDatabase()` 里且**先于** `runtime.registerPlugin(undefined as never)`；闸判据包含真实库重叠判定',
   initIndex >= 0 &&
     dbCode.indexOf('assertDatabaseAccessAllowed()', initIndex) > initIndex &&
-    dbCode.indexOf('await runtime.registerPlugin(sqlPlugin)', initIndex) >
+    dbCode.indexOf('await runtime.registerPlugin(undefined as never)', initIndex) >
       dbCode.indexOf('assertDatabaseAccessAllowed()', initIndex) &&
     /isProductionDir\(/.test(dbCode) &&
     isProductionDir(PRODUCTION_DB_DIR) &&

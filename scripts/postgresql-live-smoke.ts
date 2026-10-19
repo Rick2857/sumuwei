@@ -23,15 +23,18 @@
  *
  * 跑法：pnpm with-test-model pnpm postgresql:live:smoke
  */
+import type { AgentRuntime, Character } from '../src/infrastructure/runtime/eliza-types.ts'
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
+
 import 'dotenv/config'
 
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-import type { Character } from '@elizaos/core'
-import { AgentRuntime } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+
+
+
 
 import { character } from '../src/character/index.ts'
 import { isolateDatabase } from '../src/dev/sandbox.ts'
@@ -187,13 +190,12 @@ async function main(): Promise<void> {
       mkdirSync(fallback, { recursive: true })
       process.env.PGLITE_DATA_DIR = fallback
 
-      const created2 = new AgentRuntime({
-        character: character as Character,
-        plugins: [],
-        settings: { POSTGRES_URL: url },
-      })
+      const created2 = createThinHostRuntime({
+    character: character,
+    settings: { POSTGRES_URL: url },
+  })
       runtime = created2
-      await initDatabase(created2, sqlPlugin)
+      await initDatabase(created2)
       await created2.initialize()
       const kernel = await initKernel(created2, { definition: characterDefinitionFromCharacter(character) })
       const db = kernel.stores.db as never

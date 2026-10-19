@@ -23,13 +23,15 @@
  *  （WP7-C）· 量具三段式自证（各检测器的注入必响已在 WP2–WP6 门内逐个证过，
  *  本门 R 段是链路级恢复控）。真实库不打开（isolateDatabase）。
  */
+import type { Character } from '../src/infrastructure/runtime/eliza-types.ts'
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
 import 'dotenv/config'
 
 import { isolateDatabase } from '../src/dev/sandbox.ts'
 isolateDatabase('m8-e2e-verify', { keep: false })
 
-import { AgentRuntime, type Character } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+
+
 import { execFileSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -153,8 +155,11 @@ function withFailing(real: RawDb, marker: RegExp, tag: string): RawDb {
 // ---------------------------------------------------------------------------
 
 async function main(): Promise<void> {
-  const runtime = new AgentRuntime({ character: character as Character, plugins: [], settings: {} })
-  await initDatabase(runtime, sqlPlugin)
+  const runtime = createThinHostRuntime({
+    character: character,
+    settings: {},
+  })
+  await initDatabase(runtime)
   await runtime.initialize()
   const kernel = await initKernel(runtime, {
     definition: characterDefinitionFromCharacter(character),

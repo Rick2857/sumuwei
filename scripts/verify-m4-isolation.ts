@@ -58,7 +58,8 @@ import {
   contaminatedMemories,
   unsupportedMemories,
 } from '../src/infrastructure/persistence/memory-store.ts'
-import { stringToUuid } from '@elizaos/core'
+import { stringToUuid } from '../src/kernel/contracts/uuid.ts'
+
 
 import { rowsOf } from '../src/infrastructure/persistence/db.ts'
 

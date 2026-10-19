@@ -27,14 +27,17 @@
  * 跑法：pnpm exec tsx scripts/inspect-memory-integrity.ts
  */
 
+import type { Character } from '../src/infrastructure/runtime/eliza-types.ts'
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
+import { applyKernelMigrations as __applyKernelMigrations, getRawDb as __getRawDb } from '../src/infrastructure/persistence/db.ts'
 import 'dotenv/config'
 
 import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
-import { AgentRuntime, type Character } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+
+
 import { sql } from 'drizzle-orm'
 
 import { character } from '../src/character/index.ts'
@@ -73,9 +76,12 @@ if (resolve(process.env.PGLITE_DATA_DIR) !== resolve(target)) {
   throw new Error(`拒绝打开非副本库：PGLITE_DATA_DIR=${process.env.PGLITE_DATA_DIR}`)
 }
 
-const runtime = new AgentRuntime({ character: character as Character, plugins: [] })
-await runtime.registerPlugin(sqlPlugin)
-await runtime.runPluginMigrations()
+const runtime = createThinHostRuntime({
+    character: character,
+    settings: {},
+  })
+await runtime.registerPlugin(undefined as never)
+await await __applyKernelMigrations(__getRawDb(runtime))
 
 const db = getRawDb(runtime)
 

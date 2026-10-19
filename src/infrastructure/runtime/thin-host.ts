@@ -81,12 +81,25 @@ export interface ThinDbAdapter {
 
 export interface ThinHostOptions {
   /** 与旧 `new AgentRuntime({ character, ... })` 的形状对齐 */
-  character: { name: string; id?: string }
+  character: { name: string; id?: string; system?: string }
   agentId: string
   settings: Record<string, string>
   /** 由调用方注入的 pg Pool（**薄宿主不自己 new Pool**：连接策略归部署层） */
   pool: { query: (q: unknown) => Promise<unknown>; end?: () => Promise<void>; ended?: boolean }
   logger: { info: (m: string) => void; warn: (m: string) => void; error: (m: string) => void; debug: (m: string) => void }
+  /**
+   * 建 drizzle 包装层 —— **按后端选驱动**。
+   *
+   * ⚠️ 缺省是 `drizzle-orm/node-postgres`（**只**适用于 PG 的 `pg.Pool`）。
+   *    PGlite 必须用 `drizzle-orm/pglite`，且要喂**原始 PGlite 客户端**（不是池包装）
+   *    —— 否则驱动读 `pool.options.dialect` 会炸（实测 2026-10-19：
+   *    `Cannot read properties of undefined (reading 'dialect')`）。
+   *
+   * 📌 存在这个参数的原因：D3 正在把后端统一到 PostgreSQL，但**过渡期**两种后端都要能用，
+   *    而"选错驱动"这件事**只有真的连一次库**才会暴露（所有薄宿主门都跑在 PG 上，
+   *    所以这个洞一直藏着）。
+   */
+  makeDb?: (handle: unknown) => RawDb
 }
 
 /** 薄宿主自己的一份日志（不引 ElizaOS 的 logger） */
@@ -102,7 +115,7 @@ export function thinLogger(): ThinHostOptions['logger'] {
 
 export class ThinHostRuntime {
   readonly agentId: string
-  readonly character: { name: string; id?: string }
+  readonly character: { name: string; id?: string; system?: string }
   readonly settings: Record<string, string>
   readonly logger: ThinHostOptions['logger']
   readonly events: Record<string, ((payload: unknown) => void)[]> = {}
@@ -110,6 +123,7 @@ export class ThinHostRuntime {
   adapter!: ThinDbAdapter
 
   private readonly pool: ThinHostOptions['pool']
+  private readonly makeDb: ThinHostOptions['makeDb']
   private stopped = false
   private initialized = false
 
@@ -118,6 +132,7 @@ export class ThinHostRuntime {
     this.agentId = options.agentId
     this.settings = options.settings
     this.pool = options.pool
+    this.makeDb = options.makeDb
     this.logger = options.logger
   }
 
@@ -132,7 +147,16 @@ export class ThinHostRuntime {
    *    旧宿主需要 `withGuardTimersUnrefed()` 这个猴子补丁才能退出干净，
    *    薄宿主**从结构上就没有那个问题**，因此该补丁可以退役。
    */
-  async initialize(): Promise<{ services: string[] }> {
+  async initialize(_options?: { skipMigrations?: boolean; [k: string]: unknown }): Promise<{ services: string[] }> {
+    /*
+     * ⚠️ 参数**接受但不使用**（M12 · W4 的接口兼容）：上游签名是
+     *    `initialize(options?: InitializeOptions)`，而几十个脚本调用时
+     *    写的是 `initialize({ skipMigrations: false })`。
+     *    薄宿主**从不**跑 DDL ⇒ 这个开关对它没有对象 ⇒ 收下、忽略。
+     *    ⚠️ 不收下就会报 `Expected 0 arguments, but got 1` ⇒ 那等于
+     *    要求每个调用点都改一句 —— 而"换实现不换接口"正是本里程碑的前提。
+     */
+    void _options
     if (this.initialized) return { services: [] }
     this.initialized = true
     this.logger.info('薄宿主就绪：无常驻轮询服务、无上游守卫定时器')
@@ -158,7 +182,9 @@ export class ThinHostRuntime {
    *    schema 安装属于显式维护入口（`pnpm migrate:apply`）。
    */
   async registerPlugin(_plugin: unknown): Promise<void> {
-    const db = drizzle(this.pool as never)
+    // ⚠️ 驱动由调用方按后端决定（见 ThinHostOptions.makeDb 的说明）：
+    //    PG ⇒ drizzle-orm/node-postgres；PGlite ⇒ drizzle-orm/pglite。
+    const db = this.makeDb === undefined ? drizzle(this.pool as never) : this.makeDb(this.pool)
     this.adapter = {
       db: db as unknown as RawDb,
       manager: { getConnection: () => this.pool as never },
@@ -217,8 +243,7 @@ export class ThinHostRuntime {
     if (typeof handler !== 'function') {
       throw new KernelError('persistence_error', 'thin_host_no_model_handler', `没有可用的处理器：${modelType}`)
     }
-    const shim = { logger: this.logger, getSetting: (k: string) => this.settings[k] }
-    return handler(shim, params)
+    return handler(this, params)
   }
 
   // -------------------------------------------------------------------------
@@ -487,7 +512,16 @@ export class ThinHostRuntime {
    * ⇒ 具名错误 + 明确的处置指引，让它**响亮地**失败。
    *    新链路（默认）根本不经过这里，所以这不影响正常对话。
    */
-  async composeState(_input: unknown): Promise<never> {
+  async composeState(message: unknown, includeList?: unknown, onlyInclude?: boolean): Promise<never> {
+    /*
+     * ⚠️ 三个参数**照上游签名收下**（M12 · W4 的接口兼容）：旧上下文链路
+     *    `builder.ts` 调 `composeState(message, includeList, onlyInclude)`。
+     *    薄宿主**失败关闭**（下面照旧抛）⇒ 这三个值对它**没有对象**。
+     *    ⚠️ 不收下就报 `Expected 1 arguments, but got 3`。
+     */
+    void message
+    void includeList
+    void onlyInclude
     throw new KernelError(
       'persistence_error',
       'thin_host_no_legacy_providers',

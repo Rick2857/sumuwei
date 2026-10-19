@@ -11,6 +11,8 @@
  * ```
  *
  * ⚠️ 全部??*隔离??*上跑（`isolateDatabase`）；**绝不**打开真实库?? * ⚠️ 量具有效性：每条判据都有**正控**（该过的过）??*负控**（不该过的必须被拒）?? *    并统??`measured_count`?? 0 才算量过东西）?? */
+import type { Character, Plugin } from '../src/infrastructure/runtime/eliza-types.ts'
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
 import 'dotenv/config'
 
 import { readFileSync } from 'node:fs'
@@ -19,8 +21,8 @@ import { createServer } from 'node:net'
 import { resolve } from 'node:path'
 import { ENTRY_PROTOCOL_VERSION } from '../src/infrastructure/qq/entry-handshake.ts'
 import { sql } from 'drizzle-orm'
-import { AgentRuntime, type Character, type Plugin } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+
+
 
 import { character } from '../src/character/index.ts'
 import { isolateDatabase } from '../src/dev/sandbox.ts'
@@ -228,13 +230,12 @@ const OWNER_ID = '10001'
 const OWNER_BOT_ID = '10002'
 const COEXIST_TOKEN = 'wp5-coexist-token-0123456789ab'
 
-const runtime = new AgentRuntime({
-  character: character as Character,
-  plugins: [sqlPlugin] as Plugin[],
-  conversationLength: 16,
-  settings: { OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? '' },
-})
-await initDatabase(runtime, sqlPlugin)
+const runtime = createThinHostRuntime({
+    character: character,
+    settings: { OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? '' },
+    conversationLength: 16,
+  })
+await initDatabase(runtime)
 
 const db = getRawDb(runtime)
 
@@ -1211,13 +1212,12 @@ try {
 }
 
 /* 重开之后再暂停一次，然后**再次**关掉重开，验??暂停"也活过重??*/
-const reopenedRuntime = new AgentRuntime({
-  character: character as Character,
-  plugins: [sqlPlugin] as Plugin[],
-  conversationLength: 16,
-  settings: { OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? '' },
-})
-await initDatabase(reopenedRuntime, sqlPlugin)
+const reopenedRuntime = createThinHostRuntime({
+    character: character,
+    settings: { OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? '' },
+    conversationLength: 16,
+  })
+await initDatabase(reopenedRuntime)
 const db2 = getRawDb(reopenedRuntime)
 const pausedAfterRestart = await pauseNotifications(db2, {
   characterId, reason: 'post_restart_pause', permissionVersion: 'perm@4', policyVersion: 'policy@1',

@@ -1,10 +1,14 @@
+import type { Character, Plugin } from '../src/infrastructure/runtime/eliza-types.ts'
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
 import 'dotenv/config'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { AgentRuntime, ModelType, stringToUuid, type Character, type Plugin } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+import { ModelType } from '../src/infrastructure/runtime/eliza-vocabulary.ts'
+import { stringToUuid } from '../src/kernel/contracts/uuid.ts'
+
+
 import { sql } from 'drizzle-orm'
 import { character } from '../src/character/index.ts'
 import { initDatabase } from '../src/db/index.ts'
@@ -44,11 +48,14 @@ const evidenceRoot = resolve(`artifacts/post-lv2/model-memory/${live ? 'live' : 
 mkdirSync(evidenceRoot, { recursive: true })
 const results: { name: string; pass: boolean; detail?: string; raw?: string; domainEvents?: number }[] = []
 const sandbox = isolateDatabase('model-memory', { keep: true })
-const runtime = new AgentRuntime({ character: character as Character, plugins: [sqlPlugin] as Plugin[], settings: {
+const runtime = createThinHostRuntime({
+    character: character,
+    settings: {
   OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? 'unused', OPENAI_BASE_URL: process.env.OPENAI_BASE_URL ?? '',
   OPENAI_LARGE_MODEL: process.env.OPENAI_LARGE_MODEL ?? '',
-} })
-await initDatabase(runtime, sqlPlugin)
+},
+  })
+await initDatabase(runtime)
 const kernel = await initKernel(runtime, { definition: characterDefinitionFromCharacter(character), registry: createFullDomainEventRegistry() })
 const db = getRawDb(runtime)
 const store = createNativeMemoryStore(db)

@@ -73,8 +73,8 @@ cpSync(SOURCE_DB, copyDir, { recursive: true })
 process.env.PGLITE_DATA_DIR = copyDir
 process.env.PROJECT_LG_SANDBOX = copyDir
 
-const { AgentRuntime } = await import('@elizaos/core')
-const sqlPlugin = (await import('@elizaos/plugin-sql')).default
+const { createThinHostRuntime } = await import('../src/infrastructure/runtime/thin-host-factory.ts')
+
 const { character } = await import('../src/character/index.ts')
 const { initDatabase } = await import('../src/db/index.ts')
 const { getRawDb } = await import('../src/infrastructure/persistence/db.ts')
@@ -129,8 +129,11 @@ const fixedProvider = (slot?: string) => ({
   },
 })
 
-const runtime = new AgentRuntime({ character, plugins: [] })
-await initDatabase(runtime, sqlPlugin)
+const runtime = createThinHostRuntime({
+      character: character,
+      settings: {},
+    })
+await initDatabase(runtime)
 const db = getRawDb(runtime)
 const characterId = runtime.character.id as CharacterId
 const processorVersion = 'reflection-scheduler@1'

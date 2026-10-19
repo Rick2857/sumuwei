@@ -16,8 +16,9 @@
  * `messageHandlerTemplate` 渲染进最终 prompt（见 src/context/builder.ts）。
  */
 
-import type { IAgentRuntime, Memory, Provider } from '@elizaos/core'
 
+
+import type { IAgentRuntime, Memory, Provider } from '../infrastructure/runtime/eliza-types.ts'
 import { applyDecay } from './decay.ts'
 import { loadState } from './repository.ts'
 import type { CharacterState } from './types.ts'

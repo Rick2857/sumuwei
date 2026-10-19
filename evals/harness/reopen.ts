@@ -14,9 +14,11 @@
  * 且本文件只做只读查询，不写任何事件。
  */
 
-import { AgentRuntime, type Character } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
-import bootstrapPlugin from '@elizaos/plugin-bootstrap'
+import type { Character } from '../../src/infrastructure/runtime/eliza-types.ts'
+import { createThinHostRuntime } from '../../src/infrastructure/runtime/thin-host-factory.ts'
+
+
+
 
 import { character } from '../../src/character/index.ts'
 import { initDatabase } from '../../src/db/index.ts'
@@ -43,12 +45,11 @@ export async function openKernelOnExistingDir(dataDirOverride?: string): Promise
     throw new Error(`拒绝在真实对话库上做连续性实验：${dir}`)
   }
 
-  const runtime = new AgentRuntime({
-    character: character as Character,
-    plugins: [bootstrapPlugin],
+  const runtime = createThinHostRuntime({
+    character: character,
     settings: {},
   })
-  await initDatabase(runtime, sqlPlugin)
+  await initDatabase(runtime)
   await runtime.initialize()
 
   const kernel = await initKernel(runtime, { definition: characterDefinitionFromCharacter(character) })

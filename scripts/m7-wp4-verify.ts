@@ -19,13 +19,15 @@
  * 量具纪律：§6.7 三段式 + §6.8 measured_count 自检；隔离库（本文件顶部），
  * 真实库不打开。
  */
+import type { Character } from '../src/infrastructure/runtime/eliza-types.ts'
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
 import 'dotenv/config'
 
 import { isolateDatabase } from '../src/dev/sandbox.ts'
 isolateDatabase('m7-wp4-verify', { keep: false })
 
-import { AgentRuntime, type Character } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+
+
 import { execFileSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -105,8 +107,11 @@ function near(a: number, b: number): boolean {
 // ---------------------------------------------------------------------------
 
 async function main(): Promise<void> {
-  const runtime = new AgentRuntime({ character: character as Character, plugins: [], settings: {} })
-  await initDatabase(runtime, sqlPlugin)
+  const runtime = createThinHostRuntime({
+    character: character,
+    settings: {},
+  })
+  await initDatabase(runtime)
   await runtime.initialize()
   const kernel = await initKernel(runtime, {
     definition: characterDefinitionFromCharacter(character),

@@ -17,7 +17,7 @@
  *   state_events      每次状态变化一行，存 before / delta / after / reason
  */
 
-import type { IAgentRuntime } from '@elizaos/core'
+import type { IAgentRuntime } from '../infrastructure/runtime/eliza-types.ts'
 import { sql } from 'drizzle-orm'
 
 import { KernelError } from '../kernel/contracts/index.ts'

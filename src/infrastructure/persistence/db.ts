@@ -134,6 +134,63 @@ export function firstRow<T>(rows: Record<string, unknown>[]): T | undefined {
 // 迁移
 // ---------------------------------------------------------------------------
 
+/**
+ * 把一条迁移语句改写成**幂等**形式。
+ *
+ * ⚠️ 为什么在**执行层**统一处理，而不是逐条改迁移（2026-10-19 实测）：
+ *   PostgreSQL **既不支持** `ADD CONSTRAINT IF NOT EXISTS`，**也不支持**
+ *   `CREATE POLICY IF NOT EXISTS`；而既有迁移里有十几条裸的 `add constraint`
+ *   与七条裸的 `create policy`。
+ *   逐条改必然**漏**（第一版只改了 `v7AttributionCheckStatements`，
+ *   门立刻报出漏掉的 `command_type_vocab`；扩到 policy 后同理）。
+ *   ⇒ 在这里一处包住，对**所有**迁移与**所有**语句类型生效，新写的迁移也不必记得手包。
+ *
+ * ⚠️ 这**不改变**正常路径的行为：`applyKernelMigrations()` 会按 `applied` 跳过
+ *   已应用迁移，裸语句本来就不会重跑。改它是为了让迁移**自证幂等** ——
+ *   门 `thinhost:lgmigration:verify` 的 I1（第二遍必须无错）就是靠它。
+ *
+ * 判据与 PostgreSQL 自身 `already exists` 的报错口径一致：
+ *   · 约束 → `pg_constraint.conname`
+ *   · 策略 → `pg_policies`（按 schemaname + tablename + policyname）
+ */
+function toIdempotentStatement(statement: string): string {
+  const trimmed = statement.trim()
+
+  // ---- ① alter table … add constraint ------------------------------------
+  const c = /^alter\s+table\s+([^\s]+)\s+add\s+constraint\s+([^\s]+)\s+([\s\S]+)$/i.exec(trimmed)
+  if (c !== null) {
+    const table = c[1]!.replace(/'/g, "''")
+    const name = c[2]!.replace(/'/g, "''")
+    return (
+      `do $$ begin\n` +
+      `  if not exists (select 1 from pg_constraint where conname = '${name}') then\n` +
+      `    alter table ${table} add constraint ${c[2]} ${c[3]!.trim()};\n` +
+      `  end if;\n` +
+      `end $$;`
+    )
+  }
+
+  // ---- ② create policy <name> on <table> … --------------------------------
+  const p = /^create\s+policy\s+([^\s]+)\s+on\s+([^\s]+)\s+([\s\S]+)$/i.exec(trimmed)
+  if (p !== null) {
+    const policy = p[1]!.replace(/'/g, "''")
+    const table = p[2]!
+    const bare = table.replace(/^public\./i, '')
+    return (
+      `do $$ begin\n` +
+      `  if not exists (\n` +
+      `    select 1 from pg_policies\n` +
+      `     where schemaname = 'public' and tablename = '${bare}' and policyname = '${policy}'\n` +
+      `  ) then\n` +
+      `    ${trimmed};\n` +
+      `  end if;\n` +
+      `end $$;`
+    )
+  }
+
+  return statement
+}
+
 const MIGRATION_TABLE = `create table if not exists character_schema_migrations (
   version     integer primary key,
   name        text    not null,
@@ -184,7 +241,7 @@ export async function applyKernelMigrations(db: RawDb): Promise<MigrationReport>
       for (const statement of migration.statements) {
         await exec(
           target,
-          sql.raw(statement),
+          sql.raw(toIdempotentStatement(statement)),
           `迁移 ${migration.version}（${migration.name}）执行失败`
         )
       }

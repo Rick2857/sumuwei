@@ -42,9 +42,9 @@ const runId = `u1-new-user-rel-${new Date().toISOString().replace(/[:.]/g, '-').
 const sandbox = isolateDatabase('u1-new-user-relationship', { runId, keep: true })
 console.log(`  [sandbox] ${sandbox.dir}`)
 
-const { AgentRuntime } = await import('@elizaos/core')
-type Character = import('@elizaos/core').Character
-const sqlPlugin = (await import('@elizaos/plugin-sql')).default
+const { createThinHostRuntime } = await import('../src/infrastructure/runtime/thin-host-factory.ts')
+type Character = import('../src/infrastructure/runtime/eliza-types.ts').Character
+
 const { character } = await import('../src/character/index.ts')
 const { initDatabase } = await import('../src/db/index.ts')
 const { initKernel } = await import('../src/kernel/app/kernel.ts')
@@ -71,8 +71,11 @@ const record = (id: string, label: string, pass: boolean, detail: string): void 
   console.log(`  ${pass ? '✅' : '❌'} ${id} ${label} —— ${detail}`)
 }
 
-const runtime = new AgentRuntime({ character: character as Character, plugins: [], settings: {} })
-await initDatabase(runtime, sqlPlugin)
+const runtime = createThinHostRuntime({
+      character: character,
+      settings: {},
+    })
+await initDatabase(runtime)
 await runtime.initialize()
 const kernel = await initKernel(runtime, { definition: characterDefinitionFromCharacter(character) })
 const db = kernel.stores.db

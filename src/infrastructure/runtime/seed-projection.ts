@@ -32,8 +32,7 @@
  * 旧链路 `--dump-prompt --legacy` 也看得到），只是**不属于 Seed**。
  */
 
-import type { Character } from '@elizaos/core'
-
+import type { Character } from './eliza-types.ts'
 import {
   buildCharacterDefinition,
   CHARACTER_SLUG,

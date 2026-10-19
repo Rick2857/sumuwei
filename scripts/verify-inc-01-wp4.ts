@@ -850,8 +850,8 @@ try {
   process.env.PROJECT_LG_ALLOW_PRODUCTION_DB = '1'
   delete process.env.PROJECT_LG_SANDBOX
 
-  const { AgentRuntime } = await import('@elizaos/core')
-  const sqlPlugin = (await import('@elizaos/plugin-sql')).default
+  const { createThinHostRuntime } = await import('../src/infrastructure/runtime/thin-host-factory.ts')
+  
   const { character } = await import('../src/character/index.ts')
   const { initDatabase } = await import('../src/db/index.ts')
   const { closeDatabaseConnection, isDatabaseClosed } = await import(
@@ -866,14 +866,13 @@ try {
     b16GateAllowsCopy = false
   }
 
-  const runtime = new AgentRuntime({
-    character,
-    plugins: [sqlPlugin],
-    conversationLength: 4,
-    settings: { OPENAI_API_KEY: 'offline-probe' },
-  })
+  const runtime = createThinHostRuntime({
+      character: character,
+      settings: { OPENAI_API_KEY: 'offline-probe' },
+      conversationLength: 4,
+    })
   // 空目录：`initDatabase` 会把表建起来（**不是**真实库）
-  await initDatabase(runtime, sqlPlugin)
+  await initDatabase(runtime)
   const adapter = (runtime as unknown as { adapter?: { constructor?: { name?: string } } }).adapter
   b16AdapterCtor = adapter?.constructor?.name ?? 'unknown'
   b16Before = isDatabaseClosed(runtime)
@@ -952,10 +951,10 @@ const mainCode = stripComments(mainSrc)
 
 const c1Init = dbSrc.indexOf('export async function initDatabase(')
 const c1Gate = dbSrc.indexOf('assertDatabaseAccessAllowed()', c1Init)
-const c1Register = dbSrc.indexOf('await runtime.registerPlugin(sqlPlugin)', c1Init)
+const c1Register = dbSrc.indexOf('await runtime.registerPlugin(undefined as never)', c1Init)
 check(
   'C1',
-  'AT4.1：中央闸在 `initDatabase()` 的 `runtime.registerPlugin(sqlPlugin)` **之前**（按源码位置核对）',
+  'AT4.1：中央闸在 `initDatabase()` 的 `runtime.registerPlugin(undefined as never)` **之前**（按源码位置核对）',
   c1Init >= 0 && c1Gate > c1Init && c1Register > c1Gate,
   `initDatabase@${c1Init} gate@${c1Gate} registerPlugin@${c1Register}`
 )
@@ -974,7 +973,7 @@ check(
  * C3：`initDatabase` 的**唯一**调用形态是"被塞进状态机的 `openDatabase` 注入点"。
  * 刻意不按"文本先后"判（那会误判：闭包定义在 `prepareProductionOpen(...)` 调用之前），
  * 而是判三件事：
- *   ① 只出现 2 次 `ready = await initDatabase(runtime, sqlPlugin)`（两处 opener）
+ *   ① 只出现 2 次 `ready = await initDatabase(runtime)`（两处 opener）
  *   ② 只出现 2 个 `const openDatabase = async` 闭包，且两处都把 `openDatabase` 传进 deps
  *   ③ 收尾走 `handle.finish(..., afterClose: true)`
  */

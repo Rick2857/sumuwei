@@ -5,6 +5,7 @@
  *   运行时装配 → 数据库 → 房间/参与者 → 每轮 Context 组装 → 调模型 → 存消息
  * 角色定义在 src/character/，上下文组装在 src/context/builder.ts。
  */
+import type { AgentRuntime, UUID } from './infrastructure/runtime/eliza-types.ts'
 import 'dotenv/config'
 import { checkImageInputs, ImageInputStore } from './infrastructure/media/image-input.ts'
 import type { ImageInput } from './kernel/contracts/image-input.ts'
@@ -19,19 +20,45 @@ import { join, resolve } from 'node:path'
 import { createInterface } from 'node:readline/promises'
 import { stdin as input, stdout as output } from 'node:process'
 
-import {
-  AgentRuntime,
-  ChannelType,
-  EventType,
-  ModelType,
-  logger,
-  type Memory,
-  type Plugin,
-  type UUID,
-} from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
-import openaiPlugin from '@elizaos/plugin-openai'
-import bootstrapPlugin from '@elizaos/plugin-bootstrap'
+
+/*
+ * ⚠️ `EventType` / `ModelType` / `ChannelType` 已从 ElizaOS 独立出来（M12 · W2-③）。
+ *
+ * 运行时它们**只是字符串**（`runtime.events[event]` 的键、`models[modelType]` 的键）
+ * ⇒ 换成本地同值常量，行为不变。
+ * 取值抄自上游 `@elizaos/core@1.7.2` dist/node/index.node.js
+ * （ModelType :25288 / EventType :25409 / ChannelType :25204）。
+ *
+ * ⚠️ `ChannelType` 的**值**也本地化了；它的**类型**仍指向上游（名义类型）——
+ *   因为它出现在 `Memory.content.channelType` / `Room.type` 这两个**上游类型字段**里。
+ *   ⇒ 本地那一份的**运行时值与上游逐字相同**（`'DM'`），类型问题留给 W4。
+ */
+import { ChannelType, EventType, ModelType } from './infrastructure/runtime/eliza-vocabulary.ts'
+/*
+ * ⚠️ `logger` 已从 ElizaOS 独立出来（M12 · W2）。
+ *
+ * ⚠️ **行为与上游同形**：默认 sink 写 stdout/stderr（上游 `info`→stdout、`warn`/`error`→stderr，
+ *    2026-10-19 实测）。
+ *    ⚠️ 生产 journal 里看不到这些行，是因为核心被 `LgStdioClient` spawn 时
+ *    **stdout 走管道不转发**（与 logger 实现无关）。
+ *    ⇒ 本实现**必须**同形：在能看见 stdout 的场合（本地/CLI/测试），
+ *    不写就是**真实的行为差异**（日志凭空消失）。
+ *
+ * 📌 本文件里 90+ 处 `logger.*` 调用**一行都不用改** —— 这正是把 logger 收进本仓库的
+ *    实际收益：将来要让这些日志落 journal，**只改 logger.ts 里的 sink 一处**。
+ */
+import { logger } from './infrastructure/telemetry/logger.ts'
+/*
+ * ⚠️ `sqlPlugin`（`@elizaos/plugin-sql`）的 import 已删除（M12 · W2-③，2026-10-19）。
+ *
+ * 理由：薄宿主的 `registerPlugin()` **不解释插件** —— 它只注册适配器、**不跑任何 DDL**
+ * ⇒ 那个值在薄宿主下**没有对象**。
+ * 而 `initDatabase(runtime, sqlPlugin)` 的第二参数**已改为可选**
+ * （见 src/db/index.ts 的说明）⇒ 薄宿主路径**不必**再 import 它。
+ *
+ * ⚠️ `scripts/` 里的旧宿主调用点**仍然传** `sqlPlugin`（参数可选 ⇒ 传了照旧生效），
+ *   那些是 W3 的迁移范围。
+ */
 
 /*
  * ⚠️ `stringToUuid` 已从 ElizaOS 独立出来（2026-10-18）。
@@ -47,7 +74,13 @@ import bootstrapPlugin from '@elizaos/plugin-bootstrap'
 import { stringToUuid } from './kernel/contracts/uuid.ts'
 
 import { character } from './character/index.ts'
-import { buildTurnContext } from './context/builder.ts'
+/*
+ * ⚠️ `buildTurnContext` 的 import 已删除（M12 · D2）：它是**旧上下文链路**的唯一入口
+ *   （`composeState` + `composePromptFromState` + `messageHandlerTemplate`），
+ *   而旧链路已退役（薄宿主不实现 provider 体系）。
+ *   📌 旧链路本身**仍保留在 `src/context/builder.ts` 里（可读）** ——
+ *      D2 要求"保留可读 + 无调用者"，判据见 `thinhost:retirement:verify` 的 R6。
+ */
 import { allowKernelMigration, allowProductionDatabase, initDatabase, type DbReady } from './db/index.ts'
 import { isProductionDir } from './dev/sandbox.ts'
 /*
@@ -96,8 +129,13 @@ import {
   productionSnapshotRootOf,
   type ProductionOpenHandle,
 } from './infrastructure/persistence/production-open-guard.ts'
-import { createPersistentCharacterPlugin } from './plugin/persistent-character.ts'
-import { openAiCompatiblePlugin } from './providers/openai-compatible.ts'
+/*
+ * ⚠️ `createPersistentCharacterPlugin` / `openAiCompatiblePlugin` 的 import 已删除
+ *   （M12 · D2，2026-10-19）：它们只服务已删除的 ElizaOS 插件装配。
+ *   ⚠️ `openAiCompatiblePlugin` **仍被薄宿主自己导入**
+ *   （`src/infrastructure/runtime/thin-host.ts:53`）—— `useModel` 查它的 `models` 表，
+ *   模型能力没有因此消失。
+ */
 import { resolveCurrentState } from './state/provider.ts'
 import { initCharacterState } from './state/init.ts'
 /*
@@ -118,7 +156,7 @@ import {
 } from './infrastructure/telemetry/index.ts'
 import { TelemetryRecorder } from './infrastructure/telemetry/recorder.ts'
 import { ConversationRecorder } from './infrastructure/runtime/conversation-recorder.ts'
-import { createThinHostRuntime, thinHostEnabled } from './infrastructure/runtime/thin-host-factory.ts'
+import { createThinHostRuntime } from './infrastructure/runtime/thin-host-factory.ts'
 /*
  * WP6.1（K-28）：对话 ingress 的**受信归因装配**。
  *
@@ -146,10 +184,7 @@ import {
 /** post-Lv2 / ADR-109 `D06`：双入口的**有界轮转公平**调度（一次一轮） */
 import { FairTurnScheduler } from './kernel/app/bridge/turn-scheduler.ts'
 import {
-  buildLegacyDumpContext,
-  buildWhitelistedContext,
   callModelText,
-  compileLegacyContext,
   recentContextLinesFrom,
   renderAffectReadback,
   renderAffectSection,
@@ -1012,22 +1047,21 @@ export function resolveIds(userName: string): { characterId: string; userId: str
 async function buildRuntime(userName: string): Promise<AgentRuntime> {
   const ids = resolveIds(userName)
 
-  // persistent-character 需要知道自己服务的是「哪个角色 × 哪个用户」，
-  // 因此先构造实例再注册，而不是靠全局单例。
-  const persistentCharacter = createPersistentCharacterPlugin(ids)
-
-  // 装配 L1 需要的插件实例，依赖关系在本仓库内可见：
-  //   sql                  → 持久化（pglite），Recent Messages 的来源
-  //   bootstrap            → 官方消息管线与 RECENT_MESSAGES / CHARACTER 等 provider
-  //   openai               → 提供 embedding 能力（文本生成被下面这个覆盖）
-  //   openai-compatible    → 我们的模型 provider（priority 更高，走 /chat/completions）
-  //   persistent-character → L1-M2：角色状态持久化 + CHARACTER_STATE provider
-  const plugins: Plugin[] = [
-    openaiPlugin,
-    bootstrapPlugin,
-    openAiCompatiblePlugin,
-    persistentCharacter,
-  ]
+  /*
+   * ⚠️⚠️ **ElizaOS 插件装配已删除**（M12 · D2，2026-10-19）。
+   *
+   * 旧形态在这里装四个插件（`sql` / `bootstrap` / `openai` / `openai-compatible`
+   * + `persistent-character`），交给 `new AgentRuntime({ character, plugins, … })`。
+   * 薄宿主**不是** ElizaOS 的插件系统：它的 `registerPlugin` 不解释插件，
+   * `composeState` 也**不实现** provider 体系（薄宿主下失败关闭）⇒
+   * 这套装配**结构上**已经无处可去。
+   *
+   * ⚠️ **模型 provider 仍然在用**，只是不再经插件系统：
+   *   `openAiCompatiblePlugin.models` 由**薄宿主自己**导入
+   *   （`src/infrastructure/runtime/thin-host.ts:53`），`useModel` 直接查那张表。
+   *
+   * ⚠️ `sqlPlugin` 仍要 import（`initDatabase` 需要它注册适配器）—— 见下方 import。
+   */
 
   // runtime.getSetting() 走的是这个内部设置表，而不是 process.env，
   // 所以必须显式把 .env 的值播种进去，否则插件读到的全是 null。
@@ -1066,16 +1100,13 @@ async function buildRuntime(userName: string): Promise<AgentRuntime> {
 
   /*
    * ============================================================================
-   *  薄宿主选择（thinhost，2026-10-18）—— **缺省仍是 ElizaOS，本段逐字不变**
+   *  薄宿主（thinhost）—— **唯一实现**（M12 · D2，2026-10-19）
    * ============================================================================
    * 实测依据（本机 + Linux 服务器配对，见 docs/post-lv2/ThinHost-Replacement-Attribution-2026-10-18.md）：
    *   · 稳态空闲 CPU：1.019% → 0.009% 单核（bootstrap 的 TASK 每 1000ms 查库
    *     与 embedding 每 100ms 唤醒被去掉）
    *   · 上游 30s 守卫定时器：2 → 0（`guard-timers.ts` 补丁随之可退役）
    *   · 内存与启动时间基本持平（**不虚报这两项收益**）
-   *
-   * ⚠️ 开关缺省 off：换宿主不是加功能，缺省 on 会让人无声地换掉底座。
-   *    生产激活仍需**独立授权**（先例 ADR-048/065/067/071/112）。
    *
    * ⚠️⚠️ 这里**只能替换 `runtime` 这个绑定，绝不能提前 `return`**。
    *    第一版写成 `if (thinHostEnabled()) { … return thin }` ⇒ 后面的
@@ -1084,23 +1115,37 @@ async function buildRuntime(userName: string): Promise<AgentRuntime> {
    *    （这是本轮真实发生的一次故障，见决策文档 §8。）
    *    薄宿主同样要经 `openDatabase()` 注册适配器、走租约与 pre-open 快照。
    */
-  const runtime: AgentRuntime = thinHostEnabled()
-    ? (() => {
-        const thin = createThinHostRuntime({
-          character: { name: character.name, id: character.id },
-          agentId: stringToUuid(`agent-${character.name}`),
-          settings,
-          conversationLength: CONVERSATION_LENGTH,
-        })
-        logger.info('[thin-host] 已选用薄 Node 宿主（ElizaOS 不参与本进程）')
-        return thin
-      })()
-    : new AgentRuntime({
-        character,
-        plugins,
-        conversationLength: CONVERSATION_LENGTH,
-        settings,
-      })
+  /*
+   * ⚠️⚠️ **单一路径**（M12 · D2，2026-10-19）：薄宿主是**唯一实现**。
+   *
+   * ⚠️ 旧形态是三元式 `thinHostEnabled() ? 薄 : new AgentRuntime({...})` ——
+   *    **旧分支已删除**：删包后 `@elizaos/core` 无法加载，那条分支不是"变慢"，
+   *    而是**启动即失败** ⇒ 留着它等于留一个"点了就炸"的开关。
+   *    `CHARACTER_THIN_HOST=off` 现在**拒绝启动**（见 thin-host-factory.ts）。
+   *
+   * ⚠️⚠️ 这里**绝不能提前 `return`**。
+   *    第一版写成 `if (thinHostEnabled()) { … return thin }` ⇒ 后面的
+   *    `initDatabase` / 生产状态机 / `buildKernel` 全部被跳过 ⇒
+   *    `getRawDb()` 抛 `no_db_handle`（「拿不到底层数据库句柄」）⇒ 核心起不来。
+   *    （这是真实发生的一次故障，见决策文档 §8。）
+   *    薄宿主同样要经 `openDatabase()` 注册适配器、走租约与 pre-open 快照。
+   *
+   * ⚠️ 生产回滚路径因此改变：不再靠"换宿主"，而是靠 `git checkout` 回到
+   *    带 ElizaOS 的提交 + 恢复 lockfile（M12 计划 §7 第 4 条）。
+   */
+  const runtime: AgentRuntime = (() => {
+    const thin = createThinHostRuntime({
+      character: { name: character.name, id: character.id, system: character.system },
+      // ⚠️ **不传 `agentId`** —— 工厂按**上游同款规则**推导
+      //   （`character.id ?? agentId ?? stringToUuid(name)`，core dist:48921）。
+      //   旧宿主用的是 `character.id`；若这里传别的值，`agent_id` 会与
+      //   历史 197 条 memories 分裂（生产已实测到一次，见 resolveAgentId 的说明）。
+      settings,
+      conversationLength: CONVERSATION_LENGTH,
+    })
+    logger.info('[thin-host] 已选用薄 Node 宿主（ElizaOS 不参与本进程）')
+    return thin
+  })()
 
   /*
    * INC-01 WP3（`AT3.3`）：**初始化失败也必须 close**。
@@ -1120,8 +1165,9 @@ async function buildRuntime(userName: string): Promise<AgentRuntime> {
   let ready: DbReady | undefined
 
   const openDatabase = async (): Promise<void> => {
-    // plugin-sql 需要走 registerPlugin 以完成迁移并注册适配器
-    ready = await initDatabase(runtime, sqlPlugin)
+    // ⚠️ 薄宿主**不需要** plugin-sql（它的 `registerPlugin` 不解释插件，只注册适配器）
+    //   ⇒ 第二参数省略（M12 · W2-③）。
+    ready = await initDatabase(runtime)
   }
 
   try {
@@ -3822,41 +3868,23 @@ class ChatSession {
     await this.runtime.ensureParticipantInRoom(this.userEntityId, this.roomId)
 
     // -----------------------------------------------------------------------
-    // 抑制 bootstrap SETTINGS provider 的启动噪声
+    // 旧 provider 预热 —— **已退役**（M12 · D2，2026-10-19）
     // -----------------------------------------------------------------------
-    // SETTINGS provider 把 DM 房间当成"首次引导(onboarding)"，去找
-    // "属于该用户的、metadata.settings 已初始化的 world"。我们的 world 是
-    // 用**角色身份**建的（owner = 角色），所以它必然找不到，于是每次启动刷两条：
+    // ⚠️ 旧形态：这里**预跑一次白名单 composeState**，用来抑制 bootstrap 的
+    //    SETTINGS provider 启动噪声（"No world found for user during onboarding"）。
+    //    理由是"第一个用 DM message 调用 composeState 的路径决定 state 缓存里有什么"。
     //
-    //   No world found for user during onboarding
-    //   Critical error in settings provider (error=No server ownership found for onboarding)
+    // ⚠️ **为什么现在可以删**（不是"忘了删"）：
+    //   ① 薄宿主**不实现** ElizaOS 的 provider 体系 ⇒ `composeState` 在薄宿主上
+    //      **失败关闭**（thin-host.ts:489 抛具名错误）⇒ 这次预热**必然抛**，
+    //      且异常被 catch 吞掉 ⇒ **它在薄宿主上什么也没做**（死代码）。
+    //   ② 被它抑制的那两条噪声来自 **bootstrap provider**，
+    //      而 bootstrap 已随插件装配一起退役（M12 · D2）⇒ 噪声的**来源**也没了。
+    //   ⇒ 留着一个"必然抛异常且被吞掉"的调用，只会让读者以为 provider 体系还在。
     //
-    // 这里**预跑一次白名单 composeState**：第一个用 DM message 调用
-    // composeState 的路径决定 state 缓存里有什么，因此这次调用之后，
-    // SETTINGS 根本不会被调用。
-    //
-    // 为什么放在 open()：它把"哪条命令先跑"这个偶然顺序变成确定性行为，
-    // 而不是"取决于用户先敲了 --inspect 还是直接聊天"。
-    //
-    // 这次预组装**没有任何持久化副作用**，结果也不被使用；
-    // 新链路的 prompt 仍由 ContextCompiler 独立组装（用事实账本 + 投影）。
-    if (this.flags.contextCompilerV1) {
-      try {
-        await buildWhitelistedContext(this.runtime, {
-          id: stringToUuid(`provider-warmup-${this.roomId}`),
-          entityId: this.userEntityId,
-          agentId: this.runtime.agentId as UUID,
-          roomId: this.roomId,
-          worldId: this.worldId,
-          content: { text: '(warmup)', source: 'cli', channelType: ChannelType.DM },
-        })
-      } catch (error) {
-        // 预热失败不该拦住对话：退回"照常启动，只是会有那两条噪声"
-        logger.debug(
-          `[turn] provider 预热失败（已忽略）: ${error instanceof Error ? error.message : String(error)}`
-        )
-      }
-    }
+    // 📌 旧上下文路径（`composeState` / `composePromptFromState` / `messageHandlerTemplate`）
+    //    本身**仍保留在 `src/context/builder.ts` 里（可读）**，只是不再被任何入口调用 ——
+    //    D2 要求的是"保留可读 + 无调用者"，不是删文件。
 
     // 新链路：会话内序号从**数据库**推导，而不是进程内计数。
     // 干跑模式不写库、序号不前进，否则第二次干跑会撞上第一次的序号
@@ -4902,30 +4930,30 @@ class ChatSession {
         )
       }
     } else {
-      // 1a) 先落库用户消息——Recent Messages 立刻就能看到它
-      const userMessage: Memory = {
-        id: stringToUuid(`msg-${this.roomId}-${turn}-user`),
-        entityId: this.userEntityId,
-        agentId,
-        roomId: this.roomId,
-        worldId: this.worldId,
-        content: { text: userText, source: 'cli', channelType: ChannelType.DM },
-      }
-      // 干跑模式下不写库：这条消息只存在于本轮内存里
-      if (!this.dryRun) {
-        await this.runtime.createMemory(userMessage, 'messages', true)
-      }
-
-      phaseAt.preCompile = Date.now()
-      const ctx = await compileLegacyContext(this.runtime, userMessage)
-      prompt = ctx.prompt
-
-      if (DEBUG_CONTEXT) {
-        const lines = ctx.contributions.map((c) => `${c.name}(${c.chars})`).join(', ')
-        logger.info(
-          `[turn ${this.turn}] providers: ${lines || '(none)'} | 估算历史行数: ${ctx.recentMessageCount} | prompt ${ctx.prompt.length} 字符`
-        )
-      }
+      /*
+       * ⚠️⚠️ 旧上下文链路 —— **已退役**（M12 · D2，2026-10-19）。
+       *
+       * 旧形态：先落库用户消息到 `memories`，再由 `compileLegacyContext`
+       * （`composeState` + `composePromptFromState` + `messageHandlerTemplate`）
+       * 组装 prompt。
+       *
+       * ⚠️ **为什么现在必须拒绝而不是"照跑"**：
+       *   薄宿主**不实现** ElizaOS 的 provider 体系 ⇒ `composeState` 在薄宿主上
+       *   **失败关闭**（thin-host.ts:489 抛具名错误）⇒ 这条分支在薄宿主上
+       *   **必然崩**，而且崩在"用户消息已落库之后" ⇒ 留下半截状态。
+       *   ⇒ 宁可**在动手之前**就明确拒绝。
+       *
+       * 📌 旧链路本身**仍保留在 `src/context/builder.ts` 里（可读）** ——
+       *    D2 要求的是"保留可读 + **无调用者**"，不是删文件。
+       *    判据见 `thinhost:retirement:verify` 的 R6。
+       */
+      throw new Error(
+        '[context] 旧上下文链路（composeState + messageHandlerTemplate）已退役。\n' +
+          '  薄宿主是唯一运行时（ElizaOS 宿主已退役），旧链路的 provider 体系不存在。\n' +
+          '  要走新链路需要两件事：CHARACTER_CONTEXT_COMPILER_V1=1（缺省即开）\n' +
+          '  与 kernel 启用（CHARACTER_KERNEL_ENABLED=true）。\n' +
+          '  （本次没有改动任何数据。）'
+      )
     }
 
     /*
@@ -5498,25 +5526,23 @@ class ChatSession {
       return spokenText
     }
 
-    // 4') 旧链路：落库回复——下一轮的 Recent Messages 会带上它
-    const agentMessage: Memory = {
-      id: stringToUuid(`msg-${this.roomId}-${turn}-agent`),
-      entityId: this.agentEntityId,
-      agentId,
-      roomId: this.roomId,
-      worldId: this.worldId,
-      content: { text: replyText, source: 'cli', channelType: ChannelType.DM },
-    }
-    if (!this.dryRun) {
-      await this.runtime.createMemory(agentMessage, 'messages', true)
-    } else {
-      this.dryRunTurns += 1
-    }
-    if (DEBUG_CONTEXT) {
-      logger.info(`[turn ${this.turn}] 模型 ${modelSeconds}s`)
-    }
-
-    return replyText
+    /*
+     * ⚠️ 旧链路的"落库回复" —— **已退役**（M12 · D2，2026-10-19）。
+     *
+     * 旧形态：把回复写进 ElizaOS 的 `memories` 表，供下一轮的 RECENT_MESSAGES provider 读。
+     * 新链路在**上面**已经做同样的双写（"cutover 阶段：回复同时写回 memories"，
+     * 保证 `--history` / RECENT_MESSAGES 完全不受影响）⇒ 旧形态是**重复**的那一份。
+     *
+     * ⚠️ 这里**结构上已经不可达**：上面的上下文装配在旧链路上**直接抛错**
+     *    （`useCompiler` 为假 ⇒ 抛"旧上下文链路已退役"）⇒ 走不到这里。
+     *    留一句显式的抛错，是为了"万一将来有人改了上面的分支"，这里**响亮地**失败，
+     *    而不是悄悄写一份重复的 `memories` 行。
+     */
+    throw new Error(
+      '[context] 旧链路的回复落库已退役（不应可达）。\n' +
+        '  新链路的双写在上面已经完成；若你看到这条，说明上下文装配的分支被改动过。\n' +
+        '  （本次没有改动任何数据。）'
+    )
   }
 
   /**
@@ -5556,26 +5582,27 @@ class ChatSession {
       return '（房间里还没有用户消息，也没有传入问题，无法导出 prompt）'
     }
 
-    const probe: Memory = {
-      id: stringToUuid(`dump-${Date.now()}`),
-      entityId: this.userEntityId,
-      agentId: this.runtime.agentId as UUID,
-      roomId: this.roomId,
-      worldId: this.worldId,
-      content: { text, source: 'cli', channelType: ChannelType.DM },
-    }
-
-    // --- 旧路径（对照用）---------------------------------------------------
+    /*
+     * --- 旧路径（对照用）—— **已退役**（M12 · D2，2026-10-19）---------------
+     *
+     * 旧形态：`--dump-prompt --legacy` 还原"M1 会看到什么"（composeState + 模板）。
+     *
+     * ⚠️ **为什么必须退役而不是保留**：
+     *   薄宿主**不实现** ElizaOS 的 provider 体系 ⇒ `composeState` 在薄宿主上
+     *   **失败关闭** ⇒ 这条命令在薄宿主下**必然抛错**。
+     *   也就是说：它**今天就已经不能用了**，只是一直没人在薄宿主上用过它。
+     *   ⇒ 把它改成一条**说清原因**的具名错误，比留着一个必然崩的调用更有用。
+     *
+     * 📌 旧链路本身仍保留在 `src/context/builder.ts` 里（可读）；D2 要求的是
+     *    "保留可读 + **无调用者**"（判据见 `thinhost:retirement:verify` 的 R6）。
+     */
     if (options.legacy || !this.gateway) {
-      const ctx = await buildLegacyDumpContext(this.runtime, probe)
-      return [
-        `# 路径：旧（composeState + messageHandlerTemplate）`,
-        `# 待问的问题：${text}`,
-        `# provider 贡献：${ctx.contributions.map((c) => `${c.name}(${c.chars})`).join(', ')}`,
-        `# prompt 长度：${ctx.prompt.length} 字符`,
-        '',
-        ctx.prompt,
-      ].join('\n')
+      throw new Error(
+        '[dump-prompt] 旧对照路径（composeState + messageHandlerTemplate）已退役。\n' +
+          '  薄宿主是唯一运行时（ElizaOS 宿主已退役），旧链路的 provider 体系不存在。\n' +
+          '  请去掉 --legacy，用默认的新链路视图（与真实对话同一条编译路径）。\n' +
+          '  （本次是只读命令，没有改动任何数据。）'
+      )
     }
 
     // --- 新路径（默认）-----------------------------------------------------
@@ -7764,9 +7791,13 @@ async function runMigrateCommand(apply: boolean): Promise<number> {
   // 单独装配一个最小 runtime（不跑 kernel、不建会话）
   const characterModule = await import('./character/index.ts')
   const character = characterModule.character
-  const { AgentRuntime, stringToUuid } = await import('@elizaos/core')
-  const sqlPlugin = (await import('@elizaos/plugin-sql')).default
+  /*
+   * ⚠️ `@elizaos/plugin-sql` 的动态 import 已删除（M12 · W2-③，2026-10-19）：
+   *   薄宿主的 `registerPlugin()` **不解释插件** ⇒ 那个值**没有对象**。
+   */
   const { initDatabase, kernelMigrationAllowed } = await import('./db/index.ts')
+  const { stringToUuid } = await import('./kernel/contracts/uuid.ts')
+  const { createThinHostRuntime } = await import('./infrastructure/runtime/thin-host-factory.ts')
 
   console.log('')
   console.log('='.repeat(72))
@@ -7774,10 +7805,22 @@ async function runMigrateCommand(apply: boolean): Promise<number> {
   console.log('='.repeat(72))
   console.log('')
 
-  const runtime = new AgentRuntime({
-    character,
-    plugins: [sqlPlugin],
-    conversationLength: 16,
+  /*
+   * ⚠️⚠️ **宿主已换成薄 Node 宿主**（M12 · D2，2026-10-19）。
+   *
+   * 旧形态：`new AgentRuntime({ character, plugins: [sqlPlugin], … })` ——
+   *   那是**第二个** ElizaOS 宿主构造点（主路径的那个已在 D2 里删掉）。
+   *   它在删包后会**启动即失败** ⇒ 迁移入口也必须换。
+   *
+   * ⚠️ **为什么薄宿主能跑这个命令**（不是"看起来能"）：
+   *   · `registerPlugin(sqlPlugin)` → 薄宿主注册**适配器**、**不跑任何 DDL** ✓
+   *   · `initDatabase(runtime, sqlPlugin)` → PG 后端且 `allowKernelMigration()` 为真时
+   *     会调 `applyKernelMigrations`（LG 自己的迁移体系）✓
+   *   ⇒ 这正是 W1 实测过的路径（`thinhost:lgmigration:verify` 10/10）。
+   */
+  const runtime = createThinHostRuntime({
+    character: { name: character.name, id: character.id, system: character.system },
+    // ⚠️ **不传 `agentId`** —— 工厂按上游同款规则推导（见 resolveAgentId）。
     settings: {
       OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? '',
       OPENAI_BASE_URL: process.env.BASE_URL_FOR_MIGRATE ?? 'https://api.deepseek.com',
@@ -7817,18 +7860,24 @@ async function runMigrateCommand(apply: boolean): Promise<number> {
   const openDatabase = async (): Promise<void> => {
     // 预览模式：先只看待办，**不应用**
     if (!apply) {
-      await runtime.registerPlugin(sqlPlugin)
-      await runtime.runPluginMigrations()
-      const { getRawDb: getDb, pendingMigrations, currentSchemaVersion } = await import(
+      const { assertDatabaseAccessAllowed } = await import('./db/index.ts')
+      assertDatabaseAccessAllowed()
+      // ⚠️ 薄宿主**不需要** plugin-sql（它不解释插件，只注册适配器）⇒ 不传。
+      await runtime.registerPlugin(undefined as never)
+      const { getRawDb: getDb, pendingMigrations, currentSchemaVersion, verifyDatabaseIdentity } = await import(
         './infrastructure/persistence/db.ts'
       )
       const db = getDb(runtime)
+      const { databaseIdentityExpectationFrom } = await import('./infrastructure/persistence/database-backend.ts')
+      if (process.env.CHARACTER_DB_BACKEND === 'postgres') {
+        await verifyDatabaseIdentity(db, databaseIdentityExpectationFrom())
+      }
       previewVersion = await currentSchemaVersion(db)
       previewPending = await pendingMigrations(db)
       return
     }
     // 应用模式：initDatabase 里已放行，会真的跑迁移
-    ready = await initDatabase(runtime, sqlPlugin)
+    ready = await initDatabase(runtime)
   }
 
   let handle: ProductionOpenHandle | undefined

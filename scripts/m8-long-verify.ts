@@ -20,13 +20,15 @@
  * 一轮都不跑（量具有效性先于读数——INV-M45-06）。
  * 长轨迹是稳定性/可重放证据，不是"情绪智能"的主观证明（计划 §11.5）。
  */
+import type { Character } from '../src/infrastructure/runtime/eliza-types.ts'
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
 import 'dotenv/config'
 
 import { isolateDatabase } from '../src/dev/sandbox.ts'
 isolateDatabase('m8-long-verify', { keep: false })
 
-import { AgentRuntime, type Character } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+
+
 import { execFileSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -144,8 +146,11 @@ async function main(): Promise<void> {
   }
   console.log(`语料指纹 ${invariants.fingerprint}（${M8_LONG_CORPUS_VERSION}）——开跑闸通过`)
 
-  const runtime = new AgentRuntime({ character: character as Character, plugins: [], settings: {} })
-  await initDatabase(runtime, sqlPlugin)
+  const runtime = createThinHostRuntime({
+    character: character,
+    settings: {},
+  })
+  await initDatabase(runtime)
   await runtime.initialize()
   const kernel = await initKernel(runtime, {
     definition: characterDefinitionFromCharacter(character),

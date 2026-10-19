@@ -37,13 +37,15 @@
  *  · 失败关闭：无测试凭证 ⇒ 拒跑（exit 2），不产出任何"看起来跑了"的证据。
  *  · 隔离库（isolateDatabase）；真实库永不打开。
  */
+import type { Character } from '../src/infrastructure/runtime/eliza-types.ts'
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
 import 'dotenv/config'
 
 import { isolateDatabase } from '../src/dev/sandbox.ts'
 isolateDatabase('m8.5-e2e-verify', { keep: false })
 
-import { AgentRuntime, type Character } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+
+
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
@@ -144,8 +146,11 @@ async function main(): Promise<void> {
     process.exit(2)
   }
 
-  const runtime = new AgentRuntime({ character: character as Character, plugins: [], settings: {} })
-  await initDatabase(runtime, sqlPlugin)
+  const runtime = createThinHostRuntime({
+    character: character,
+    settings: {},
+  })
+  await initDatabase(runtime)
   await runtime.initialize()
   const kernel = await initKernel(runtime, {
     definition: characterDefinitionFromCharacter(character),

@@ -76,8 +76,9 @@ async function seed(): Promise<void> {
   process.env.PGLITE_DATA_DIR = resolved
   process.env.PROJECT_LG_SANDBOX = resolved
 
-  const { AgentRuntime, stringToUuid } = await import('@elizaos/core')
-  const sqlPlugin = (await import('@elizaos/plugin-sql')).default
+  const { createThinHostRuntime } = await import('../src/infrastructure/runtime/thin-host-factory.ts')
+  const { stringToUuid } = await import('../src/kernel/contracts/uuid.ts')
+  
   const { character } = await import('../src/character/index.ts')
   const { initDatabase } = await import('../src/db/index.ts')
   const { getRawDb } = await import('../src/infrastructure/persistence/db.ts')
@@ -98,13 +99,12 @@ async function seed(): Promise<void> {
   const characterId = asCharacterId(character.id ?? character.name)
   const userId = stringToUuid(`user-${userName}`)
 
-  const runtime = new AgentRuntime({
-    character: character as never,
-    plugins: [sqlPlugin],
-    conversationLength: 16,
-    settings: { OPENAI_API_KEY: 'placeholder', OPENAI_BASE_URL: '' },
-  } as never)
-  await initDatabase(runtime, sqlPlugin)
+  const runtime = createThinHostRuntime({
+      character: character,
+      settings: { OPENAI_API_KEY: 'placeholder', OPENAI_BASE_URL: '' },
+      conversationLength: 16,
+    })
+  await initDatabase(runtime)
   const db = getRawDb(runtime)
 
   /* S1 不播种（探针轮开机自播）；其余场景先铺 ORIGIN（放行链本尊） */

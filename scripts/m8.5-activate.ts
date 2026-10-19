@@ -72,9 +72,7 @@ if (!sandboxed && !isProduction) {
 /* 显式放行（中央闸仍要求 pre-open token；沙箱路径不受影响） */
 allowProductionDatabase()
 
-const { AgentRuntime } = await import('@elizaos/core')
-const sqlPlugin = (await import('@elizaos/plugin-sql')).default
-const { character } = await import('../src/character/index.ts')
+const { createThinHostRuntime } = await import('../src/infrastructure/runtime/thin-host-factory.ts')const { character } = await import('../src/character/index.ts')
 const { getRawDb } = await import('../src/infrastructure/persistence/db.ts')
 const { asCharacterId } = await import('../src/kernel/contracts/ids.ts')
 const { getAffectProjection, rebuildAffectProjectionV2 } = await import(
@@ -133,15 +131,14 @@ export interface ActivationReading {
 }
 
 const characterId = asCharacterId(character.id ?? character.name)
-const runtime = new AgentRuntime({
-  character: character as never,
-  plugins: [sqlPlugin],
-  conversationLength: 16,
-  settings: {
+const runtime = createThinHostRuntime({
+      character: character,
+      settings: {
     OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? 'placeholder',
     OPENAI_BASE_URL: process.env.OPENAI_BASE_URL ?? '',
   },
-} as never)
+      conversationLength: 16,
+    })
 
 const snapshotOf = (row: Awaited<ReturnType<typeof getAffectProjection>>) =>
   row === undefined
@@ -179,7 +176,7 @@ if (isProduction) {
     operationKind: 'affect_semantic_activate',
     deps: {
       openDatabase: async () => {
-        await initDatabase(runtime, sqlPlugin)
+        await initDatabase(runtime)
       },
       stopServices: () => stopRuntimeServices(runtime),
       closeDatabase: async () => await closeDatabaseConnection(runtime),
@@ -191,7 +188,7 @@ if (isProduction) {
   productionHandle = handle
   console.log(`[inc-01] 生产状态机：${handle.reading.states.join(' → ')}（租约+pre-open 快照已验）`)
 } else {
-  await initDatabase(runtime, sqlPlugin)
+  await initDatabase(runtime)
   console.log(`演练模式：目标 ${dataDir}（不走 INC-01 状态机）`)
 }
 

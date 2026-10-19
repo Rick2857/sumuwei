@@ -73,7 +73,7 @@ const { memoryIntegrityProblems } = await import(
   '../src/infrastructure/persistence/memory-integrity.ts'
 )
 const { DEFAULT_CONTEXT_BUDGET } = await import('../src/kernel/recall/selector.ts')
-const { stringToUuid } = await import('@elizaos/core')
+const { stringToUuid } = await import('../src/kernel/contracts/uuid.ts')
 
 const userId = stringToUuid('user-Alex')
 

@@ -17,6 +17,8 @@
  * blind 层**不进本门**（heldout 纪律——永不用于离线门/指令迭代）。
  * 量具纪律：正控/负控/恢复三段式；measured_count 自检；证据落盘。
  */
+import type { Character } from '../src/infrastructure/runtime/eliza-types.ts'
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
 import 'dotenv/config'
 
 import { isolateDatabase } from '../src/dev/sandbox.ts'
@@ -24,8 +26,8 @@ isolateDatabase('m8.5-corpus-replay', { keep: false })
 
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { AgentRuntime, type Character } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+
+
 
 import { character } from '../src/character/index.ts'
 import { initDatabase } from '../src/db/index.ts'
@@ -260,8 +262,11 @@ function contextWindowOf(entry: CorpusEntry): AffectSemanticContextMessage[] {
 // ④ 隔离库引导 + 建档 + 受控 rebuild @2（WP13 激活段的机制面，WP8 门同款）
 // ---------------------------------------------------------------------------
 
-const runtime = new AgentRuntime({ character: character as Character, plugins: [], settings: {} })
-await initDatabase(runtime, sqlPlugin)
+const runtime = createThinHostRuntime({
+    character: character,
+    settings: {},
+  })
+await initDatabase(runtime)
 await runtime.initialize()
 const kernel = await initKernel(runtime, {
   definition: characterDefinitionFromCharacter(character),

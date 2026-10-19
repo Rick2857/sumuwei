@@ -19,6 +19,8 @@
  *
  * 跑法：`pnpm with-test-model pnpm exec tsx scripts/verify-m6-wp10b-live.ts`
  */
+import type { Character } from '../src/infrastructure/runtime/eliza-types.ts'
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
 import 'dotenv/config'
 
 import { spawnSync } from 'node:child_process'
@@ -27,8 +29,8 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { join, relative, resolve } from 'node:path'
 
-import { AgentRuntime, type Character } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+
+
 import { sql } from 'drizzle-orm'
 
 import { character } from '../src/character/index.ts'
@@ -145,16 +147,15 @@ check(
 report.section('G 从副本读回 trace / 账本（Level 2）')
 const characterId = asCharacterId(character.id ?? character.name)
 const owner = entityRef('character', String(characterId))
-const runtime = new AgentRuntime({
-  character: character as Character,
-  plugins: [sqlPlugin],
-  conversationLength: 16,
-  settings: {
+const runtime = createThinHostRuntime({
+    character: character,
+    settings: {
     OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? 'placeholder',
     OPENAI_BASE_URL: process.env.OPENAI_BASE_URL ?? '',
   },
-} as never)
-await initDatabase(runtime, sqlPlugin)
+    conversationLength: 16,
+  })
+await initDatabase(runtime)
 const db = getRawDb(runtime)
 const service = createDeveloperQueryService({ db, characterId, owner, runtimeId: 'm6-wp10b-live' })
 

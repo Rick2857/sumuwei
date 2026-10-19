@@ -31,6 +31,9 @@
  *
  * 量具纪律：§6.7 三段式 + §6.8 measured_count 自检；隔离库，真实库不打开。
  */
+import type { AgentRuntime, Character, UUID } from '../src/infrastructure/runtime/eliza-types.ts'
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
+
 import 'dotenv/config'
 
 import { isolateDatabase, resetPluginSqlConnection } from '../src/dev/sandbox.ts'
@@ -38,8 +41,9 @@ import { isolateDatabase, resetPluginSqlConnection } from '../src/dev/sandbox.ts
 const RUN_ID = `m7-wp6-td07-${Date.now()}-${process.pid}`
 isolateDatabase('m7-wp6-td07', { runId: RUN_ID, keep: true })
 
-import { AgentRuntime, type Character, stringToUuid, type UUID } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+import { stringToUuid } from '../src/kernel/contracts/uuid.ts'
+
+
 import { execFileSync } from 'node:child_process'
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -87,12 +91,11 @@ interface Bed {
 async function assemble(): Promise<Bed> {
   await resetPluginSqlConnection()
   isolateDatabase('m7-wp6-td07', { runId: RUN_ID, keep: true })
-  const runtime = new AgentRuntime({
-    character: character as Character,
-    plugins: [sqlPlugin],
+  const runtime = createThinHostRuntime({
+    character: character,
     settings: {},
   })
-  await initDatabase(runtime, sqlPlugin)
+  await initDatabase(runtime)
   await runtime.initialize()
   const kernel = await initKernel(runtime, {
     definition: characterDefinitionFromCharacter(character),

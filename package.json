@@ -52,7 +52,6 @@
     "eval:otlp": "tsx scripts/verify-otlp-compat.ts",
     "eval:phoenix-chat": "tsx scripts/verify-phoenix-live-chat.ts",
     "eval:dryrun": "tsx scripts/verify-dry-run-silence.ts",
-    "eval:providers": "tsx scripts/verify-provider-whitelist.ts",
     "backfill:preview": "tsx src/main.ts --backfill-events",
     "backfill:apply": "tsx src/main.ts --backfill-events --apply",
     "db:inspect": "tsx scripts/inspect-production-copy.ts",
@@ -320,7 +319,6 @@
     "m5.1.1:phase4b:preflight": "tsx scripts/verify-m5.1.1-phase4b-preflight.ts",
     "m5.1.1:phase4b:db-v9": "tsx scripts/verify-m5.1.1-phase4b-db-v9.ts",
     "m5.1.1:phase4b:verify": "tsx scripts/verify-m5.1.1-phase4b-qualification.ts",
-    "m5.1.1:d01:smoke:live": "tsx scripts/verify-m5.1.1-d01-live-smoke.ts",
     "m5.1.1:phase4:closure:verify": "tsx scripts/verify-m5.1.1-phase4-closure.ts",
     "m5.1.1:final:verify": "tsx scripts/verify-m5.1.1-phase4-closure.ts",
     "inc-01:test": "tsx scripts/inc-01-test.ts",
@@ -334,11 +332,9 @@
     "gates:profile": "tsx scripts/gates-run.ts --lane offline --profile",
     "gates:verify": "tsx scripts/verify-gate-runner.ts",
     "cli:exit:verify": "tsx scripts/verify-cli-exit-latency.ts",
-    "thinhost:ddl:verify": "tsx scripts/thinhost-ddl-gate.ts",
     "thinhost:wiring:verify": "tsx scripts/thinhost-wiring-verify.ts",
     "thinhost:retirement:verify": "tsx scripts/thinhost-retirement-verify.ts",
     "thinhost:surface:verify": "tsx scripts/thinhost-surface-verify.ts",
-    "thinhost:equivalence:verify": "tsx scripts/thinhost-equivalence-verify.ts",
     "thinhost:initdb:verify": "tsx scripts/thinhost-initdb-verify.ts",
     "thinhost:uuid:parity": "tsx scripts/thinhost-uuid-parity.ts",
     "fast": "tsx scripts/gates-run.ts --lane affected --cache",
@@ -708,10 +704,6 @@
     "db:init": "tsx scripts/public-db-init.ts"
   },
   "dependencies": {
-    "@elizaos/core": "1.7.2",
-    "@elizaos/plugin-bootstrap": "1.7.2",
-    "@elizaos/plugin-openai": "1.6.0",
-    "@elizaos/plugin-sql": "1.7.2",
     "@huggingface/transformers": "4.3.0",
     "@mozilla/readability": "0.6.0",
     "@tesseract.js-data/chi_sim": "1.0.0",
@@ -726,7 +718,8 @@
     "pg": "8.23.1",
     "rss-parser": "3.13.0",
     "tesseract.js": "7.0.0",
-    "tesseract.js-core": "7.0.0"
+    "tesseract.js-core": "7.0.0",
+    "@electric-sql/pglite": "0.3.16"
   },
   "devDependencies": {
     "@types/jsdom": "^27.0.0",

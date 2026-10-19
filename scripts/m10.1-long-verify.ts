@@ -29,6 +29,7 @@
  * 用法：`tsx scripts/m10.1-long-verify.ts [--turns 200|500]`
  */
 
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
 import 'dotenv/config'
 
 import { isolateDatabase } from '../src/dev/sandbox.ts'
@@ -39,8 +40,8 @@ import { createHash } from 'node:crypto'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
-import { AgentRuntime } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+
+
 
 import { createM11RunId, openM11RunDir, writeM11Manifest, M11_MANIFEST_VERSION } from './m11-evidence.ts'
 import { createM10TurnHarness, deterministicRuntime, fixedProvider } from './m10-harness.ts'
@@ -153,8 +154,11 @@ const draftOf = (operation: string, extra: Record<string, unknown>): unknown => 
 
 async function main(): Promise<void> {
   phase(`boot isolated database（${String(TURNS)} 轮轨迹）`)
-  const agentRuntime = new AgentRuntime({ character, plugins: [] })
-  await initDatabase(agentRuntime, sqlPlugin)
+  const agentRuntime = createThinHostRuntime({
+    character: character,
+    settings: {},
+  })
+  await initDatabase(agentRuntime)
   const db = getRawDb(agentRuntime)
   const harness = createM10TurnHarness({ db, characterId: CHARACTER, userId: USER_ID })
   const rt = deterministicRuntime()

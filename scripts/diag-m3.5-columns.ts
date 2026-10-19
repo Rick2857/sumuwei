@@ -18,14 +18,17 @@
  * 跑法：tsx scripts/diag-m3.5-columns.ts
  */
 
+import type { Character } from '../src/infrastructure/runtime/eliza-types.ts'
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
+import { applyKernelMigrations as __applyKernelMigrations, getRawDb as __getRawDb } from '../src/infrastructure/persistence/db.ts'
 import 'dotenv/config'
 
 import { cpSync, existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
-import { AgentRuntime, type Character } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+
+
 import { sql } from 'drizzle-orm'
 
 import { character } from '../src/character/index.ts'
@@ -52,9 +55,12 @@ cpSync(PRODUCTION_DB, target, { recursive: true })
 process.env.PGLITE_DATA_DIR = target
 process.env.PROJECT_LG_SANDBOX = target
 
-const runtime = new AgentRuntime({ character: character as Character, plugins: [] })
-await runtime.registerPlugin(sqlPlugin)
-await runtime.runPluginMigrations()
+const runtime = createThinHostRuntime({
+    character: character,
+    settings: {},
+  })
+await runtime.registerPlugin(undefined as never)
+await await __applyKernelMigrations(__getRawDb(runtime))
 
 const db = getRawDb(runtime)
 

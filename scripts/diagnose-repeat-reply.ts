@@ -24,10 +24,9 @@ import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { cpSync, mkdtempSync } from 'node:fs'
 
-import { AgentRuntime, stringToUuid, type Character, type Plugin } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
-import openaiPlugin from '@elizaos/plugin-openai'
-import bootstrapPlugin from '@elizaos/plugin-bootstrap'
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
+import { stringToUuid } from '../src/kernel/contracts/uuid.ts'
+import type { Character, Plugin } from '../src/infrastructure/runtime/eliza-types.ts'
 
 import { character } from '../src/character/index.ts'
 import { allowProductionDatabase, initDatabase } from '../src/db/index.ts'
@@ -65,14 +64,8 @@ const NEEDLE = process.argv.find((item) => item.startsWith('--needle='))?.slice(
 
 const characterId = character.id ?? character.name
 const userId = stringToUuid('user-Alex')
-const runtime = new AgentRuntime({
-  character: character as Character,
-  plugins: [
-    openaiPlugin,
-    bootstrapPlugin,
-    openAiCompatiblePlugin,
-    createPersistentCharacterPlugin({ characterId, userId }),
-  ] as Plugin[],
+const runtime = createThinHostRuntime({
+  character: character,
   conversationLength: 16,
   settings: {
     OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? '',
@@ -111,7 +104,7 @@ const handle = copyMode
       operationKind: 'real_db_verify',
       deps: {
         openDatabase: async () => {
-          await initDatabase(runtime, sqlPlugin)
+          await initDatabase(runtime)
         },
         stopServices: () => stopRuntimeServices(runtime),
         closeDatabase: async () => await closeDatabaseConnection(runtime),
@@ -125,7 +118,7 @@ if (handle !== undefined) {
     `生产状态机：${handle.reading.states.join(' → ')}（pre-open 快照 ${handle.reading.preOpenSnapshotId ?? '未记录'}）`
   )
 } else {
-  await initDatabase(runtime, sqlPlugin)
+  await initDatabase(runtime)
 }
 db = getRawDb(runtime)
 console.log(`诊断关键词：${NEEDLE}`)

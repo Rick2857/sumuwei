@@ -36,11 +36,12 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs'
-import { createRequire } from 'node:module'
 import { createServer, type Server } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+/* ⚠️ PGlite 入口解析已收到**全仓唯一一份**（2026-10-19，见 pglite-entry.ts 的说明）。 */
+import { resolvePgliteEntry } from './pglite-entry.ts'
 
 /** 易失运行态文件：内容随每次打开而变，不代表数据内容（排除理由见事故报告附录 C.2） */
 export const VOLATILE_EXCLUDED_PATHS: readonly string[] = ['postmaster.pid']
@@ -443,7 +444,8 @@ export async function openRawPGlite(dir: string): Promise<RawPGlite> {
  * 解析 `@electric-sql/pglite`。
  *
  * ⚠️ 它**不是**本仓库的直接依赖（只在 `.pnpm` 里，被 `@elizaos/plugin-sql` 依赖），
- *    所以不能直接 `import '@electric-sql/pglite'`。这里从 plugin-sql 的安装位置去解析，
+ *    所以不能直接 `import '@electric-sql/pglite'`。解析逻辑在
+ *    **全仓唯一一份**（`pglite-entry.ts`），那里从 plugin-sql 的安装位置去解析，
  *    **不写死版本号**，也不为此改动 `package.json` / lockfile（计划的 Non-goals 禁止升级依赖）。
  */
 async function loadPGliteCtor(): Promise<new (options: { dataDir: string }) => RawPGlite> {
@@ -459,17 +461,12 @@ async function loadPGliteCtor(): Promise<new (options: { dataDir: string }) => R
   return ctor
 }
 
-function resolvePgliteEntry(): string {
-  const requireFromHere = createRequire(import.meta.url)
-  try {
-    return requireFromHere.resolve('@electric-sql/pglite')
-  } catch {
-    /* 未提升到顶层，继续从 plugin-sql 出发 */
-  }
-  const pluginSqlEntry = requireFromHere.resolve('@elizaos/plugin-sql')
-  const requireFromPluginSql = createRequire(pluginSqlEntry)
-  return requireFromPluginSql.resolve('@electric-sql/pglite')
-}
+/*
+ * ⚠️ 解析逻辑已收到**全仓唯一一份**（`pglite-entry.ts`，2026-10-19）。
+ *    这里原来的私有副本与薄宿主工厂那份**曾经不一致** ——
+ *    工厂那份写错了（直接解析一个非直接依赖）⇒ 实测 MODULE_NOT_FOUND。
+ *    ⇒ 收到一处，W4 改依赖时只改一处。
+ */
 
 /** 对**一次性副本**做健康探针；永远不要对"要保留的快照本体"跑它（打开会改 pg_control） */
 export async function runHealthProbe(dir: string): Promise<HealthProbeResult> {

@@ -29,6 +29,8 @@
  * 跑法：pnpm m5.1.1:wp3.2:verify
  */
 
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
+import { applyKernelMigrations as __applyKernelMigrations, getRawDb as __getRawDb } from '../src/infrastructure/persistence/db.ts'
 import 'dotenv/config'
 
 import { readFileSync } from 'node:fs'
@@ -36,8 +38,8 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { AgentRuntime } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+
+
 import { sql } from 'drizzle-orm'
 
 import { character } from '../src/character/index.ts'
@@ -124,21 +126,20 @@ check(
 
 const sandbox = isolateDatabase('m5.1.1-wp32')
 check('沙箱不是真实库', isProductionDir(sandbox.dir) === false && sandbox.dir.startsWith(tmpdir()), sandbox.dir)
-const runtime = new AgentRuntime({
-  character,
-  plugins: [sqlPlugin],
-  conversationLength: 16,
-  settings: {
+const runtime = createThinHostRuntime({
+    character: character,
+    settings: {
     OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? '',
     OPENAI_BASE_URL: process.env.OPENAI_BASE_URL ?? 'https://api.deepseek.com',
     OPENAI_LARGE_MODEL: process.env.OPENAI_LARGE_MODEL ?? 'deepseek-flash',
     OPENAI_SMALL_MODEL: process.env.OPENAI_SMALL_MODEL ?? 'deepseek-flash',
   },
-})
-await runtime.registerPlugin(sqlPlugin)
-await runtime.runPluginMigrations()
+    conversationLength: 16,
+  })
+await runtime.registerPlugin(undefined as never)
+await await __applyKernelMigrations(__getRawDb(runtime))
 const db = getRawDb(runtime)
-await initDatabase(runtime, sqlPlugin)
+await initDatabase(runtime)
 const schemaVersion = await currentSchemaVersion(db)
 check(
   /*

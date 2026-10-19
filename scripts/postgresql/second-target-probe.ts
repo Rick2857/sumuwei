@@ -22,8 +22,10 @@
  *    LG_TARGET_A=postgres://…/lg_test_a LG_TARGET_B=postgres://…/lg_test_b \
  *    node node_modules/tsx/dist/cli.mjs scripts/postgresql/second-target-probe.ts
  */
-import { AgentRuntime, type Character, type Plugin } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+import type { AgentRuntime, Character, Plugin } from '../../src/infrastructure/runtime/eliza-types.ts'
+import { createThinHostRuntime } from '../../src/infrastructure/runtime/thin-host-factory.ts'
+
+
 
 import { character } from '../../src/character/index.ts'
 
@@ -66,15 +68,14 @@ async function attempt(url: string, database: string): Promise<Attempt> {
   process.env.LG_PG_EXPECT_USER = 'lg_migrate'
   process.env.LG_TEST_DATABASE_PREFIX = 'lg_test_'
 
-  const runtime = new AgentRuntime({
-    character: character as Character,
-    plugins: [sqlPlugin] as Plugin[],
+  const runtime = createThinHostRuntime({
+    character: character,
     settings: { POSTGRES_URL: url },
   })
 
   try {
     const { initDatabase } = await import('../../src/db/index.ts')
-    const ready = await initDatabase(runtime, sqlPlugin)
+    const ready = await initDatabase(runtime)
     /*
      * ⚠️ 只在**成功**时记下 runtime：池挂在这个 runtime 的 adapter 上。
      *    失败的那次（守卫在 `registerPlugin` **之前**就抛了）根本没有 adapter ⇒

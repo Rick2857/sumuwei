@@ -26,6 +26,7 @@
  *    属**未测**（`L-M10-42`）。本门**不**假装做了那件事。
  */
 
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
 import 'dotenv/config'
 
 import { isolateDatabase } from '../src/dev/sandbox.ts'
@@ -35,8 +36,8 @@ import { execFileSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
-import { AgentRuntime } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+
+
 
 import { createM10RunId, openM10RunDir, writeM10Manifest } from './m10-evidence.ts'
 import { createM10TurnHarness, deterministicRuntime, fixedProvider } from './m10-harness.ts'
@@ -140,8 +141,11 @@ function draftOf(operation: string, extra: Record<string, unknown>): unknown {
 
 async function main(): Promise<void> {
   phase('boot isolated database')
-  const agentRuntime = new AgentRuntime({ character, plugins: [] })
-  await initDatabase(agentRuntime, sqlPlugin)
+  const agentRuntime = createThinHostRuntime({
+    character: character,
+    settings: {},
+  })
+  await initDatabase(agentRuntime)
   const db = getRawDb(agentRuntime)
   const harness = createM10TurnHarness({ db, characterId: CHARACTER, userId: USER_ID })
   const rt = deterministicRuntime()

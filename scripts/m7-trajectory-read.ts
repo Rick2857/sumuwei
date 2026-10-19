@@ -73,8 +73,9 @@ export async function readAll(dbDir: string, fromEnd: number, userName: string):
   process.env.PGLITE_DATA_DIR = dbDir
   process.env.PROJECT_LG_SANDBOX = dbDir
 
-  const { AgentRuntime, stringToUuid } = await import('@elizaos/core')
-  const sqlPlugin = (await import('@elizaos/plugin-sql')).default
+  const { createThinHostRuntime } = await import('../src/infrastructure/runtime/thin-host-factory.ts')
+  const { stringToUuid } = await import('../src/kernel/contracts/uuid.ts')
+  
   const { character } = await import('../src/character/index.ts')
   const { initDatabase } = await import('../src/db/index.ts')
   const { getRawDb, exec } = await import('../src/infrastructure/persistence/db.ts')
@@ -90,16 +91,15 @@ export async function readAll(dbDir: string, fromEnd: number, userName: string):
   const characterId = asCharacterId(character.id ?? character.name)
   const userId = stringToUuid(`user-${userName}`)
 
-  const runtime = new AgentRuntime({
-    character: character as never,
-    plugins: [sqlPlugin],
-    conversationLength: 16,
-    settings: {
+  const runtime = createThinHostRuntime({
+      character: character,
+      settings: {
       OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? 'placeholder',
       OPENAI_BASE_URL: process.env.OPENAI_BASE_URL ?? '',
     },
-  } as never)
-  await initDatabase(runtime, sqlPlugin)
+      conversationLength: 16,
+    })
+  await initDatabase(runtime)
   const db = getRawDb(runtime)
 
   /* ---- 投影（全精度） ---- */

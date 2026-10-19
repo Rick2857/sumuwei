@@ -6,7 +6,8 @@ import { TurnBridge, handleBridgeMessage, type BridgeWireResponse } from '../src
 import { VoiceDeliveryLedger } from '../src/kernel/app/bridge/voice-delivery-ledger.ts'
 import type { SpeechExpression } from '../src/kernel/contracts/expressive-speech.ts'
 import { openAiCompatiblePlugin } from '../src/providers/openai-compatible.ts'
-import { ModelType } from '@elizaos/core'
+import { ModelType } from '../src/infrastructure/runtime/eliza-vocabulary.ts'
+
 import { asActionId, asTraceId } from '../src/kernel/contracts/ids.ts'
 import { withoutAppendices } from '../src/kernel/contracts/expressive-speech.ts'
 

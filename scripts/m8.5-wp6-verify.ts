@@ -22,13 +22,15 @@
  * 不主张（归 WP7/WP8）：放行口判据、模式开关消费、main.ts 接线、shadow 采集面。
  * 量具纪律：§6.7 三段式 + §6.8 measured_count 自检；隔离库，真实库不打开。
  */
+import type { Character } from '../src/infrastructure/runtime/eliza-types.ts'
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
 import 'dotenv/config'
 
 import { isolateDatabase } from '../src/dev/sandbox.ts'
 isolateDatabase('m8.5-wp6-verify', { keep: false })
 
-import { AgentRuntime, type Character } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+
+
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
@@ -342,8 +344,11 @@ const SEMANTIC_EV = fixtureEvent(
 // ④–⑦ 持久化段（隔离库；真实库不打开；引导按 m8-wp6-verify 既有范式）
 // ---------------------------------------------------------------------------
 
-const runtime = new AgentRuntime({ character: character as Character, plugins: [], settings: {} })
-await initDatabase(runtime, sqlPlugin)
+const runtime = createThinHostRuntime({
+    character: character,
+    settings: {},
+  })
+await initDatabase(runtime)
 await runtime.initialize()
 const kernel = await initKernel(runtime, {
   definition: characterDefinitionFromCharacter(character),

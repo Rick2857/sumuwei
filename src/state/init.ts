@@ -35,7 +35,9 @@
  *     （`STATE_TRANSITION_SYSTEM_ORIGIN_RULE`）。
  */
 
-import { logger, type IAgentRuntime } from '@elizaos/core'
+/* ⚠️ `logger` 已从 ElizaOS 独立出来（M12 · W2）；行为与上游同形，见 logger.ts。 */
+import type { IAgentRuntime } from '../infrastructure/runtime/eliza-types.ts'
+import { logger } from '../infrastructure/telemetry/logger.ts'
 
 import type { TrustedAttribution } from '../kernel/contracts/attribution.ts'
 

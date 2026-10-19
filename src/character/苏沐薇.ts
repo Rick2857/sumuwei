@@ -27,7 +27,7 @@
  * 不塞进 system prompt。这样 L1-M2 接入 State provider、L1-M4 接入
  * Summary provider 时，不会把人设挤掉。
  */
-import { type Character } from '@elizaos/core'
+import type { Character } from '../infrastructure/runtime/eliza-types.ts'
 
 export const character: Character = {
   // 固定 id：保证重启后仍是同一个 agent。
@@ -36,13 +36,12 @@ export const character: Character = {
 
   name: '苏沐薇',
 
-  // 只放插件名；实例在 src/main.ts 里显式构造并传入 runtime，
-  // 让依赖关系在本仓库内可见、可控，而不是靠字符串魔法加载。
-  plugins: [
-    '@elizaos/plugin-sql',
-    '@elizaos/plugin-openai',
-    '@elizaos/plugin-bootstrap',
-  ],
+  // ⚠️ 插件实例**已随依赖移除工程全部退役**：薄宿主**不是**插件系统，
+  //    `src/main.ts` 不再装配 `sql` / `openai` / `bootstrap` 任何插件
+  //    ⇒ 原来这三个**包名字符串**已无任何消费者（它们当年也只是"名字"，
+  //    实例是 main.ts 显式构造后传进去的）。
+  //    保留它们 = 留一份"看起来还在用插件、其实没有任何代码读它"的死数据，
+  //    而删包时它们会是**唯一**残留的上游痕迹。
 
   // 背景：让性格有来由，而不是空贴形容词
   bio: [

@@ -11,12 +11,14 @@
  *       node_modules/.bin/tsx scripts/snapshot-state.ts --save    # 写入 data/snapshot.json
  *       node_modules/.bin/tsx scripts/snapshot-state.ts --diff data/snapshot.json  # 与快照比对
  */
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
 import 'dotenv/config'
 
 import { readFileSync, writeFileSync } from 'node:fs'
 
-import { AgentRuntime, stringToUuid } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+import { stringToUuid } from '../src/kernel/contracts/uuid.ts'
+
+
 import { sql } from 'drizzle-orm'
 
 import { character } from '../src/character/index.ts'
@@ -55,7 +57,10 @@ export interface StateSnapshot {
 }
 
 export async function takeSnapshot(): Promise<StateSnapshot> {
-  const runtime = new AgentRuntime({ character, plugins: [] })
+  const runtime = createThinHostRuntime({
+    character: character,
+    settings: {},
+  })
 
   /*
    * INC-01 WP6：本脚本也是**真实库 opener** —— 因此它必须和生产路径走同一条状态机
@@ -74,7 +79,7 @@ export async function takeSnapshot(): Promise<StateSnapshot> {
       operationKind: 'state_snapshot',
       deps: {
         openDatabase: async () => {
-          await initDatabase(runtime, sqlPlugin)
+          await initDatabase(runtime)
         },
         stopServices: () => stopRuntimeServices(runtime),
         closeDatabase: async () => await closeDatabaseConnection(runtime),
@@ -84,7 +89,7 @@ export async function takeSnapshot(): Promise<StateSnapshot> {
     })
     await handle.open()
   } else {
-    await initDatabase(runtime, sqlPlugin)
+    await initDatabase(runtime)
   }
 
   const holder = runtime as unknown as {

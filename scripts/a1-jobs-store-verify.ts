@@ -47,19 +47,18 @@ if (process.env.CHARACTER_DB_BACKEND !== 'pglite') {
 }
 
 const sandbox = isolateDatabase('a1-jobs-store', { keep: true })
-const { AgentRuntime } = await import('@elizaos/core')
-const sqlPlugin = (await import('@elizaos/plugin-sql')).default
+const { createThinHostRuntime } = await import('../src/infrastructure/runtime/thin-host-factory.ts')
+
 const { character } = await import('../src/character/index.ts')
 const { initDatabase } = await import('../src/db/index.ts')
 const { getRawDb } = await import('../src/infrastructure/persistence/db.ts')
 
-const runtime = new AgentRuntime({
-  character: character as never,
-  plugins: [],
-  settings: { PGLITE_DATA_DIR: sandbox.dir, CHARACTER_DB_BACKEND: 'pglite' },
-})
+const runtime = createThinHostRuntime({
+      character: character,
+      settings: { PGLITE_DATA_DIR: sandbox.dir, CHARACTER_DB_BACKEND: 'pglite' },
+    })
 try {
-  await initDatabase(runtime, sqlPlugin as never)
+  await initDatabase(runtime)
   const db = getRawDb(runtime)
   const store = createAdminJobsStore(db as never)
 

@@ -20,15 +20,18 @@
  *
  * 跑法：pnpm postgresql:p02:verify
  */
+import type { AgentRuntime, Character } from '../src/infrastructure/runtime/eliza-types.ts'
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
+
 import 'dotenv/config'
 
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-import type { Character } from '@elizaos/core'
-import { AgentRuntime } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+
+
+
 
 import { character } from '../src/character/index.ts'
 import { initDatabase } from '../src/db/index.ts'
@@ -151,9 +154,12 @@ async function main(): Promise<void> {
     let kernelReadings: Record<string, unknown> = {}
     try {
       // ---- 起真核心：**用 .env 里那套配置**（`initDatabase` 自己会读它）----
-      const created = new AgentRuntime({ character: character as Character, plugins: [], settings: runtimeSettings() })
+      const created = createThinHostRuntime({
+    character: character,
+    settings: runtimeSettings(),
+  })
       runtime = created
-      await initDatabase(created, sqlPlugin)
+      await initDatabase(created)
       await created.initialize()
       const kernel = await initKernel(created, { definition: characterDefinitionFromCharacter(character) })
 
@@ -227,9 +233,12 @@ async function main(): Promise<void> {
     // ---- **重启核心**：数据库一次都没重启 ----
     let secondBootFailed: string | undefined
     try {
-      const again = new AgentRuntime({ character: character as Character, plugins: [], settings: runtimeSettings() })
+      const again = createThinHostRuntime({
+    character: character,
+    settings: runtimeSettings(),
+  })
       runtime = again
-      await initDatabase(again, sqlPlugin)
+      await initDatabase(again)
       await again.initialize()
       const kernel2 = await initKernel(again, { definition: characterDefinitionFromCharacter(character) })
       const events2 = await domainEventsFor(kernel2.stores.db, kernel2.characterId)

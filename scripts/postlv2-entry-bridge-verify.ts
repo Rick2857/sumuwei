@@ -353,7 +353,7 @@ const { conversationEventsInRange } = await import(
   '../src/infrastructure/persistence/conversation-store.ts'
 )
 const { character } = await import('../src/character/index.ts')
-const { stringToUuid } = await import('@elizaos/core')
+const { stringToUuid } = await import('../src/kernel/contracts/uuid.ts')
 /*
  * ⚠️ 守卫链来自**唯一实现**（`src/kernel/app/reply-guard-chain.ts`），
  * 不再在门里手抄一遍。R3 那版之所以漏掉全部五道守卫而门照旧 PASS，

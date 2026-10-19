@@ -27,6 +27,7 @@
  * ⚠️ `isolateDatabase()` 一次性沙箱库；真实库**从不被打开**。零模型 / 零出网。
  */
 
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
 import 'dotenv/config'
 
 import { isolateDatabase } from '../src/dev/sandbox.ts'
@@ -37,8 +38,8 @@ import { writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { performance } from 'node:perf_hooks'
 
-import { AgentRuntime } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+
+
 
 import { createM10RunId, openM10RunDir, writeM10Manifest } from './m10-evidence.ts'
 import { character } from '../src/character/index.ts'
@@ -196,8 +197,11 @@ function commitmentOf(characterId: CharacterId, goalId: string): CommitmentState
 
 async function main(): Promise<void> {
   phase('boot isolated database')
-  const runtime = new AgentRuntime({ character, plugins: [] })
-  await initDatabase(runtime, sqlPlugin)
+  const runtime = createThinHostRuntime({
+    character: character,
+    settings: {},
+  })
+  await initDatabase(runtime)
   const db = getRawDb(runtime)
   const registry = createFullDomainEventRegistry()
 

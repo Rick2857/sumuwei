@@ -18,6 +18,8 @@
  * 是生产提交资格；这里是对历史消息的纯评估）。量具纪律：measured_count 自检
  * （零 source = INVALID，不是 PASS）。
  */
+import type { Character } from '../src/infrastructure/runtime/eliza-types.ts'
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
 import 'dotenv/config'
 
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
@@ -58,8 +60,8 @@ process.env.PROJECT_LG_SANDBOX = dbDir
 // ② 引导（副本上的内核；读事件用）
 // ---------------------------------------------------------------------------
 
-import { AgentRuntime, type Character } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+
+
 import { character } from '../src/character/index.ts'
 import { initDatabase } from '../src/db/index.ts'
 import { initKernel } from '../src/kernel/app/kernel.ts'
@@ -74,8 +76,11 @@ import {
 } from '../src/kernel/app/affect/semantic-evaluator.ts'
 import { createOpenAiAffectSemanticProvider } from '../src/infrastructure/model/affect-semantic-provider.ts'
 
-const runtime = new AgentRuntime({ character: character as Character, plugins: [], settings: {} })
-await initDatabase(runtime, sqlPlugin)
+const runtime = createThinHostRuntime({
+    character: character,
+    settings: {},
+  })
+await initDatabase(runtime)
 await runtime.initialize()
 const kernel = await initKernel(runtime, { definition: characterDefinitionFromCharacter(character) })
 const characterId = kernel.characterId

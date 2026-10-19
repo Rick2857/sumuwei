@@ -25,12 +25,15 @@
  * 跑法：tsx scripts/verify-m4-real-db.ts
  */
 
+import type { Character, Plugin } from '../src/infrastructure/runtime/eliza-types.ts'
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
 import 'dotenv/config'
 
-import { AgentRuntime, stringToUuid, type Character, type Plugin } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
-import openaiPlugin from '@elizaos/plugin-openai'
-import bootstrapPlugin from '@elizaos/plugin-bootstrap'
+import { stringToUuid } from '../src/kernel/contracts/uuid.ts'
+
+
+
+
 
 import { character } from '../src/character/index.ts'
 import { latestSchemaVersion } from '../src/infrastructure/persistence/migrations.ts'
@@ -128,22 +131,16 @@ function check(label: string, ok: boolean, detail = ''): void {
 const characterId = character.id ?? character.name
 const userId = stringToUuid('user-Alex')
 
-const runtime = new AgentRuntime({
-  character: character as Character,
-  plugins: [
-    openaiPlugin,
-    bootstrapPlugin,
-    openAiCompatiblePlugin,
-    createPersistentCharacterPlugin({ characterId, userId }),
-  ] as Plugin[],
-  conversationLength: 16,
-  settings: {
+const runtime = createThinHostRuntime({
+    character: character,
+    settings: {
     OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? '',
     OPENAI_BASE_URL: process.env.OPENAI_BASE_URL ?? 'https://api.deepseek.com',
     OPENAI_LARGE_MODEL: process.env.OPENAI_LARGE_MODEL ?? 'deepseek-flash',
     OPENAI_SMALL_MODEL: process.env.OPENAI_SMALL_MODEL ?? 'deepseek-flash',
   },
-})
+    conversationLength: 16,
+  })
 
 /*
  * `initDatabase` 会把待应用的迁移跑掉。真库此刻已在 v5，
@@ -165,7 +162,7 @@ if (guarded) {
     operationKind: 'real_db_verify',
     deps: {
       openDatabase: async () => {
-        await initDatabase(runtime, sqlPlugin)
+        await initDatabase(runtime)
       },
       stopServices: () => stopRuntimeServices(runtime),
       closeDatabase: async () => await closeDatabaseConnection(runtime),
@@ -178,7 +175,7 @@ if (guarded) {
     `   生产状态机：${openHandle.reading.states.join(' → ')}（pre-open 快照 ${openHandle.reading.preOpenSnapshotId ?? '未记录'}）`
   )
 } else {
-  await initDatabase(runtime, sqlPlugin)
+  await initDatabase(runtime)
 }
 
 const db = getRawDb(runtime)

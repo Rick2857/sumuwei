@@ -1,3 +1,5 @@
+import type { Character, Plugin } from '../src/infrastructure/runtime/eliza-types.ts'
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
 import 'dotenv/config'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
@@ -5,8 +7,9 @@ import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { AgentRuntime, stringToUuid, type Character, type Plugin } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+import { stringToUuid } from '../src/kernel/contracts/uuid.ts'
+
+
 import { character } from '../src/character/index.ts'
 import { initDatabase } from '../src/db/index.ts'
 import { isolateDatabase, cleanupSandbox } from '../src/dev/sandbox.ts'
@@ -82,8 +85,11 @@ if (!live) {
   Object.assign(process.env, { OPENAI_API_KEY: 'offline-fixture', OPENAI_BASE_URL: `http://127.0.0.1:${port}/v1`, OPENAI_LARGE_MODEL: 'fixture' })
 }
 const sandbox = isolateDatabase('automatic-memory-verify', { keep: true })
-const runtime = new AgentRuntime({ character: character as Character, plugins: [sqlPlugin] as Plugin[], settings: { OPENAI_API_KEY: 'unused' } })
-await initDatabase(runtime, sqlPlugin)
+const runtime = createThinHostRuntime({
+    character: character,
+    settings: { OPENAI_API_KEY: 'unused' },
+  })
+await initDatabase(runtime)
 const kernel = await initKernel(runtime, { definition: characterDefinitionFromCharacter(character), registry: createFullDomainEventRegistry() })
 const db = getRawDb(runtime)
 const userId = stringToUuid('user-automatic-memory-fixture')

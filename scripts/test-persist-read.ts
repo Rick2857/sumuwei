@@ -9,14 +9,16 @@
  * 跑法（一般由 run-tests.ts 的 E 测试调用）：
  *   node_modules/.bin/tsx scripts/test-persist-read.ts
  */
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
 import 'dotenv/config'
 
 import { isolateDatabase } from '../src/dev/sandbox.ts'
 // keep=true：本进程是验证链的最后一环，退出后目录由 run-tests.ts 统一清理
 isolateDatabase('persist', { runId: process.env.PERSIST_RUN_ID ?? 'default', keep: true })
 
-import { AgentRuntime, stringToUuid } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+import { stringToUuid } from '../src/kernel/contracts/uuid.ts'
+
+
 
 import { character } from '../src/character/index.ts'
 import { initDatabase } from '../src/db/index.ts'
@@ -25,8 +27,11 @@ import { readStateIfExists } from '../src/state/repository.ts'
 const characterId = character.id ?? character.name
 const userId = stringToUuid(`user-${process.env.USER_NAME ?? 'Alex'}`)
 
-const runtime = new AgentRuntime({ character, plugins: [] })
-await initDatabase(runtime, sqlPlugin)
+const runtime = createThinHostRuntime({
+    character: character,
+    settings: {},
+  })
+await initDatabase(runtime)
 
 // 关键：用 readStateIfExists 而不是 loadState。
 // loadState 在查不到时会按初始值**建档**，那样"重启后状态还在"会假通过——

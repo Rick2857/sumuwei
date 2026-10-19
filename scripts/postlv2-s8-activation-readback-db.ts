@@ -24,10 +24,9 @@
 
 import 'dotenv/config'
 
-import { AgentRuntime, stringToUuid, type Character, type Plugin } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
-import openaiPlugin from '@elizaos/plugin-openai'
-import bootstrapPlugin from '@elizaos/plugin-bootstrap'
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
+import { stringToUuid } from '../src/kernel/contracts/uuid.ts'
+import type { Character, Plugin } from '../src/infrastructure/runtime/eliza-types.ts'
 
 import { character } from '../src/character/index.ts'
 import { allowProductionDatabase, initDatabase } from '../src/db/index.ts'
@@ -81,14 +80,8 @@ allowProductionDatabase()
 
 const characterId = character.id ?? character.name
 const userId = stringToUuid('user-Alex')
-const runtime = new AgentRuntime({
-  character: character as Character,
-  plugins: [
-    openaiPlugin,
-    bootstrapPlugin,
-    openAiCompatiblePlugin,
-    createPersistentCharacterPlugin({ characterId, userId }),
-  ] as Plugin[],
+const runtime = createThinHostRuntime({
+  character: character,
   conversationLength: 16,
   settings: {
     OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? '',
@@ -109,7 +102,7 @@ if (guarded) {
     operationKind: 'real_db_verify',
     deps: {
       openDatabase: async () => {
-        await initDatabase(runtime, sqlPlugin)
+        await initDatabase(runtime)
       },
       stopServices: () => stopRuntimeServices(runtime),
       closeDatabase: async () => await closeDatabaseConnection(runtime),
@@ -120,7 +113,7 @@ if (guarded) {
   await openHandle.open()
   console.log(`   生产状态机：${openHandle.reading.states.join(' → ')}（pre-open 快照 ${openHandle.reading.preOpenSnapshotId ?? '未记录'}）`)
 } else {
-  await initDatabase(runtime, sqlPlugin)
+  await initDatabase(runtime)
 }
 
 const db = getRawDb(runtime)

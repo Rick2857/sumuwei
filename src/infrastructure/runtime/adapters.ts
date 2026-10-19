@@ -18,8 +18,10 @@
  * （例如"最近事件是否被正确投影成 Context line"不需要启动 runtime）。
  */
 
-import type { AgentRuntime, Memory } from '@elizaos/core'
-import { ModelType } from '@elizaos/core'
+
+/* ⚠️ `ModelType` 已从 ElizaOS 独立出来（M12 · W2-③）；取值逐字抄自上游。 */
+import type { AgentRuntime, Memory } from './eliza-types.ts'
+import { ModelType } from './eliza-vocabulary.ts'
 
 import {
   asCharacterId,
@@ -47,7 +49,6 @@ import { validateRelationshipProposal } from '../../kernel/policies/relationship
 import { relationshipReducerFor } from '../../kernel/projections/relationship.ts'
 import type { ConversationLine } from '../../kernel/context/sections.ts'
 import { resolveCurrentState, renderStateBlock } from '../../state/provider.ts'
-import { buildTurnContext, type TurnContext } from '../../context/builder.ts'
 import { recentConversationEvents } from '../persistence/conversation-store.ts'
 import {
   applyAcceptedEvents,
@@ -246,55 +247,16 @@ export const CONVERSATION_PROVIDERS = [
 // 旧路径（M1 的 composeState + messageHandlerTemplate）
 // ---------------------------------------------------------------------------
 
-/**
- * 旧 Context 路径。
+/*
+ * ⚠️ **三个旧链路包装已随 M12 · W4 退役**（2026-10-19）。
  *
- * M2.5 保留它有两个用途：
- *   1. `--dump-prompt` 仍然还原"M1 会看到什么"，便于对照
- *   2. `CHARACTER_CONTEXT_COMPILER_V1=0` 时主链路完全走它（行为与 M2 逐字节一致）
- *
- * 它**不是**第二条通往模型的合法路径：默认配置下主链路必须走
- * ContextCompiler（SC-006 检的就是这一点）。
- *
- * 注意：旧路径**不套 provider 白名单**——它的 provider 组成属于 M1/M2 的既有
- * 行为，改它没有收益却有回归风险。白名单是新链路的语义。
+ * 它们全都只是 `buildTurnContext(…)` 的改名转发，而那个函数来自 ElizaOS
+ * （其 `composePromptFromState` 需要 handlebars + 唯一名生成器）。
+ * D2 已确立旧链路在**生产无调用者**；W4 删包后它也不可能存在。
+ * ⇒ 保留这三个包装 = 保留三个必然编译失败的转发壳。
+ * ⚠️ 代价（如实记）：`--dump-prompt --legacy` 的对照视图没了；
+ *    依赖它的 L1/L2 上下文注入断言随之退役。
  */
-export async function compileLegacyContext(
-  runtime: AgentRuntime,
-  message: Memory
-): Promise<TurnContext> {
-  return buildTurnContext(runtime, message)
-}
-
-/**
- * 旧路径的**只读**组装（供 `--dump-prompt --legacy` 对照用）。
- *
- * 与 `compileLegacyContext` 是同一个调用，单独起个名字是为了让
- * "这是对照视图"这件事在调用点一眼可见。
- */
-export async function buildLegacyDumpContext(
-  runtime: AgentRuntime,
-  message: Memory
-): Promise<TurnContext> {
-  return buildTurnContext(runtime, message)
-}
-
-/**
- * 只跑白名单里的 provider（`onlyInclude = true`）。
- *
- * 用在**新链路**上：ContextCompiler 自己不碰 ElizaOS，
- * 由这里把 provider 输出取出来再交给它组装。
- */
-export async function buildWhitelistedContext(
-  runtime: AgentRuntime,
-  message: Memory,
-  providers: readonly string[] = CONVERSATION_PROVIDERS
-): Promise<TurnContext> {
-  return buildTurnContext(runtime, message, {
-    includeList: [...providers],
-    onlyInclude: true,
-  })
-}
 
 // ---------------------------------------------------------------------------
 // 模型调用

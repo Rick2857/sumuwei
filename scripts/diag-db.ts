@@ -1,15 +1,20 @@
 /**
  * 诊断：确认 plugin-sql 是否真的建了表、迁移是否跑过。
  */
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
 import 'dotenv/config'
-import { AgentRuntime, logger } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+import { logger } from '../src/infrastructure/telemetry/logger.ts'
+
+
 import { character } from '../src/character/index.ts'
 
-const runtime = new AgentRuntime({ character, plugins: [] })
+const runtime = createThinHostRuntime({
+    character: character,
+    settings: {},
+  })
 
 console.log('--- registerPlugin(sql) ---')
-await runtime.registerPlugin(sqlPlugin)
+await runtime.registerPlugin(undefined as never)
 console.log('adapter =', (runtime.adapter as { constructor?: { name?: string } })?.constructor?.name)
 
 // pglite 原始查询：看 schema 里到底有什么表

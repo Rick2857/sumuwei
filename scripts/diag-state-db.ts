@@ -4,6 +4,7 @@
  * 用途：证明状态**真的在数据库里**，而不是内存里的变量。
  * 跑法：node_modules/.bin/tsx scripts/diag-state-db.ts
  */
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
 import 'dotenv/config'
 
 // ⚠️ 实验必须隔离：本脚本会建表（ensureStateTables），因此需要独立副本。
@@ -11,16 +12,20 @@ import 'dotenv/config'
 import { isolateDatabase } from '../src/dev/sandbox.ts'
 isolateDatabase('diag-state-db')
 
-import { AgentRuntime, stringToUuid } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+import { stringToUuid } from '../src/kernel/contracts/uuid.ts'
+
+
 import { sql } from 'drizzle-orm'
 
 import { character } from '../src/character/index.ts'
 import { initDatabase } from '../src/db/index.ts'
 import { ensureStateTables } from '../src/state/repository.ts'
 
-const runtime = new AgentRuntime({ character, plugins: [] })
-await initDatabase(runtime, sqlPlugin)
+const runtime = createThinHostRuntime({
+    character: character,
+    settings: {},
+  })
+await initDatabase(runtime)
 await ensureStateTables(runtime)
 
 const holder = runtime as unknown as {

@@ -5,10 +5,11 @@
  * 期望：抛错并提示实验必须隔离。
  * 跑法：node_modules/.bin/tsx scripts/dev-test-guard.ts
  */
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
 import 'dotenv/config'
 
-import { AgentRuntime } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+
+
 
 import { character } from '../src/character/index.ts'
 import { initDatabase } from '../src/db/index.ts'
@@ -16,10 +17,13 @@ import { initDatabase } from '../src/db/index.ts'
 // 模拟"忘了隔离"的脚本：直接指向真实库
 process.env.PGLITE_DATA_DIR = './data/pglite'
 
-const runtime = new AgentRuntime({ character, plugins: [] })
+const runtime = createThinHostRuntime({
+    character: character,
+    settings: {},
+  })
 
 try {
-  await initDatabase(runtime, sqlPlugin)
+  await initDatabase(runtime)
   console.log('❌ 闸门失效：本应拒绝，却成功连上了真实库')
   process.exit(1)
 } catch (e) {

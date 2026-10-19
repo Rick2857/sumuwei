@@ -15,11 +15,13 @@
  *
  * 运行：pnpm m9:scale:verify（隔离库；不碰真实库；无模型）
  */
+import type { Character } from '../src/infrastructure/runtime/eliza-types.ts'
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
 import 'dotenv/config'
 import { isolateDatabase } from '../src/dev/sandbox.ts'
-import type { Character } from '@elizaos/core'
-import { AgentRuntime } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+
+
+
 import { execFileSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -109,8 +111,11 @@ async function main(): Promise<void> {
   console.log('\n=== M9 scale：B42/B43(信念半)/B45/B47（页边界规模 + 重建 + 修订稳定） ===')
 
   isolateDatabase('m9-scale-verify', { keep: false })
-  const runtime = new AgentRuntime({ character: character as Character, plugins: [], settings: {} })
-  await initDatabase(runtime, sqlPlugin)
+  const runtime = createThinHostRuntime({
+    character: character,
+    settings: {},
+  })
+  await initDatabase(runtime)
   await runtime.initialize()
   const kernel = await initKernel(runtime, {
     definition: characterDefinitionFromCharacter(character),

@@ -36,16 +36,20 @@
  *   tsx scripts/verify-m4-restart.ts --phase read  --run-id <id>
  */
 
+import type { AgentRuntime, Character, Plugin } from '../src/infrastructure/runtime/eliza-types.ts'
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
+
 import 'dotenv/config'
 
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
-import { AgentRuntime, stringToUuid, type Character, type Plugin } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
-import openaiPlugin from '@elizaos/plugin-openai'
-import bootstrapPlugin from '@elizaos/plugin-bootstrap'
+import { stringToUuid } from '../src/kernel/contracts/uuid.ts'
+
+
+
+
 import { sql } from 'drizzle-orm'
 
 import { character } from '../src/character/index.ts'
@@ -122,24 +126,18 @@ async function assemble(): Promise<Harness> {
   const characterId = character.id ?? character.name
   const userId = stringToUuid('user-Alex')
 
-  const runtime = new AgentRuntime({
-    character: character as Character,
-    plugins: [
-      openaiPlugin,
-      bootstrapPlugin,
-      openAiCompatiblePlugin,
-      createPersistentCharacterPlugin({ characterId, userId }),
-    ] as Plugin[],
-    conversationLength: 16,
+  const runtime = createThinHostRuntime({
+    character: character,
     settings: {
       OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? '',
       OPENAI_BASE_URL: process.env.OPENAI_BASE_URL ?? 'https://api.deepseek.com',
       OPENAI_LARGE_MODEL: process.env.OPENAI_LARGE_MODEL ?? 'deepseek-flash',
       OPENAI_SMALL_MODEL: process.env.OPENAI_SMALL_MODEL ?? 'deepseek-flash',
     },
+    conversationLength: 16,
   })
 
-  await initDatabase(runtime, sqlPlugin)
+  await initDatabase(runtime)
   await runtime.initialize()
 
   const kernel = await initKernel(runtime, {

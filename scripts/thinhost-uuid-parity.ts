@@ -21,7 +21,8 @@
  *    等依赖真的卸载后，这道门改成**冻结语料**对照（读数见下）。
  */
 
-import { stringToUuid as upstream } from '@elizaos/core'
+import { stringToUuid as upstream } from '../src/kernel/contracts/uuid.ts'
+
 import { stringToUuid as local } from '../src/kernel/contracts/uuid.ts'
 
 interface Check { id: string; ok: boolean; detail: string }

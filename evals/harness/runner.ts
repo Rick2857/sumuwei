@@ -19,8 +19,9 @@
  * 安全：全部在一次性副本库上跑（`isolateDatabase`），真实对话库绝不被碰。
  */
 
-import { AgentRuntime, stringToUuid, type Character } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+import { createThinHostRuntime } from '../../src/infrastructure/runtime/thin-host-factory.ts'
+import { stringToUuid } from '../../src/kernel/contracts/uuid.ts'
+import type { Character } from '../../src/infrastructure/runtime/eliza-types.ts'
 
 import { character } from '../../src/character/index.ts'
 import { initDatabase } from '../../src/db/index.ts'
@@ -29,9 +30,7 @@ import {
   createPersistentCharacterPlugin,
 } from '../../src/plugin/persistent-character.ts'
 import { openAiCompatiblePlugin } from '../../src/providers/openai-compatible.ts'
-import openaiPlugin from '@elizaos/plugin-openai'
-import bootstrapPlugin from '@elizaos/plugin-bootstrap'
-import type { Plugin } from '@elizaos/core'
+import type { AgentRuntime } from '../../src/infrastructure/runtime/eliza-types.ts'
 
 import { initKernel, type KernelHandle } from '../../src/kernel/app/kernel.ts'
 import { TurnGateway } from '../../src/kernel/app/turn-gateway.ts'
@@ -438,14 +437,8 @@ export async function bootHarness(
   )
 
   const userId = stringToUuid('user-Alex')
-  const runtime = new AgentRuntime({
-    character: character as Character,
-    plugins: [
-      openaiPlugin,
-      bootstrapPlugin,
-      openAiCompatiblePlugin,
-      createPersistentCharacterPlugin({ characterId: character.id ?? character.name, userId }),
-    ] as Plugin[],
+  const runtime = createThinHostRuntime({
+    character: character,
     conversationLength: 16,
     settings: {
       OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? '',
@@ -455,7 +448,7 @@ export async function bootHarness(
     },
   })
 
-  await initDatabase(runtime, sqlPlugin)
+  await initDatabase(runtime)
   await runtime.initialize()
   const kernel = await initKernel(runtime, { definition: characterDefinitionFromCharacter(character) })
 

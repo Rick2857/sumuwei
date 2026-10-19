@@ -25,13 +25,15 @@
  * （WP13 激活段）、盲测语料判定。
  * 量具纪律：§6.7 三段式 + §6.8 measured_count 自检；隔离库，真实库不打开。
  */
+import type { Character } from '../src/infrastructure/runtime/eliza-types.ts'
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
 import 'dotenv/config'
 
 import { isolateDatabase } from '../src/dev/sandbox.ts'
 isolateDatabase('m8.5-wp8-verify', { keep: false })
 
-import { AgentRuntime, type Character } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+
+
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
@@ -223,8 +225,11 @@ checkEqual('negative', 'N1c', '原始串保留在 raw 字段（诊断面；不�
 // ③ 隔离库引导（真实库不打开；WP7 门同款范式）
 // ---------------------------------------------------------------------------
 
-const runtime = new AgentRuntime({ character: character as Character, plugins: [], settings: {} })
-await initDatabase(runtime, sqlPlugin)
+const runtime = createThinHostRuntime({
+    character: character,
+    settings: {},
+  })
+await initDatabase(runtime)
 await runtime.initialize()
 const kernel = await initKernel(runtime, {
   definition: characterDefinitionFromCharacter(character),

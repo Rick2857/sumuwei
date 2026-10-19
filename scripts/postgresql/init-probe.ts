@@ -29,8 +29,11 @@
  *    LG_PG_EXPECT_DATABASE=lg_test_wp2 LG_PG_EXPECT_USER=lg_migrate \
  *    node node_modules/tsx/dist/cli.mjs scripts/postgresql/init-probe.ts
  */
-import { AgentRuntime, type Character, type Plugin } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+import type { AgentRuntime, Character, Plugin } from '../../src/infrastructure/runtime/eliza-types.ts'
+import { createThinHostRuntime } from '../../src/infrastructure/runtime/thin-host-factory.ts'
+
+
+
 
 import { character } from '../../src/character/index.ts'
 
@@ -99,11 +102,10 @@ async function main(): Promise<void> {
   const { initDatabase, allowKernelMigration } = dbModule
 
   const makeRuntime = (): AgentRuntime =>
-    new AgentRuntime({
-      character: character as Character,
-      plugins: [sqlPlugin] as Plugin[],
-      settings: { POSTGRES_URL: url },
-    })
+    createThinHostRuntime({
+    character: character,
+    settings: { POSTGRES_URL: url },
+  })
 
   // -------------------------------------------------------------------------
   // ②a 负控：**不**放行迁移时，Kernel 迁移闸必须拦住
@@ -120,7 +122,7 @@ async function main(): Promise<void> {
   {
     const runtimeA = makeRuntime()
     try {
-      await initDatabase(runtimeA, sqlPlugin)
+      await initDatabase(runtimeA)
       notRun.push({
         id: 'kernel-migration-gate-negative-control',
         what: '未放行时 Kernel 迁移闸拦住（kernel_migration_pending）',
@@ -146,7 +148,7 @@ async function main(): Promise<void> {
 
   let ready: Awaited<ReturnType<typeof initDatabase>>
   try {
-    ready = await initDatabase(runtime, sqlPlugin)
+    ready = await initDatabase(runtime)
     step('initDatabase() 成功（显式放行迁移后）', true)
   } catch (error) {
     const e = error as { code?: string; message?: string; name?: string }
@@ -212,10 +214,23 @@ async function main(): Promise<void> {
   }
   step('插件 + Kernel 迁移在真 PG 上建出表（>0）', Number(row.tables ?? 0) > 0, `public 表数=${row.tables}`)
   step('pgvector 扩展已在目标库安装', row.vector_ver !== null && row.vector_ver !== undefined, `vector=${row.vector_ver ?? '(未安装)'}`)
+
+  /*
+   * ⚠️ 2026-10-19：**不再硬编码 18**，改读源码的 `latestSchemaVersion()`。
+   *
+   * 原来写死 18，而源码已到 23（`migrations.ts:1971` 的
+   * `lg-runtime-compatibility-tables`）⇒ 这道门**长期 FAIL**。
+   * 一道永远红的门等于没有门（还会让人以为产品坏了）。
+   *
+   * ⇒ 改成读源码，于是"再加一个迁移"不会再让这道门过期。
+   *    ⚠️ 读数里**同时**写出字面版本，便于事后核对是哪一版。
+   */
+  const { latestSchemaVersion } = await import('../../src/infrastructure/persistence/migrations.ts')
+  const expectedVersion = latestSchemaVersion()
   step(
-    'Kernel schema 版本 = 源码最新（18）',
-    Number(row.kernel_ver ?? 0) === 18,
-    `kernel_ver=${row.kernel_ver}`
+    `Kernel schema 版本 = 源码最新（${String(expectedVersion)}）`,
+    Number(row.kernel_ver ?? 0) === expectedVersion,
+    `kernel_ver=${row.kernel_ver} expected=${String(expectedVersion)}`
   )
 
   // -------------------------------------------------------------------------

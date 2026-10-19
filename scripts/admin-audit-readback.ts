@@ -35,8 +35,8 @@ const argOf = (name: string, fallback: string): string => {
 const limit = Number(argOf('--limit', '5'))
 const capability = argOf('--capability', 'admin.jobs.admit')
 
-const { AgentRuntime } = await import('@elizaos/core')
-const sqlPlugin = (await import('@elizaos/plugin-sql')).default
+const { createThinHostRuntime } = await import('../src/infrastructure/runtime/thin-host-factory.ts')
+
 const { character } = await import('../src/character/index.ts')
 const { initDatabase } = await import('../src/db/index.ts')
 const { initKernel } = await import('../src/kernel/app/kernel.ts')
@@ -50,10 +50,9 @@ const { closeDatabaseConnection } = await import('../src/infrastructure/persiste
  * ⚠️ `2026-10-14` 实测教训：`--migrate` 那条路当年**漏了**播种（连到 `template1` ⇒ 被身份核对拒绝）；
  *    这里**显式**播种，避免重复那个坑。
  */
-const runtime = new AgentRuntime({
-  character: character as never,
-  plugins: [],
-  settings: {
+const runtime = createThinHostRuntime({
+      character: character,
+      settings: {
     ...(process.env.POSTGRES_URL ? { POSTGRES_URL: process.env.POSTGRES_URL } : {}),
     ...(process.env.CHARACTER_DB_BACKEND ? { CHARACTER_DB_BACKEND: process.env.CHARACTER_DB_BACKEND } : {}),
     ...(process.env.PGLITE_DATA_DIR ? { PGLITE_DATA_DIR: process.env.PGLITE_DATA_DIR } : {}),
@@ -62,10 +61,10 @@ const runtime = new AgentRuntime({
       ? { LG_PG_EXPECT_DATABASE_PREFIX: process.env.LG_PG_EXPECT_DATABASE_PREFIX }
       : {}),
   },
-})
+    })
 
 try {
-  await initDatabase(runtime, sqlPlugin as never)
+  await initDatabase(runtime)
   await runtime.initialize()
   const kernel = await initKernel(runtime, { definition: characterDefinitionFromCharacter(character as never) })
   const { exec } = await import('../src/infrastructure/persistence/db.ts')

@@ -13,11 +13,9 @@ import 'dotenv/config'
 
 import { isolateDatabase } from '../src/dev/sandbox.ts'
 
-import { AgentRuntime, type Character, type Plugin } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
-import openaiPlugin from '@elizaos/plugin-openai'
-import bootstrapPlugin from '@elizaos/plugin-bootstrap'
-import { stringToUuid } from '@elizaos/core'
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
+import type { Character, Plugin } from '../src/infrastructure/runtime/eliza-types.ts'
+import { stringToUuid } from '../src/kernel/contracts/uuid.ts'
 
 import { character } from '../src/character/index.ts'
 import { initDatabase } from '../src/db/index.ts'
@@ -31,14 +29,8 @@ import { hashSeed } from '../src/infrastructure/persistence/seed-hash.ts'
 isolateDatabase('diag-seed-db-diff')
 
 const userId = stringToUuid('user-Alex')
-const runtime = new AgentRuntime({
-  character: character as Character,
-  plugins: [
-    openaiPlugin,
-    bootstrapPlugin,
-    openAiCompatiblePlugin,
-    createPersistentCharacterPlugin({ characterId: character.id ?? character.name, userId }),
-  ] as Plugin[],
+const runtime = createThinHostRuntime({
+  character: character,
   conversationLength: 16,
   settings: {
     OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? '',
@@ -48,7 +40,7 @@ const runtime = new AgentRuntime({
   },
 })
 
-await initDatabase(runtime, sqlPlugin)
+await initDatabase(runtime)
 await runtime.initialize()
 
 // 与 harness 完全同一条路径：不带 now（所以 createdAt 是真实时间）

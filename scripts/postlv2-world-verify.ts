@@ -52,7 +52,7 @@ const { createM4Harness } = await import('./m4-harness.ts')
 const { TurnGateway } = await import('../src/kernel/app/turn-gateway.ts')
 const { ConversationRecorder } = await import('../src/infrastructure/runtime/conversation-recorder.ts')
 const { character } = await import('../src/character/index.ts')
-const { stringToUuid } = await import('@elizaos/core')
+const { stringToUuid } = await import('../src/kernel/contracts/uuid.ts')
 const { SECTION_IDS } = await import('../src/kernel/context/sections.ts')
 
 const h = await createM4Harness({ label: 'postlv2-world' })

@@ -48,7 +48,7 @@ const sandbox = isolateDatabase('postlv2-source-root')
 console.log(`  [sandbox] ${sandbox.dir}`)
 
 const { createM4Harness } = await import('./m4-harness.ts')
-const { stringToUuid } = await import('@elizaos/core')
+const { stringToUuid } = await import('../src/kernel/contracts/uuid.ts')
 const { evidenceRef, EVIDENCE_KINDS } = await import('../src/kernel/contracts/memory.ts')
 const { rootReadingsByMemory } = await import(
   '../src/infrastructure/persistence/qualification-read.ts'

@@ -26,10 +26,10 @@
  * ⚠️ 零模型 / 零出网；只开 `isolateDatabase()` 的一次性沙箱，**绝不打开真实库**。
  */
 
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
 import 'dotenv/config'
 import { isolateDatabase } from '../src/dev/sandbox.ts'
-import { AgentRuntime } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+
 import { execFileSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -79,8 +79,11 @@ const percentile = (sorted: readonly number[], fraction: number): number => {
 
 const run = async (): Promise<void> => {
   isolateDatabase('m9-perf-baseline', { keep: false })
-  const runtime = new AgentRuntime({ character: character as never, plugins: [], settings: {} } as never)
-  await initDatabase(runtime, sqlPlugin as never)
+  const runtime = createThinHostRuntime({
+    character: character,
+    settings: {},
+  })
+  await initDatabase(runtime)
   await runtime.initialize()
   const kernel = await initKernel(runtime, { definition: characterDefinitionFromCharacter(character) })
   const db = kernel.stores.db

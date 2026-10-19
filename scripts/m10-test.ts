@@ -25,6 +25,7 @@
  *    会让失败进程永远不退 ⇒ 门挂死而不是报错）。
  */
 
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
 import 'dotenv/config'
 
 import { isolateDatabase } from '../src/dev/sandbox.ts'
@@ -34,8 +35,8 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
-import { AgentRuntime } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+
+
 
 import { createM10RunId, openM10RunDir, writeM10Manifest } from './m10-evidence.ts'
 import { character } from '../src/character/index.ts'
@@ -1591,8 +1592,11 @@ async function replayChecks(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 async function databaseChecks(): Promise<void> {
-  const runtime = new AgentRuntime({ character, plugins: [] })
-  await initDatabase(runtime, sqlPlugin)
+  const runtime = createThinHostRuntime({
+    character: character,
+    settings: {},
+  })
+  await initDatabase(runtime)
   const db = getRawDb(runtime)
   const characterId = 'char_m10_db' as CharacterId
   const registry = createFullDomainEventRegistry()

@@ -13,10 +13,12 @@
  * 跑法：node_modules/.bin/tsx scripts/verify-dry-run-silence.ts
  */
 
+import type { Character } from '../src/infrastructure/runtime/eliza-types.ts'
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
 import 'dotenv/config'
 
-import { AgentRuntime, type Character } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+
+
 import { sql } from 'drizzle-orm'
 
 import { isolateDatabase } from '../src/dev/sandbox.ts'
@@ -65,17 +67,16 @@ const TABLES = [
 
 const userId = '00000000-0000-4000-8000-0000000000aa'
 const definition = characterDefinitionFromCharacter(character, { now: 0 })
-const runtime = new AgentRuntime({
-  character: character as Character,
-  plugins: [createPersistentCharacterPlugin({ characterId: definition.id, userId })] as never,
-  settings: {
+const runtime = createThinHostRuntime({
+    character: character,
+    settings: {
     OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? '',
     OPENAI_BASE_URL: process.env.OPENAI_BASE_URL ?? 'https://api.deepseek.com',
     OPENAI_LARGE_MODEL: process.env.OPENAI_LARGE_MODEL ?? 'deepseek-flash',
   },
-})
+  })
 
-await initDatabase(runtime, sqlPlugin)
+await initDatabase(runtime)
 await runtime.initialize()
 await initCharacterState(runtime, String(definition.id), userId)
 // 注意：initKernel 收的是 **runtime**（它自己去找底层句柄），

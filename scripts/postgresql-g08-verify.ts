@@ -29,6 +29,9 @@
  *
  * 跑法：pnpm postgresql:g08:verify
  */
+import type { AgentRuntime, Character } from '../src/infrastructure/runtime/eliza-types.ts'
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
+
 import 'dotenv/config'
 
 import assert from 'node:assert/strict'
@@ -37,9 +40,8 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
-import type { Character } from '@elizaos/core'
-import { AgentRuntime } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+
+
 import { sql } from 'drizzle-orm'
 
 import { character } from '../src/character/index.ts'
@@ -217,12 +219,11 @@ async function main(): Promise<void> {
       const fallback = join(sandbox.dir, 'pglite-fallback')
       mkdirSync(fallback, { recursive: true })
       process.env.PGLITE_DATA_DIR = fallback
-      const created = new AgentRuntime({
-        character: character as Character,
-        plugins: [],
-        settings: { POSTGRES_URL: url },
-      })
-      await initDatabase(created, sqlPlugin)
+      const created = createThinHostRuntime({
+    character: character,
+    settings: { POSTGRES_URL: url },
+  })
+      await initDatabase(created)
       await created.initialize()
       const kernel = await initKernel(created, { definition: characterDefinitionFromCharacter(character) })
       liveRuntime = created

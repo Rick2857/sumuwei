@@ -1,3 +1,4 @@
+import type { AgentRuntime } from '../src/infrastructure/runtime/eliza-types.ts'
 /**
  * 角色自选工具 · **首轮使用读回**（FIRST-USE 的机器读数；**只读**，且**绝不打开真实库**）。
  *
@@ -35,8 +36,8 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, 
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
-import { AgentRuntime, stringToUuid } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
+import { stringToUuid } from '../src/kernel/contracts/uuid.ts'
 
 import { character } from '../src/character/index.ts'
 import { allowProductionDatabase } from '../src/db/index.ts'
@@ -134,9 +135,8 @@ async function main(): Promise<number> {
 
   const characterId = String(character.id ?? character.name)
   const userId = stringToUuid(`user-${process.env.USER_NAME ?? 'Alex'}`)
-  const runtime = new AgentRuntime({
+  const runtime = createThinHostRuntime({
     character: character as never,
-    plugins: [sqlPlugin] as never,
     conversationLength: 16,
     settings: {
       OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? '',
@@ -145,7 +145,7 @@ async function main(): Promise<number> {
       OPENAI_SMALL_MODEL: process.env.OPENAI_SMALL_MODEL ?? 'deepseek-flash',
     },
   })
-  await initDatabase(runtime, sqlPlugin)
+  await initDatabase(runtime, undefined)
   const db = getRawDb(runtime)
 
   /* ② 只允许 SELECT 的唯一查询口（判据看**字符串首词**，与 `verify-m4-real-db` 同形） */

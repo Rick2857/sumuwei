@@ -1,8 +1,7 @@
 /** Create a new, empty schema for this public checkout. Never import existing data. */
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
 import { resolve, join } from 'node:path'
-import { AgentRuntime } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
 import { parse } from 'dotenv'
 import { character } from '../src/character/index.ts'
 import { initDatabase } from '../src/db/index.ts'
@@ -23,9 +22,9 @@ mkdirSync(fixtureRoot, { recursive: true })
 const fixture = mkdtempSync(join(fixtureRoot, 'empty-'))
 process.env.PGLITE_DATA_DIR = fixture
 process.env.PROJECT_LG_SANDBOX = fixture
-const runtime = new AgentRuntime({ character, plugins: [sqlPlugin] })
+const runtime = createThinHostRuntime({ character, settings: {} })
 try {
-  await initDatabase(runtime, sqlPlugin)
+  await initDatabase(runtime)
 } finally {
   await closeDatabaseConnection(runtime)
 }

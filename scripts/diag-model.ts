@@ -1,20 +1,25 @@
 /**
  * 诊断：抓出 TEXT_LARGE 调用 "Not Found" 的真实来源。
  */
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
 import 'dotenv/config'
 
 // ⚠️ 实验必须隔离：本脚本会 initDatabase（建库建表），因此需要独立副本。
 import { isolateDatabase } from '../src/dev/sandbox.ts'
 isolateDatabase('diag-model')
 
-import { AgentRuntime, ModelType } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
-import openaiPlugin from '@elizaos/plugin-openai'
+import { ModelType } from '../src/infrastructure/runtime/eliza-vocabulary.ts'
+
+
+
 import { character } from '../src/character/index.ts'
 import { initDatabase } from '../src/db/index.ts'
 
-const runtime = new AgentRuntime({ character, plugins: [openaiPlugin] })
-await initDatabase(runtime, sqlPlugin)
+const runtime = createThinHostRuntime({
+    character: character,
+    settings: {},
+  })
+await initDatabase(runtime)
 await runtime.initialize()
 
 for (const k of ['OPENAI_API_KEY', 'OPENAI_BASE_URL', 'OPENAI_LARGE_MODEL']) {

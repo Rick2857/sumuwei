@@ -24,10 +24,9 @@ import { cpSync, mkdtempSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 
-import { AgentRuntime, stringToUuid, type Character, type Plugin } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
-import openaiPlugin from '@elizaos/plugin-openai'
-import bootstrapPlugin from '@elizaos/plugin-bootstrap'
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
+import { stringToUuid } from '../src/kernel/contracts/uuid.ts'
+import type { Character, Plugin } from '../src/infrastructure/runtime/eliza-types.ts'
 
 import { character } from '../src/character/index.ts'
 import { allowProductionDatabase, initDatabase } from '../src/db/index.ts'
@@ -44,13 +43,8 @@ allowProductionDatabase()
 
 const characterId = character.id ?? character.name
 const userId = stringToUuid('user-Alex')
-const runtime = new AgentRuntime({
-  character: character as Character,
-  plugins: [
-    openaiPlugin,
-    bootstrapPlugin,
-    createPersistentCharacterPlugin({ characterId, userId }),
-  ] as Plugin[],
+const runtime = createThinHostRuntime({
+  character: character,
   conversationLength: 16,
   settings: {
     OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? '',
@@ -68,7 +62,7 @@ process.env.PROJECT_LG_SANDBOX = copyDir
 console.log(`源（只被 cpSync 读，从未打开）: ${realDataDir}`)
 console.log(`副本（被打开）              : ${copyDir}`)
 
-await initDatabase(runtime, sqlPlugin)
+await initDatabase(runtime)
 const db: RawDb = getRawDb(runtime)
 
 async function rows(sql: string): Promise<Record<string, unknown>[]> {

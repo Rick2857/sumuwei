@@ -30,6 +30,8 @@
  * 跑法：pnpm m5.1.1:k16:verify
  */
 
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
+import { applyKernelMigrations as __applyKernelMigrations, getRawDb as __getRawDb } from '../src/infrastructure/persistence/db.ts'
 import 'dotenv/config'
 
 import { createHash } from 'node:crypto'
@@ -37,8 +39,8 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, 
 import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 
-import { AgentRuntime } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+
+
 import { sql } from 'drizzle-orm'
 
 import { character } from '../src/character/index.ts'
@@ -151,19 +153,18 @@ console.log(`  副本：${workDir}`)
  *    而那正是用户在本 WP 明令禁止的动作（"K-16 关闭前禁止在 production copy 上执行 v7"）。
  *    这里只要一个能读的原始连接。
  */
-const runtime = new AgentRuntime({
-  character,
-  plugins: [sqlPlugin],
-  conversationLength: 16,
-  settings: {
+const runtime = createThinHostRuntime({
+    character: character,
+    settings: {
     OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? '',
     OPENAI_BASE_URL: process.env.OPENAI_BASE_URL ?? 'https://api.deepseek.com',
     OPENAI_LARGE_MODEL: process.env.OPENAI_LARGE_MODEL ?? 'deepseek-flash',
     OPENAI_SMALL_MODEL: process.env.OPENAI_SMALL_MODEL ?? 'deepseek-flash',
   },
-})
-await runtime.registerPlugin(sqlPlugin)
-await runtime.runPluginMigrations()
+    conversationLength: 16,
+  })
+await runtime.registerPlugin(undefined as never)
+await await __applyKernelMigrations(__getRawDb(runtime))
 const db = getRawDb(runtime)
 
 const copyVersion = await currentSchemaVersion(db)

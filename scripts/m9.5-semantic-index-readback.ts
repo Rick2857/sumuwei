@@ -47,14 +47,17 @@
  * 跑法：`pnpm exec tsx scripts/m9.5-semantic-index-readback.ts`
  */
 
+import type { Character, Plugin } from '../src/infrastructure/runtime/eliza-types.ts'
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
 import 'dotenv/config'
 
 import { existsSync, readdirSync } from 'node:fs'
 
-import { AgentRuntime, stringToUuid, type Character, type Plugin } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
-import openaiPlugin from '@elizaos/plugin-openai'
-import bootstrapPlugin from '@elizaos/plugin-bootstrap'
+import { stringToUuid } from '../src/kernel/contracts/uuid.ts'
+
+
+
+
 
 import { character } from '../src/character/index.ts'
 import { allowProductionDatabase, initDatabase } from '../src/db/index.ts'
@@ -185,22 +188,16 @@ function report(label: string, detail = ''): void {
 /* ---------------------------------------------------------------------------
  * 装配（与 main.ts 同一组插件；不 import main.ts）
  * ------------------------------------------------------------------------- */
-const runtime = new AgentRuntime({
-  character: character as Character,
-  plugins: [
-    openaiPlugin,
-    bootstrapPlugin,
-    openAiCompatiblePlugin,
-    createPersistentCharacterPlugin({ characterId, userId }),
-  ] as Plugin[],
-  conversationLength: 16,
-  settings: {
+const runtime = createThinHostRuntime({
+    character: character,
+    settings: {
     OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? '',
     OPENAI_BASE_URL: process.env.OPENAI_BASE_URL ?? 'https://api.deepseek.com',
     OPENAI_LARGE_MODEL: process.env.OPENAI_LARGE_MODEL ?? 'deepseek-flash',
     OPENAI_SMALL_MODEL: process.env.OPENAI_SMALL_MODEL ?? 'deepseek-flash',
   },
-})
+    conversationLength: 16,
+  })
 
 /** 两次快照实际删掉的快照名（必须是空） */
 const prunedByThisRun: string[] = []
@@ -225,7 +222,7 @@ if (guarded) {
     operationKind: 'real_db_verify',
     deps: {
       openDatabase: async () => {
-        await initDatabase(runtime, sqlPlugin)
+        await initDatabase(runtime)
       },
       stopServices: () => stopRuntimeServices(runtime),
       closeDatabase: async () => await closeDatabaseConnection(runtime),
@@ -241,7 +238,7 @@ if (guarded) {
       `（pre-open 快照 ${openHandle.reading.preOpenSnapshotId ?? '未记录'}）`
   )
 } else {
-  await initDatabase(runtime, sqlPlugin)
+  await initDatabase(runtime)
   console.log('  ⚠️ 非生产目录（沙箱/副本）—— 未走生产状态机')
 }
 

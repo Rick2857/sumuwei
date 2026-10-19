@@ -17,8 +17,7 @@
  *    `initCharacterState`）。这也是本项目在数据库顺序上踩过的坑之一。
  */
 
-import type { Plugin } from '@elizaos/core'
-
+import type { Plugin } from '../infrastructure/runtime/eliza-types.ts'
 import {
   createCharacterStateProvider,
   type StateProviderIds,

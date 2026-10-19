@@ -1,3 +1,4 @@
+import type { AgentRuntime } from '../../../src/infrastructure/runtime/eliza-types.ts'
 /**
  * M3 运行环境 —— 把 `EvalRuntimeFacade` **真的实现出来**。
  *
@@ -31,9 +32,9 @@
  *    来源**；序号由持久层分配，评测没有权力决定它。
  */
 
-import { AgentRuntime, stringToUuid, type Character, type Plugin } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
-import bootstrapPlugin from '@elizaos/plugin-bootstrap'
+import { createThinHostRuntime } from '../../../src/infrastructure/runtime/thin-host-factory.ts'
+import { stringToUuid } from '../../../src/kernel/contracts/uuid.ts'
+import type { Character, Plugin } from '../../../src/infrastructure/runtime/eliza-types.ts'
 
 import { character } from '../../../src/character/index.ts'
 import { initDatabase } from '../../../src/db/index.ts'
@@ -307,12 +308,8 @@ async function assemble(label: string, runId?: string): Promise<HostState> {
   })
 
   const userId = stringToUuid('user-Alex')
-  const runtime = new AgentRuntime({
-    character: character as Character,
-    plugins: [
-      bootstrapPlugin,
-      openAiCompatiblePlugin,
-    ] as Plugin[],
+  const runtime = createThinHostRuntime({
+    character: character,
     conversationLength: 16,
     settings: {
       OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? '',
@@ -322,7 +319,7 @@ async function assemble(label: string, runId?: string): Promise<HostState> {
     },
   })
 
-  await initDatabase(runtime, sqlPlugin)
+  await initDatabase(runtime)
   await runtime.initialize()
   const kernel = await initKernel(runtime, {
     definition: characterDefinitionFromCharacter(character),

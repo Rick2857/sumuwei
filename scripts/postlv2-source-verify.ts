@@ -169,8 +169,8 @@ record(
 const sandbox = isolateDatabase('postlv2-source')
 console.log(`  [sandbox] ${sandbox.dir}`)
 
-const { AgentRuntime } = await import('@elizaos/core')
-const sqlPlugin = (await import('@elizaos/plugin-sql')).default
+const { createThinHostRuntime } = await import('../src/infrastructure/runtime/thin-host-factory.ts')
+
 const { sql } = await import('drizzle-orm')
 const { character } = await import('../src/character/index.ts')
 const { applyKernelMigrations, currentSchemaVersion, getRawDb } = await import(
@@ -178,18 +178,17 @@ const { applyKernelMigrations, currentSchemaVersion, getRawDb } = await import(
 )
 const { latestSchemaVersion } = await import('../src/infrastructure/persistence/migrations.ts')
 
-const runtime = new AgentRuntime({
-  character,
-  plugins: [sqlPlugin],
-  conversationLength: 16,
-  settings: {
+const runtime = createThinHostRuntime({
+      character: character,
+      settings: {
     OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? '',
     OPENAI_BASE_URL: process.env.OPENAI_BASE_URL ?? 'https://api.deepseek.com',
     OPENAI_LARGE_MODEL: process.env.OPENAI_LARGE_MODEL ?? 'deepseek-flash',
     OPENAI_SMALL_MODEL: process.env.OPENAI_SMALL_MODEL ?? 'deepseek-flash',
   },
-} as never)
-await runtime.registerPlugin(sqlPlugin)
+      conversationLength: 16,
+    })
+await runtime.registerPlugin(undefined as never)
 await runtime.runPluginMigrations()
 const db = getRawDb(runtime)
 await applyKernelMigrations(db as never)

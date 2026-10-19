@@ -30,6 +30,10 @@ import { KernelError } from '../../kernel/contracts/index.ts'
    `db.ts → migrations.ts` 的环，而本文件的 `MIGRATION_0010` 是**模块级**对象字面量
    ⇒ 只要入口先加载那个模块就会 TDZ（实测 `pnpm m9.5:test` 整道门跑不起来）。 */
 import { SEMANTIC_INDEX_DDL } from './semantic-index-ddl.ts'
+import { COMPATIBILITY_SCHEMA_DDL } from './compatibility-schema.ts'
+/* ⚠️ 0024 的 DDL **逐字复用** `base-tables-ddl.ts`（**不复制**）——
+   它是 M12 W1-a 从旧宿主取证生成的常量 ⇒ 迁移与取证结果**不会漂开**。 */
+import { BASE_TABLE_DDL } from './base-tables-ddl.ts'
 
 /** 一条迁移：版本号必须严格递增，且一旦发布不许修改内容 */
 export interface Migration {
@@ -945,6 +949,13 @@ function v9StateEventAttributionColumnStatements(table: string): string[] {
  * 因此这里冻结成**一条精确的三分支 CHECK**：只有恰好落在三态之一才通过，
  * 其余**任何**元组都被数据库拒绝。词表再用**独立**的 CHECK 钉住
  * （不依赖 TypeScript 的 enum —— 数据库自己也要会拒绝 `'HACKER'` / `'MAGIC'`）。
+ */
+/*
+ * ⚠️ 幂等化**不在这里**做，而在**执行层**（`db.ts` 的 `toIdempotentStatement`，
+ *    2026-10-19）：PostgreSQL 既不支持 `ADD CONSTRAINT IF NOT EXISTS`，
+ *    也不支持 `CREATE POLICY IF NOT EXISTS`，而既有迁移里有十几条裸语句 ——
+ *    逐条包必然漏（实测漏了 `command_type_vocab`）。一处包住对所有迁移生效。
+ *    ⇒ 本文件**保持原始语句形态**，便于与历史 diff 对照。
  */
 function v7AttributionCheckStatements(table: string, options: { axisB: boolean }): string[] {
   const statements: string[] = []
@@ -1967,7 +1978,31 @@ export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_0020,
   MIGRATION_0021,
   MIGRATION_0022,
+  { version: 23, name: 'lg-runtime-compatibility-tables', statements: [...COMPATIBILITY_SCHEMA_DDL] },
 ]
+
+/*
+ * ⚠️⚠️ **没有迁移 0024** —— W1-a 曾写过一个，2026-10-19 **撤销**，如实记录理由：
+ *
+ *   实测（`scripts/probe-migration-overlap.ts` + 门 `thinhost:lgmigration:verify`）：
+ *   迁移 **0023**（`lg-runtime-compatibility-tables`）**已经完整覆盖**了
+ *   六张基础表（W0b 取证的那六张）：
+ *     · 六张表全在，**列集合逐表相同**（agents 17 · entities 5 · memories 10 ·
+ *       participants 6 · rooms 10 · worlds 6）
+ *     · **12 条外键**全在，且已是幂等 `DO` 块（compatibility-schema.ts:9-20）
+ *     · **7 个索引**全在，且已是 `CREATE INDEX IF NOT EXISTS`（同文件 21-27 行）
+ *
+ *   ⇒ 0024 的每一条语句在**任何**库上都是空操作 ⇒ 它是**纯粹的冗余**。
+ *   ⇒ 撤销它，而不是留着"看起来做了事"的迁移。
+ *
+ *   ⚠️ 这次撤销**反而证实了 M12 W1 的前提**：LG 的迁移体系**早就能**从零建出
+ *     六张基础表（不必依赖 `@elizaos/plugin-sql`）。W0b 的取证价值在于
+ *     **证明这一点**，而不是新增 DDL。
+ *
+ *   📌 保留的产物：`src/infrastructure/persistence/base-tables-ddl.ts`
+ *     （旧宿主取证的结构指纹）**继续留在仓库里**做对照基准 ——
+ *     它是"0023 是否仍与旧宿主等价"的**可执行比对物**，不是迁移输入。
+ */
 
 export function latestSchemaVersion(): number {
   return MIGRATIONS.reduce((max, m) => Math.max(max, m.version), 0)

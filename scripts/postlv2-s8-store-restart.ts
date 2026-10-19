@@ -38,8 +38,8 @@ const outPath = argOf('out')
 // ⚠️ 顺序关键：必须在任何会碰数据库的 import **之前**隔离（sandbox.ts 的说明）。
 const sandbox = isolateDatabase('postlv2-s8-store', { runId, keep: true })
 
-const { AgentRuntime } = await import('@elizaos/core')
-const sqlPlugin = (await import('@elizaos/plugin-sql')).default
+const { createThinHostRuntime } = await import('../src/infrastructure/runtime/thin-host-factory.ts')
+
 const { sql } = await import('drizzle-orm')
 const { character } = await import('../src/character/index.ts')
 const { initDatabase } = await import('../src/db/index.ts')
@@ -52,12 +52,11 @@ const { loadStoryRun, reconcileStoryRun } = await import(
 )
 const { JICHUANG_PACK } = await import('../evals/storyline/jichuang-interview-two/story-pack.ts')
 
-const runtime = new AgentRuntime({
-  character: character as never,
-  plugins: [sqlPlugin] as never,
-  settings: { OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? '' },
-})
-await initDatabase(runtime, sqlPlugin as never)
+const runtime = createThinHostRuntime({
+      character: character,
+      settings: { OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? '' },
+    })
+await initDatabase(runtime)
 
 const db = getRawDb(runtime)
 const ledger = createStoryLedgerStore(db)

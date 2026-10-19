@@ -15,8 +15,7 @@ import { isolateDatabase } from '../src/dev/sandbox.ts'
 // keep=true：读取进程要用同一目录，所以本进程退出时不能删
 isolateDatabase('persist', { runId: process.env.PERSIST_RUN_ID ?? 'default', keep: true })
 
-import { AgentRuntime } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
 
 import { character } from '../src/character/index.ts'
 import { initDatabase } from '../src/db/index.ts'
@@ -24,12 +23,13 @@ import { initCharacterState } from '../src/state/init.ts'
 import { loadState, setStateVariable } from '../src/state/repository.ts'
 
 const characterId = character.id ?? character.name
-const userId = (await import('@elizaos/core')).stringToUuid(
+const { stringToUuid } = await import('../src/kernel/contracts/uuid.ts')
+const userId = stringToUuid(
   `user-${process.env.USER_NAME ?? 'Alex'}`
 )
 
-const runtime = new AgentRuntime({ character, plugins: [] })
-await initDatabase(runtime, sqlPlugin)
+const runtime = createThinHostRuntime({ character, settings: {} })
+await initDatabase(runtime)
 await initCharacterState(runtime, characterId, userId)
 
 // 写入一组易识别的值，与初始值明显不同

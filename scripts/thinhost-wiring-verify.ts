@@ -10,8 +10,8 @@
  * `state/repository.ts:getRawDb()` 与 `runtime-shutdown.ts` 直接消费）。
  *
  * 断言：
- *   W1  开关缺省 off（不设变量 ⇒ 不换宿主）
- *   W2  非法值失败关闭回 off（拼错的变量不许把生产宿主换掉）
+ *   W1  开关**缺省即薄宿主**（D2，2026-10-19 改写：旧断言是"缺省 off"）
+ *   W2  `off` / 非法值 ⇒ **拒绝启动**（旧断言是"失败关闭回 off"）
  *   W3  开关 on ⇒ 工厂产出的是 ThinHostRuntime 实例
  *   W4  该实例的 `adapter` **结构兼容**旧宿主：`getRawDb()` 能取到 db.execute
  *   W5  `stopRuntimeServices` / `isDatabaseClosed` / `closeDatabaseConnection`
@@ -34,19 +34,49 @@ function check(id: string, ok: boolean, detail: string): void {
   console.log(`${ok ? 'PASS' : 'FAIL'} ${id} — ${detail}`)
 }
 
-// --- W1 缺省 off ---
-check('W1-default-off', thinHostEnabled({} as NodeJS.ProcessEnv) === false, '未设变量 ⇒ 仍用 ElizaOS')
-
-// --- W2 非法值失败关闭 ---
+// --- W1 缺省即薄宿主（D2：2026-10-19 改写；旧断言是"缺省 off"）---
 check(
-  'W2-invalid-fails-closed',
-  thinHostEnabled({ CHARACTER_THIN_HOST: 'yes-please' } as NodeJS.ProcessEnv) === false,
-  '拼错的变量值 ⇒ 失败关闭回 off，不换宿主'
+  'W1-default-is-thin',
+  thinHostEnabled({} as NodeJS.ProcessEnv) === true,
+  '未设变量 ⇒ 薄宿主（D2：缺省即唯一实现，不能让人无声失败）'
 )
+
+// --- W2 `off` / 非法值 ⇒ 拒绝启动（D2：旧断言是"失败关闭回 off"）---
+{
+  let offThrew = false
+  let offMessage = ''
+  try {
+    thinHostEnabled({ CHARACTER_THIN_HOST: 'off' } as NodeJS.ProcessEnv)
+  } catch (error) {
+    offThrew = true
+    offMessage = error instanceof Error ? error.message : String(error)
+  }
+  check(
+    'W2-off-refuses-startup',
+    offThrew && offMessage.includes('已退役'),
+    `CHARACTER_THIN_HOST=off ⇒ 拒绝启动（消息含"已退役"=${String(offMessage.includes('已退役'))}）`
+  )
+}
+
+{
+  let illegalThrew = false
+  let illegalMessage = ''
+  try {
+    thinHostEnabled({ CHARACTER_THIN_HOST: 'yes-please' } as NodeJS.ProcessEnv)
+  } catch (error) {
+    illegalThrew = true
+    illegalMessage = error instanceof Error ? error.message : String(error)
+  }
+  check(
+    'W2-invalid-refuses-startup',
+    illegalThrew && illegalMessage.includes('不是合法值'),
+    '拼错的变量值 ⇒ 拒绝启动并列出合法值（不猜）'
+  )
+}
 check(
   'W2-valid-on',
   thinHostEnabled({ CHARACTER_THIN_HOST: 'on' } as NodeJS.ProcessEnv) === true,
-  'CHARACTER_THIN_HOST=on ⇒ 选用薄宿主'
+  'CHARACTER_THIN_HOST=on ⇒ 选用薄宿主（兼容既有生产 .env）'
 )
 
 // --- W3 工厂产出真实薄宿主（用假 pool，不碰真库）---
@@ -65,6 +95,26 @@ const runtime = createThinHostRuntime({
 })
 check('W3-factory-thin', runtime instanceof ThinHostRuntime, `工厂产出 ${runtime.constructor.name}`)
 check('W6-host-label', currentHostLabel() === 'thin-host', `宿主标签可读：${currentHostLabel()}`)
+
+// --- W3b 工厂自身也做档位校验（造宿主处 ⇒ 任何入口都绕不过）---
+{
+  const saved = process.env.CHARACTER_THIN_HOST
+  process.env.CHARACTER_THIN_HOST = 'off'
+  let threw = false
+  try {
+    createThinHostRuntime({
+      character: { name: '苏沐薇', id: 'sumuwei' },
+      agentId: '00000000-0000-4000-8000-000000000001',
+      settings: { POSTGRES_URL: 'postgresql://fake/fake' },
+    })
+  } catch {
+    threw = true
+  } finally {
+    if (saved === undefined) delete process.env.CHARACTER_THIN_HOST
+    else process.env.CHARACTER_THIN_HOST = saved
+  }
+  check('W3b-factory-validates-switch', threw, '工厂在造宿主前就校验档位 ⇒ `off` 不会造出宿主')
+}
 
 // --- W4 adapter 结构兼容：既有 getRawDb 那条断言能取到 execute ---
 // ⚠️ 传空对象：薄宿主的 registerPlugin **不做任何 plugin 检查**（它不是 ElizaOS

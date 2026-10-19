@@ -234,7 +234,7 @@ check('W3.1 装配根：在**开库之后**取得资格，且用 `dedicatedPoolO
   assert.ok(acquireAt > 0, '找不到取得资格的那一处')
   const poolAt = source.indexOf('dedicatedPoolOf(runtime)')
   assert.ok(poolAt > 0, '找不到 dedicatedPoolOf(runtime) 的判据')
-  const openAt = source.indexOf('ready = await initDatabase(runtime, sqlPlugin)')
+  const openAt = source.indexOf('ready = await initDatabase(runtime)')
   assert.ok(openAt > 0, '找不到 initDatabase 的调用点')
   assert.ok(openAt < acquireAt, '取得资格**早于**开库 ⇒ 那时还没有连接池')
 })

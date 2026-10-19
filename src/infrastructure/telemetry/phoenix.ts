@@ -26,7 +26,12 @@
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 
-import { logger } from '@elizaos/core'
+/*
+ * ⚠️ `logger` 已从 ElizaOS 独立出来（M12 · W2）。
+ * ⚠️ 行为**与上游同形**：默认 sink 写 stdout/stderr（上游 `info`→stdout、`warn`/`error`→stderr，
+ *    2026-10-19 实测）。"日志去了哪"由 `recentLogs()` / `setLogSink()` 可查 —— 见 logger.ts 的说明。
+ */
+import { logger } from './logger.ts'
 
 import type { CharacterRunTrace, TraceStep } from '../../kernel/contracts/index.ts'
 import {

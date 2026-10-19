@@ -38,8 +38,7 @@ process.env.PROJECT_LG_SANDBOX = dbDir
 process.env.CHARACTER_BELIEF_ENABLED = 'true'
 
 async function main(): Promise<void> {
-  const { AgentRuntime } = await import('@elizaos/core')
-  const { default: sqlPlugin } = await import('@elizaos/plugin-sql')
+  const { createThinHostRuntime } = await import('../src/infrastructure/runtime/thin-host-factory.ts')
   const { character } = await import('../src/character/index.ts')
   const { initDatabase } = await import('../src/db/index.ts')
   const { initKernel } = await import('../src/kernel/app/kernel.ts')
@@ -58,8 +57,8 @@ async function main(): Promise<void> {
   const { entityRef } = await import('../src/kernel/contracts/index.ts')
   const { resolveIds } = await import('../src/main.ts')
 
-  const runtime = new AgentRuntime({ character, plugins: [], settings: {} })
-  await initDatabase(runtime, sqlPlugin)
+  const runtime = createThinHostRuntime({ character, settings: {} })
+  await initDatabase(runtime)
   await runtime.initialize()
   const kernel = await initKernel(runtime, {
     definition: characterDefinitionFromCharacter(character),

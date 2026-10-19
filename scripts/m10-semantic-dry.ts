@@ -26,6 +26,7 @@
  * ⚠️ 零模型 / 零出网 / 隔离库。
  */
 
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
 import 'dotenv/config'
 
 import { isolateDatabase } from '../src/dev/sandbox.ts'
@@ -37,8 +38,8 @@ import { join, resolve } from 'node:path'
 
 import { createM10RunId, openM10RunDir, writeM10Manifest } from './m10-evidence.ts'
 import { createM10TurnHarness, fixedProvider, deterministicRuntime } from './m10-harness.ts'
-import { AgentRuntime } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+
+
 
 import { initDatabase } from '../src/db/index.ts'
 import { getRawDb } from '../src/infrastructure/persistence/db.ts'
@@ -354,8 +355,11 @@ async function main(): Promise<void> {
    * ==================================================================== */
   phase('B: corpus drives the real chain (bounded sample)')
 
-  const agentRuntime = new AgentRuntime({ character, plugins: [] })
-  await initDatabase(agentRuntime, sqlPlugin)
+  const agentRuntime = createThinHostRuntime({
+    character: character,
+    settings: {},
+  })
+  await initDatabase(agentRuntime)
   const db = getRawDb(agentRuntime)
   const harness = createM10TurnHarness({
     db,

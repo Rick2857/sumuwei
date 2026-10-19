@@ -30,6 +30,7 @@
  * ⚠️ `isolateDatabase()` 一次性沙箱库（顶部）—— **真实库从不被打开**（`C1` 直接断言路径）。
  */
 
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
 import 'dotenv/config'
 
 import { isolateDatabase } from '../src/dev/sandbox.ts'
@@ -40,8 +41,8 @@ import { writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 
-import { AgentRuntime } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+
+
 
 import { character } from '../src/character/index.ts'
 import { initDatabase } from '../src/db/index.ts'
@@ -127,8 +128,11 @@ if (stream.length === 0) {
 }
 
 phase('booting isolated database')
-const agentRuntime = new AgentRuntime({ character, plugins: [] })
-await initDatabase(agentRuntime, sqlPlugin)
+const agentRuntime = createThinHostRuntime({
+    character: character,
+    settings: {},
+  })
+await initDatabase(agentRuntime)
 const db = getRawDb(agentRuntime)
 const harness = createM10TurnHarness({ db, characterId: CHARACTER, userId: USER_ID })
 const provider = createOpenAiGoalUnderstandingProvider()

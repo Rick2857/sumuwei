@@ -125,7 +125,7 @@ const runInit = async (argv: string[]): Promise<number> => {
  * ```text
  * 开库顺序**抄现成的只读探针** `scripts/postgresql-cutover-probe.ts`：
  *   new AgentRuntime({character, plugins: [], settings: {POSTGRES_URL}})
- *   → initDatabase(runtime, sqlPlugin) → runtime.initialize()
+ *   → initDatabase(runtime) → runtime.initialize()
  *   → initKernel(runtime, {definition}) → kernel.characterId / kernel.stores.db
  *   → 收尾 closeDatabaseConnection(runtime)
  * ⚠️ **默认不接**：不带 `--with-db` 时本函数**一次都不调用** ⇒ 今天的 `serve` 行为逐字不变
@@ -139,19 +139,16 @@ const openAdminReadDb = async (): Promise<{
   characterId: unknown
   close: () => Promise<void>
 }> => {
-  const { AgentRuntime } = await import('@elizaos/core')
-  const sqlPlugin = (await import('@elizaos/plugin-sql')).default
-  const { character } = await import('../src/character/index.ts')
+  const { createThinHostRuntime } = await import('../src/infrastructure/runtime/thin-host-factory.ts')  const { character } = await import('../src/character/index.ts')
   const { initDatabase } = await import('../src/db/index.ts')
   const { initKernel } = await import('../src/kernel/app/kernel.ts')
   const { characterDefinitionFromCharacter } = await import('../src/infrastructure/runtime/seed-projection.ts')
   const { closeDatabaseConnection } = await import('../src/infrastructure/persistence/runtime-shutdown.ts')
-  const runtime = new AgentRuntime({
-    character: character as never,
-    plugins: [],
-    settings: { POSTGRES_URL: process.env.POSTGRES_URL ?? '' },
-  })
-  await initDatabase(runtime, sqlPlugin as never)
+  const runtime = createThinHostRuntime({
+      character: character,
+      settings: { POSTGRES_URL: process.env.POSTGRES_URL ?? '' },
+    })
+  await initDatabase(runtime)
   await runtime.initialize()
   const kernel = await initKernel(runtime, { definition: characterDefinitionFromCharacter(character as never) })
   return {

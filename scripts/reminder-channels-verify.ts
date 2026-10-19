@@ -13,10 +13,9 @@ import { runReplyGuardChain } from '../src/kernel/app/reply-guard-chain.ts'
 import { CheckedSpeechStream } from '../src/kernel/app/bridge/streaming-speech.ts'
 import { MIGRATIONS } from '../src/infrastructure/persistence/migrations.ts'
 /* ★ S3 ③ 接线级门（函数级）：RawDb 只能从 runtime 拿；store 口照生产写法 */
-import { AgentRuntime, stringToUuid, type Character, type Plugin } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
-import openaiPlugin from '@elizaos/plugin-openai'
-import bootstrapPlugin from '@elizaos/plugin-bootstrap'
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
+import { stringToUuid } from '../src/kernel/contracts/uuid.ts'
+import type { Character, Plugin } from '../src/infrastructure/runtime/eliza-types.ts'
 import { character } from '../src/character/index.ts'
 import { allowProductionDatabase, initDatabase } from '../src/db/index.ts'
 import { createPersistentCharacterPlugin } from '../src/plugin/persistent-character.ts'
@@ -471,19 +470,15 @@ check(`重启后按保存渠道投递（cli=${restartCli.outcome} · QQ=${restar
   process.env.PGLITE_DATA_DIR = driverSandbox.dir
   process.env.PROJECT_LG_SANDBOX = driverSandbox.dir
   const driverCharacterId = (character.id ?? character.name) as unknown as CharacterId
-  const driverRuntime = new AgentRuntime({
-    character: character as Character,
-    plugins: [
-      openaiPlugin, bootstrapPlugin,
-      createPersistentCharacterPlugin({ characterId: String(driverCharacterId), userId: stringToUuid('user-Alex') }),
-    ] as Plugin[],
+  const driverRuntime = createThinHostRuntime({
+    character: character,
     conversationLength: 16,
     settings: { OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? '',
       OPENAI_BASE_URL: process.env.OPENAI_BASE_URL ?? 'https://api.deepseek.com',
       OPENAI_LARGE_MODEL: process.env.OPENAI_LARGE_MODEL ?? 'deepseek-flash',
       OPENAI_SMALL_MODEL: process.env.OPENAI_SMALL_MODEL ?? 'deepseek-flash' },
   })
-  await initDatabase(driverRuntime, sqlPlugin)
+  await initDatabase(driverRuntime)
   const driverDb = getRawDb(driverRuntime)
   const keyOf = (intentId: string, dueAt: number): string => reminderOccurrenceKey({ intentId, planVersion: 1, dueAt })
   const addIntent = async (id: string, repeatMode: 'once' | 'until_reply' | null, scheduledAt: number): Promise<void> => {

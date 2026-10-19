@@ -12,15 +12,17 @@
  * 跑法（由 `postgresql:cutover:apply --switch-config` 调用）：
  *   pnpm tsx scripts/postgresql-cutover-probe.ts --db lg_prod
  */
+import type { Character } from '../src/infrastructure/runtime/eliza-types.ts'
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
 import 'dotenv/config'
 
 import { spawnSync } from 'node:child_process'
 import { mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-import type { Character } from '@elizaos/core'
-import { AgentRuntime } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+
+
+
 
 import { character } from '../src/character/index.ts'
 import { isolateDatabase } from '../src/dev/sandbox.ts'
@@ -97,18 +99,17 @@ const fallbackDir = resolve(process.env.TEMP ?? '.', `lg-cutover-probe-fallback-
 mkdirSync(fallbackDir, { recursive: true })
 process.env.PGLITE_DATA_DIR = fallbackDir
 
-const runtime = new AgentRuntime({
-  character: character as Character,
-  plugins: [],
-  settings: { POSTGRES_URL: url },
-})
+const runtime = createThinHostRuntime({
+    character: character,
+    settings: { POSTGRES_URL: url },
+  })
 
 let ok = false
 let reason: string | undefined
 const readings: Record<string, unknown> = {}
 
 try {
-  await initDatabase(runtime, sqlPlugin)
+  await initDatabase(runtime)
   await runtime.initialize()
   const kernel = await initKernel(runtime, { definition: characterDefinitionFromCharacter(character) })
   const characterId = kernel.characterId

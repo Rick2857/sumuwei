@@ -49,6 +49,9 @@
  *
  * 跑法：pnpm postgresql:g06:verify
  */
+import type { AgentRuntime, Character } from '../src/infrastructure/runtime/eliza-types.ts'
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
+
 import 'dotenv/config'
 
 import assert from 'node:assert/strict'
@@ -57,8 +60,8 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
-import { AgentRuntime, type Character } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+
+
 
 import { character } from '../src/character/index.ts'
 import { isolateDatabase } from '../src/dev/sandbox.ts'
@@ -597,12 +600,11 @@ async function main(): Promise<void> {
       try {
         // ⚠️ 防线 ①：连接串走 **settings**（`runtime.getSetting` 真正看的地方）。
         //    只设 `process.env.POSTGRES_URL` **不够** —— 第一版就是这么写然后静默回退的。
-        runtime = new AgentRuntime({
-          character: character as Character,
-          plugins: [],
-          settings: { POSTGRES_URL: url },
-        })
-        await initDatabase(runtime, sqlPlugin)
+        runtime = createThinHostRuntime({
+    character: character,
+    settings: { POSTGRES_URL: url },
+  })
+        await initDatabase(runtime)
         await runtime.initialize()
         const kernel = await initKernel(runtime, { definition: characterDefinitionFromCharacter(character) })
         const db = kernel.stores.db

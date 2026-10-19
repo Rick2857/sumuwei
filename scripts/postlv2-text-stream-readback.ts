@@ -12,8 +12,10 @@ const output = resolve('artifacts/post-lv2/text-stream-20261005')
 const expected = JSON.parse(readFileSync(join(output, 'cancel-live.json'), 'utf8'))
 const copied = join(mkdtempSync(join(tmpdir(), 'lg-stream-readback-')), 'data')
 cpSync(source, copied, { recursive: true })
-const require = createRequire(import.meta.url)
-const { PGlite } = createRequire(require.resolve('@elizaos/plugin-sql'))('@electric-sql/pglite') as {
+// ⚠️ 直接解析 `@electric-sql/pglite`（M12 · W4）：它已从 plugin-sql 的**传递依赖**
+//    **提升为直接依赖**（0.3.16，同版本 ⇒ 仍是同一份，两个实例不会互相损坏）。
+//    旧写法绕 plugin-sql 一圈只为拿到那一份，现在那条路随删包一起没了。
+const { PGlite } = createRequire(import.meta.url)('@electric-sql/pglite') as {
   PGlite: new (path: string, options: { readOnly: boolean }) => {
     waitReady: Promise<void>
     query: <T>(statement: string, params: unknown[]) => Promise<{ rows: T[] }>

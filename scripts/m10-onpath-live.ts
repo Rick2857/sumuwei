@@ -31,12 +31,15 @@ if (process.argv.includes('--read')) {
   process.env.PROJECT_LG_SANDBOX = dir
   const { initDatabase } = await import('../src/db/index.ts')
   const { getRawDb, exec } = await import('../src/infrastructure/persistence/db.ts')
-  const { AgentRuntime } = await import('@elizaos/core')
-  const sqlPlugin = (await import('@elizaos/plugin-sql')).default
+  const { createThinHostRuntime } = await import('../src/infrastructure/runtime/thin-host-factory.ts')
+  
   const { character } = await import('../src/character/index.ts')
   const { sql } = await import('drizzle-orm')
-  const runtime = new AgentRuntime({ character, plugins: [] })
-  await initDatabase(runtime, sqlPlugin)
+  const runtime = createThinHostRuntime({
+      character: character,
+      settings: {},
+    })
+  await initDatabase(runtime)
   const rows = (await exec(
     getRawDb(runtime),
     sql`select type from character_domain_events where type like 'GOAL%' or type like 'COMMITMENT%'`,

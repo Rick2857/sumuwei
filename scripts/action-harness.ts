@@ -20,16 +20,20 @@
  * ⚠️ 它**不是**生产代码：只被 `scripts/verify-m4.5-*.ts` 引用。
  */
 
+import type { Character, Plugin } from '../src/infrastructure/runtime/eliza-types.ts'
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 
-import { AgentRuntime, type Character, type Plugin } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
-import openaiPlugin from '@elizaos/plugin-openai'
-import bootstrapPlugin from '@elizaos/plugin-bootstrap'
+
+
+
+
 
 import { character } from '../src/character/index.ts'
+// ⚠️ 下面这条 import 是**别的会话**加的（停机时**必定**回收连接池）；2026-10-19 被误冲掉一次，按记录复原。
+import { closeDatabaseConnection } from '../src/infrastructure/persistence/runtime-shutdown.ts'
 import { initDatabase } from '../src/db/index.ts'
 import { getRawDb, type RawDb } from '../src/infrastructure/persistence/db.ts'
 import { asCharacterId, asTraceId, newActionId, type CharacterId } from '../src/kernel/contracts/ids.ts'
@@ -168,25 +172,23 @@ export interface ActionTestBed {
  *    见 `src/dev/sandbox.ts` 的说明与 `verify-m4.5-nl-action.ts` 的做法。
  */
 export async function createActionTestBed(options: ActionTestBedOptions): Promise<ActionTestBed> {
-  const runtime = new AgentRuntime({
-    character: character as Character,
-    plugins: [
-      openaiPlugin,
-      bootstrapPlugin,
-      sqlPlugin,
-      // 刻意不装 persistent-character plugin：动作链路不需要它，
-      // 而少一个 plugin 意味着少一份可能与生产不同的行为。
-    ] as Plugin[],
-    conversationLength: 16,
+  const runtime = createThinHostRuntime({
+    character: character,
     settings: {
       OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? 'placeholder',
       OPENAI_BASE_URL: process.env.OPENAI_BASE_URL ?? 'https://api.deepseek.com',
       OPENAI_LARGE_MODEL: process.env.OPENAI_LARGE_MODEL ?? 'deepseek-flash',
       OPENAI_SMALL_MODEL: process.env.OPENAI_SMALL_MODEL ?? 'deepseek-flash',
+      // ⚠️ 测试台允许**指向隔离 PostgreSQL**（`LG_TEST_PG_URL`）—— 不给就走 PGlite 沙箱。
+      //    （这一段是**别的会话**的工作；2026-10-19 被我用 `git checkout` 误冲掉一次，此处按记录复原。）
+      ...(process.env.LG_TEST_PG_URL
+        ? { POSTGRES_URL: process.env.LG_TEST_PG_URL, CHARACTER_DB_BACKEND: 'postgres' }
+        : {}),
     },
+    conversationLength: 16,
   })
 
-  await initDatabase(runtime, sqlPlugin)
+  await initDatabase(runtime)
   const db = getRawDb(runtime)
   const characterId = asCharacterId(character.id ?? character.name)
 
@@ -302,7 +304,8 @@ export async function createActionTestBed(options: ActionTestBedOptions): Promis
     },
 
     async stop() {
-      await runtime.stop()
+      // ⚠️ `try/finally` 是**别的会话**的工作（连接池回收即使停机失败也必须做）
+      try { await runtime.stop() } finally { await closeDatabaseConnection(runtime) }
       rmSync(sandboxRoot, { recursive: true, force: true })
     },
   }

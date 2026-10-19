@@ -22,7 +22,7 @@
  * ⚠️ 全程隔离：只用隔离测试库（lg_test_ 前缀）。
  */
 
-import { stringToUuid } from '@elizaos/core'
+import { stringToUuid } from '../src/kernel/contracts/uuid.ts'
 import pg from 'pg'
 
 import { ThinHostRuntime, thinLogger } from '../src/infrastructure/runtime/thin-host.ts'

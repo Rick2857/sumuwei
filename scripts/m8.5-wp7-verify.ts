@@ -22,13 +22,15 @@
  * 不主张（归 WP8+）：模式开关消费、main.ts 接线、trace 步、shadow 采集。
  * 量具纪律：§6.7 三段式 + §6.8 measured_count 自检；隔离库，真实库不打开。
  */
+import type { Character } from '../src/infrastructure/runtime/eliza-types.ts'
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
 import 'dotenv/config'
 
 import { isolateDatabase } from '../src/dev/sandbox.ts'
 isolateDatabase('m8.5-wp7-verify', { keep: false })
 
-import { AgentRuntime, type Character } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+
+
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
@@ -169,8 +171,11 @@ checkTrue('static', 'S3b', 'commit 端口拒绝时闸行照落（fallbackReceipt
 // ② 隔离库引导（真实库不打开；按 WP6 门既有范式）
 // ---------------------------------------------------------------------------
 
-const runtime = new AgentRuntime({ character: character as Character, plugins: [], settings: {} })
-await initDatabase(runtime, sqlPlugin)
+const runtime = createThinHostRuntime({
+    character: character,
+    settings: {},
+  })
+await initDatabase(runtime)
 await runtime.initialize()
 const kernel = await initKernel(runtime, {
   definition: characterDefinitionFromCharacter(character),

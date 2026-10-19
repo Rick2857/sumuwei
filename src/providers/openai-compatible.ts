@@ -25,13 +25,25 @@
  * 上下文组装（人格 / 历史 / 时间 / 动作清单）全部由 ElizaOS 的 provider 体系
  * 完成，见 src/context/builder.ts。不要在这里拼 prompt。
  */
-import {
-  type GenerateTextParams,
-  type IAgentRuntime,
-  ModelType,
-  type Plugin,
-  parseKeyValueXml,
-} from '@elizaos/core'
+
+/* ⚠️ `ModelType` 已从 ElizaOS 独立出来（M12 · W2-③）；取值逐字抄自上游。 */
+import type { AgentRuntime, GenerateTextParams, IAgentRuntime, Plugin } from '../infrastructure/runtime/eliza-types.ts'
+import { ModelType } from '../infrastructure/runtime/eliza-vocabulary.ts'
+/*
+ * ⚠️ `parseKeyValueXml` 已从 ElizaOS 独立出来（M12 · W2）。
+ *
+ * 它在**每一次回复**上都会经过（见下方解析段），而此前**全仓零测试覆盖** ——
+ * 且 `pnpm postlv2:bridge:verify` 注入 `replyText` 绕过这一层，测不到它。
+ *
+ * ⇒ 切换前先做了**冻结对照**：22 条用例（五类：C1 三字段 / C2 部分 / C3 无 XML /
+ *   C4 异常格式 / C5 非 ASCII）逐条记录上游读数，本地实现 **22/22 一致** + 负控通过
+ *   （`pnpm thinhost:reply-parser:verify`）。
+ *
+ * ⚠️ 冻结读数揭示的行为**与直觉相反**（详见实现文件头）：
+ *   只有 `<response>…</response>` 包裹时才解析成功；裸标签全部返回 `null`；
+ *   同名嵌套只取最内层。**改这段解析前先跑那道门。**
+ */
+import { parseKeyValueXml } from '../infrastructure/providers/reply-parser.ts'
 import { ChatStreamError, readChatStream } from './chat-stream.ts'
 import type { ImageInput } from '../kernel/contracts/image-input.ts'
 
@@ -304,16 +316,19 @@ export const openAiCompatiblePlugin: Plugin = {
   description: 'OpenAI-compatible /chat/completions provider (DeepSeek official endpoint)',
   priority: PRIORITY,
   models: {
-    [ModelType.TEXT_LARGE]: async (runtime, params) =>
+    // ⚠️ **显式标注**（M12 · W4）：上游 `Plugin` 类型给 `models` 提供了上下文类型，
+    //    于是 `(runtime, params)` 能被推断。改成本地宽松 `Plugin` 后上下文没了
+    //    ⇒ 两个参数变成隐式 `any`（TS7006）。这里补回标注，而不是把上游类型抄回来。
+    [ModelType.TEXT_LARGE]: async (runtime: AgentRuntime, params: GenerateTextParams) =>
       callChatCompletions(
         runtime,
-        params as GenerateTextParams,
+        params,
         resolve(runtime, 'OPENAI_LARGE_MODEL', 'deepseek-v4.1-flash') as string
       ),
-    [ModelType.TEXT_SMALL]: async (runtime, params) =>
+    [ModelType.TEXT_SMALL]: async (runtime: AgentRuntime, params: GenerateTextParams) =>
       callChatCompletions(
         runtime,
-        params as GenerateTextParams,
+        params,
         resolve(runtime, 'OPENAI_SMALL_MODEL', 'deepseek-v4.1-flash') as string
       ),
   },

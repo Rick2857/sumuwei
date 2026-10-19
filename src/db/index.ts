@@ -13,7 +13,10 @@
  *   （另外 initialize() 只注册「随 AgentRuntime 构造传入的 plugins」+ 已注册插件，
  *     所以这里先把 sqlPlugin 注册进 runtime，它的 schema 才会进入迁移集合。）
  */
-import { logger, type AgentRuntime, type Plugin } from '@elizaos/core'
+
+/* ⚠️ `logger` 已从 ElizaOS 独立出来（M12 · W2）；行为与上游同形，见 logger.ts。 */
+import type { AgentRuntime, Plugin } from '../infrastructure/runtime/eliza-types.ts'
+import { logger } from '../infrastructure/telemetry/logger.ts'
 import { config as loadEnvironment } from 'dotenv'
 import { existsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
@@ -22,6 +25,7 @@ import { isProductionDir, PRODUCTION_DB_DIR } from '../dev/sandbox.ts'
 import { KernelError } from '../kernel/contracts/index.ts'
 import {
   applyKernelMigrations,
+  currentSchemaVersion,
   getRawDb,
   pendingMigrations,
   verifyDatabaseIdentity,
@@ -109,9 +113,11 @@ export function shouldBlockForPendingKernelMigration(input: {
   pendingCount: number
   /** 调用方是否已显式放行（`allowKernelMigration()` / `--migrate --apply`） */
   migrationAllowed: boolean
+  backend?: 'postgres' | 'pglite'
 }): boolean {
   if (input.migrationAllowed) return false
   if (input.pendingCount <= 0) return false
+  if (input.backend === 'postgres') return true
   if (input.dataDir === undefined) return false
   return isProductionDir(input.dataDir)
 }
@@ -365,7 +371,18 @@ let openedPostgresTarget: string | undefined
  */
 export async function initDatabase(
   runtime: AgentRuntime,
-  sqlPlugin: Plugin
+  /**
+   * ElizaOS 的 `plugin-sql` 实例。
+   *
+   * ⚠️ **现在可以不给**（M12 · W2-③，2026-10-19）：薄宿主的 `registerPlugin()`
+   *    **不解释插件**（它只注册适配器、**不跑任何 DDL**）⇒ 那个值在薄宿主下
+   *    **没有对象**。不给它 ⇒ `src/main.ts` 就不必 import `@elizaos/plugin-sql`
+   *    （那是本仓最后一处**运行时值**依赖之一）。
+   *
+   * ⚠️ 旧宿主（`new AgentRuntime(...)`，主要在 `scripts/` 里）**仍然需要**它
+   *    —— 那些调用点**不用改**（参数可选，传了照旧生效）。
+   */
+  sqlPlugin?: Plugin
 ): Promise<DbReady> {
   try {
     return await initDatabaseInner(runtime, sqlPlugin)
@@ -402,7 +419,7 @@ async function reclaimAfterInitFailure(runtime: unknown, error: unknown): Promis
 /** 正常路径。**不要**直接调用它 —— 走 `initDatabase()`（它负责失败回收）。 */
 async function initDatabaseInner(
   runtime: AgentRuntime,
-  sqlPlugin: Plugin
+  sqlPlugin?: Plugin
 ): Promise<DbReady> {
   // 写保护闸：放在最前面，任何实验都要先过这一关
   assertDatabaseAccessAllowed()
@@ -451,8 +468,12 @@ async function initDatabaseInner(
    *
    * ⚠️ `sqlPlugin` 参数因此**不再是必需的**；保留签名是为了让 168 个既有脚本
    *    一行不改（那批脚本仍在用旧宿主，先不做无谓的大改）。
+   *
+   * ⚠️ 薄宿主下 `sqlPlugin` 是 `undefined` —— 但 `registerPlugin` **仍然要调**：
+   *    那一步正是**注册适配器**的地方（薄宿主的 `registerPlugin` 不解释插件，
+   *    只把句柄包成 `{ db: {execute} }`）。跳过它 ⇒ 拿不到 adapter。
    */
-  await runtime.registerPlugin(sqlPlugin)
+  await runtime.registerPlugin(sqlPlugin as never)
 
   const adapter = runtime.adapter as unknown as RawDbAdapter | undefined
   if (!adapter) {
@@ -527,8 +548,23 @@ async function initDatabaseInner(
   const tablesBefore = await listTables(adapter)
   const requiredBefore = ['agents', 'memories', 'rooms', 'participants', 'entities', 'worlds']
   const missingBefore = requiredBefore.filter((t) => !tablesBefore.includes(t))
+  // PostgreSQL startup is read-only with respect to schema. Only the explicit
+  // maintenance entry may apply the LG-owned compatibility + Kernel migrations.
+  let postgresMigration: Awaited<ReturnType<typeof applyKernelMigrations>> | undefined
+  if (resolution.backend === 'postgres') {
+    const pending = await pendingMigrations(kernelDbEarly)
+    if (!kernelMigrationAllowed() && (pending.length > 0 || missingBefore.length > 0)) {
+      throw pending.length > 0 ? pendingMigrationError(pending) : new KernelError(
+        'persistence_error', 'compatibility_schema_missing',
+        `缺少运行时兼容表：${missingBefore.join(', ')}。请先运行 pnpm migrate:apply；本次没有修改 schema。`
+      )
+    }
+    postgresMigration = kernelMigrationAllowed()
+      ? await applyKernelMigrations(kernelDbEarly)
+      : { fromVersion: await currentSchemaVersion(kernelDbEarly), toVersion: await currentSchemaVersion(kernelDbEarly), applied: [], skipped: 0 }
+  }
 
-  if (missingBefore.length === 0) {
+  if (resolution.backend === 'postgres' || missingBefore.length === 0) {
     logger.info(
       `[db] schema 已就绪（${tablesBefore.length} 张表，plugin 表齐全）→ 跳过启动 DDL` +
         `（schema 变更请走显式维护入口）`
@@ -568,12 +604,13 @@ async function initDatabaseInner(
       dataDir: process.env.PGLITE_DATA_DIR,
       pendingCount: pending.length,
       migrationAllowed: kernelMigrationAllowed(),
+      backend: resolution.backend,
     })
   ) {
     throw pendingMigrationError(pending)
   }
 
-  const migration = await applyKernelMigrations(kernelDb)
+  const migration = postgresMigration ?? await applyKernelMigrations(kernelDb)
   if (migration.applied.length > 0) {
     logger.info(
       `[kernel] schema 迁移 ${migration.fromVersion} → ${migration.toVersion}：` +

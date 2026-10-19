@@ -68,16 +68,19 @@ console.log(`验证副本（在它上面打开）  ：${workDb}`)
 process.env.PGLITE_DATA_DIR = workDb
 process.env.PROJECT_LG_SANDBOX = workDb
 
-const { AgentRuntime } = await import('@elizaos/core')
-const sqlPlugin = (await import('@elizaos/plugin-sql')).default
+const { createThinHostRuntime } = await import('../src/infrastructure/runtime/thin-host-factory.ts')
+
 const { character } = await import('../src/character/index.ts')
 const { currentSchemaVersion, getRawDb, rowsOf } = await import(
   '../src/infrastructure/persistence/db.ts'
 )
 const { sql } = await import('drizzle-orm')
 
-const runtime = new AgentRuntime({ character, plugins: [] })
-await runtime.registerPlugin(sqlPlugin)
+const runtime = createThinHostRuntime({
+      character: character,
+      settings: {},
+    })
+await runtime.registerPlugin(undefined as never)
 await runtime.runPluginMigrations()
 const db = getRawDb(runtime)
 

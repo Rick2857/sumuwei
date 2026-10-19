@@ -89,11 +89,14 @@ if (!APPLY) {
 /* ---- 显式放行（中央闸仍要求 pre-open token）---- */
 allowProductionDatabase()
 
-const { AgentRuntime } = await import('@elizaos/core')
-const sqlPlugin = (await import('@elizaos/plugin-sql')).default
+const { createThinHostRuntime } = await import('../src/infrastructure/runtime/thin-host-factory.ts')
+
 const { character } = await import('../src/character/index.ts')
 
-const runtime = new AgentRuntime({ character: character as never, plugins: [], settings: {} })
+const runtime = createThinHostRuntime({
+      character: character,
+      settings: {},
+    })
 
 const { stopRuntimeServices, closeDatabaseConnection, isDatabaseClosed, createRuntimeShutdown } =
   await import('../src/infrastructure/persistence/runtime-shutdown.ts')
@@ -137,7 +140,7 @@ try {
     operationKind: 'goal_projection_rebuild',
     deps: {
       openDatabase: async () => {
-        await initDatabase(runtime, sqlPlugin)
+        await initDatabase(runtime)
       },
       stopServices: () => stopRuntimeServices(runtime),
       closeDatabase: async () => await closeDatabaseConnection(runtime),

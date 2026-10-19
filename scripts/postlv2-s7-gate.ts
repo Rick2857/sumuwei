@@ -21,7 +21,7 @@ import { isolateDatabase } from '../src/dev/sandbox.ts'
 const sandbox = isolateDatabase('postlv2-s7-gate', { keep: false })
 
 const { createM4Harness } = await import('./m4-harness.ts')
-const { stringToUuid } = await import('@elizaos/core')
+const { stringToUuid } = await import('../src/kernel/contracts/uuid.ts')
 const { entityRef } = await import('../src/kernel/contracts/entity.ts')
 const { createMemoryRetrievalStore } = await import(
   '../src/infrastructure/persistence/memory-retrieval-store.ts'

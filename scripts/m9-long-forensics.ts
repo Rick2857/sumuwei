@@ -33,20 +33,19 @@ async function main(): Promise<void> {
   process.env.PGLITE_DATA_DIR = dbDir
   process.env.PROJECT_LG_SANDBOX = dbDir
 
-  const { AgentRuntime } = await import('@elizaos/core')
-  const sqlPlugin = (await import('@elizaos/plugin-sql')).default
+  const { createThinHostRuntime } = await import('../src/infrastructure/runtime/thin-host-factory.ts')
+  
   const { character } = await import('../src/character/index.ts')
   const { initDatabase } = await import('../src/db/index.ts')
   const { getRawDb, exec } = await import('../src/infrastructure/persistence/db.ts')
   const { sql } = await import('drizzle-orm')
 
-  const runtime = new AgentRuntime({
-    character: character as never,
-    plugins: [sqlPlugin],
-    conversationLength: 16,
-    settings: { OPENAI_API_KEY: 'placeholder', OPENAI_BASE_URL: '' },
-  } as never)
-  await initDatabase(runtime, sqlPlugin)
+  const runtime = createThinHostRuntime({
+      character: character,
+      settings: { OPENAI_API_KEY: 'placeholder', OPENAI_BASE_URL: '' },
+      conversationLength: 16,
+    })
+  await initDatabase(runtime)
   const db = getRawDb(runtime)
 
   console.log('==== 含 memory_explicit_write 的 trace（时间序） ====')

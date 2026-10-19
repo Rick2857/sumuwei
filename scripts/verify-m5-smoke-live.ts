@@ -26,6 +26,9 @@
  * 跑法：pnpm m5:smoke:live        （需要 OPENAI_API_KEY）
  */
 
+import type { Character } from '../src/infrastructure/runtime/eliza-types.ts'
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
+import { applyKernelMigrations as __applyKernelMigrations, getRawDb as __getRawDb } from '../src/infrastructure/persistence/db.ts'
 import 'dotenv/config'
 
 import { spawnSync } from 'node:child_process'
@@ -33,8 +36,8 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, write
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
-import { AgentRuntime, type Character } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+
+
 
 import { character } from '../src/character/index.ts'
 import { PRODUCTION_DB_DIR, isProductionDir } from '../src/dev/sandbox.ts'
@@ -202,9 +205,12 @@ check(
 section('S5 账本侧证据（Level 2）：selected_memory_ids 与 memory_recall step')
 process.env.PGLITE_DATA_DIR = dbDir
 process.env.PROJECT_LG_SANDBOX = dbDir
-const runtime = new AgentRuntime({ character: character as Character, plugins: [] })
-await runtime.registerPlugin(sqlPlugin)
-await runtime.runPluginMigrations()
+const runtime = createThinHostRuntime({
+    character: character,
+    settings: {},
+  })
+await runtime.registerPlugin(undefined as never)
+await await __applyKernelMigrations(__getRawDb(runtime))
 const db = getRawDb(runtime)
 const writer = createTraceWriter(db)
 const traces = await writer.recent(asCharacterId(String(character.id ?? character.name)), 12)

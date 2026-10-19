@@ -99,6 +99,81 @@ export const OFFLINE_GATES: readonly GateSpec[] = [
       '依赖卸载后本门改用冻结语料核对（已固化在脚本里）。',
   },
   {
+    id: 'thinhost:isolation:verify',
+    title: '隔离目标判定（后端无关）：生产库必拒 · 缺依据失败关闭',
+    argv: tsx('scripts/thinhost-isolation-verify.ts'),
+    entry: 'scripts/thinhost-isolation-verify.ts',
+    resources: { ...SAFE_PURE },
+    why:
+      '隔离判据此前在 PG 后端下**只能靠"我承认要开生产库"的旗标** ⇒ 隔离与生产共用一个开关。' +
+      '本门守住两个**独立**条件：① 期望库名逐字相同 ② 该库名本身就是测试库。' +
+      '⚠️ **第一版只做了①，被本门自己的 C 项负控抓到漏洞**：`expectation:{database:"sumuwei"}` ' +
+      '曾能打开生产库 ⇒ C 项（两边都写生产库名仍必须拒）就是它的补丁。' +
+      '纯函数，**不连数据库**、**不碰生产**。',
+  },
+  {
+    id: 'thinhost:reply-parser:parity',
+    title: '主回复解析器 parseKeyValueXml：与上游冻结语料逐用例一致 + 负控',
+    argv: tsx('scripts/thinhost-reply-parser-freeze.ts'),
+    entry: 'scripts/thinhost-reply-parser-freeze.ts',
+    resources: { ...SAFE_PURE },
+    why:
+      '它在**每一次回复**上都经过（openai-compatible.ts:87），此前**全仓零测试覆盖**；' +
+      '且 `postlv2:bridge:verify` 注入 `replyText` **绕过**它，测不到。' +
+      '22 条冻结用例（C1 三字段 / C2 部分 / C3 无 XML / C4 异常格式 / C5 非 ASCII）' +
+      '逐条记录上游读数，本地实现 22/22 一致。' +
+      '⚠️ **负控必备**：22 条里 19 条期望值就是 `null`，没有负控的话' +
+      '一个恒真的 `() => null` 也能全绿。' +
+      '⚠️ 冻结读数揭示的行为**与直觉相反**：只有 `<response>` 包裹才解析成功、' +
+      '裸标签全返回 `null`、同名嵌套只取最内层 —— 照"想"实现必然错。' +
+      '📌 门名按 M12 计划 §4.2 为 `thinhost:reply-parser:parity`（第一版误写 `verify`，已对齐）。',
+  },
+  {
+    id: 'thinhost:vocabulary:verify',
+    title: '取值词表（EventType / ModelType / ChannelType）：与上游逐字一致 + 负控',
+    argv: tsx('scripts/thinhost-vocabulary-verify.ts'),
+    entry: 'scripts/thinhost-vocabulary-verify.ts',
+    resources: { ...SAFE_PURE },
+    why:
+      '三个枚举在运行时**只是字符串**：事件名错一个字母 ⇒ 事件**永远不会被派发**（不报错）；' +
+      '模型路由键错 ⇒ `useModel` **回落到 TEXT_LARGE**（不报错，行为却漂了）。' +
+      '⇒ 都是**静默失败**，`typecheck` 一条都抓不到 ⇒ 必须逐字比对上游。' +
+      '⚠️ 含两条负控：改坏事件名 / 模型键**差一个字符**都必须被抓到。' +
+      '⚠️ 门抓到过**量具的错**：第一版用"有没有键等于某个值"判反向映射，' +
+      '而 `ModelType.TEXT_SMALL` 的值恰好等于键名 ⇒ 误判；改成"有没有数字值"。',
+  },
+  {
+    id: 'thinhost:no-eliza-in-src:verify',
+    title: '脱依赖判据（AST）：src/ 内无**运行时** @elizaos 依赖 + W4 计数如实列出',
+    argv: tsx('scripts/thinhost-no-eliza-in-src-verify.ts'),
+    entry: 'scripts/thinhost-no-eliza-in-src-verify.ts',
+    resources: { ...SAFE_PURE },
+    why:
+      '用 **TypeScript AST**（`ts.createSourceFile` 单遍 + `forEachChild`），' +
+      '**不**扫代码行里的字符串（那会误伤架构检查的禁止规则、夹具与说明文字）。' +
+      '· **A 档（运行时 · W2）**：值导入 / 动态 import / require / export-from ⇒ 0。' +
+      '  唯一例外 `src/context/builder.ts`（旧上下文链路本体，D2 要求**保留可读**）' +
+      '  —— 且断言"**恰好**只有它一个"。' +
+      '· **B 档（类型/解析期 · W4）**：type-only 导入 / `typeof import()` / `declare module` / ' +
+      '  `require.resolve` ⇒ 本门**如实计数**，不假装已达成（当前 12 / 14 / 3 / 1）。' +
+      '⚠️ 含 6 个负控：六个违规形态**全部**必须被 AST 判据抓到（证明判据有鉴别力）。',
+  },
+  {
+    id: 'thinhost:logger:verify',
+    title: '本地 logger：四个级别可读回 · **去向与上游同形** · 不静默 no-op',
+    argv: tsx('scripts/thinhost-logger-verify.ts'),
+    entry: 'scripts/thinhost-logger-verify.ts',
+    resources: { ...SAFE_PURE },
+    why:
+      '`src/` 内 132 处调用（info 88 · warn 30 · debug 12 · error 6，**全部单参数**）。' +
+      '⚠️ **去向必须与上游同形**（2026-10-19 实测纠正）：上游 `info`→stdout、`warn`/`error`→stderr。' +
+      '第一版本实现"什么都不写" ⇒ **那是真实的行为差异**（在能看见 stdout 的场合日志会凭空消失）。' +
+      '⚠️ 生产 journal 里没有这些行，是因为核心被 `LgStdioClient` spawn 时 **stdout 走管道不转发**' +
+      '（与 logger 实现无关；第一版把这条当成了"上游不写 stdout"的证据 —— 那是**误判**，已更正）。' +
+      '本门断言：stdout/stderr 分流正确 · 级别前缀可读 · `recentLogs()` 读得到内容 · 注入 sink 生效。' +
+      '⚠️ 门抓到过一个真缺陷：`logger.info({a:1})` 曾变成 `[object Object]`（信息全丢）⇒ 改为 JSON 序列化。',
+  },
+  {
     id: 'typecheck',
     title: '类型检查（tsc --noEmit）',
     argv: [process.execPath, TSC_CLI, '--noEmit'],
@@ -207,12 +282,28 @@ export const OFFLINE_GATES: readonly GateSpec[] = [
     why: "isolateDatabase('dry-run-silence')。",
   },
   {
+    /*
+     * ⚠️ `eval:providers` 已**退役**（M12 · W4，2026-10-19）。
+     *
+     * 退役理由：它读 `runtime.providers` —— 那是**上游 ElizaOS 的 provider 体系**
+     * （`registerProvider` / `getProvider` 那一套）。薄宿主**从结构上就没有**这个概念
+     * （`ThinHostRuntime` 上不存在 `providers` 字段；`composeState` 失败关闭）。
+     * ⇒ 它测的东西**在 D2 之后已经不存在**，继续留着只会让人以为"provider 白名单"还受门保护。
+     *
+     * 📌 它的**结论**（provider 白名单必须闭合，否则会直连上游）已被
+     *    `thinhost:wiring:verify`（12/12）与 `thinhost:retirement:verify`（13/13）覆盖：
+     *    薄宿主只有**一个**模型处理器（`openAiCompatiblePlugin.models`），没有任何回退路径。
+     */
     id: 'eval:providers',
-    title: 'Provider 白名单',
-    argv: tsx('scripts/verify-provider-whitelist.ts'),
-    entry: 'scripts/verify-provider-whitelist.ts',
+    title: '【已退役】Provider 白名单（薄宿主无 provider 体系）',
+    argv: tsx('scripts/thinhost-retirement-verify.ts'),
+    entry: 'scripts/thinhost-retirement-verify.ts',
     resources: { ...SAFE_PURE },
-    why: "isolateDatabase('provider-whitelist')。",
+    why:
+      '⚠️ **RETIRED**（M12 · W4）：原门读 `runtime.providers` —— 那是上游 ElizaOS 的 ' +
+      'provider 体系，薄宿主**没有**这个概念 ⇒ 它测的对象在 D2 之后已不存在。' +
+      '本条**改指** `thinhost:retirement:verify`：它的 R5/R6 断言旧宿主路径**没有调用者**、' +
+      '旧上下文链路**已退役** ⇒ provider 回退路径同样不存在。',
   },
   {
     id: 'm3.5:test',
@@ -2080,6 +2171,17 @@ export const PL2_CONTROL_GATES: readonly GateSpec[] = ([
       '⚠️ `I2-getRawDb-works` 是 2026-10-18 生产故障 A（`no_db_handle`）的崩溃点，' +
       '静态结构判据抓不到它 —— 必须真跑一次 initDatabase。',
   ],
+  [
+    'thinhost:bootstrap:fingerprint',
+    'scripts/thinhost-bootstrap-fingerprint.ts',
+    'W0b 基线取证：六张基础表的**结构**指纹（列/外键/索引/扩展/触发器）',
+    '隔离 PostgreSQL（`lg_test_` 前缀 + 与生产库同名即拒，失败关闭）。' +
+      '⚠️ **表数不能代替结构**：本门主判据是逐项结构，表数只作附带读数。' +
+      '⚠️ **从零建库需要两项前置**（实测确认，否则失败原因长得像产品缺陷）：' +
+      '① `public` schema 的 CREATE 授权给 `lg_migrate`（生产库 owner 是它，新库 owner 是 `lg_bootstrap`）' +
+      '② `create extension vector`（迁移 10 的 `vector(384)` 列依赖它）。' +
+      '已知瑕疵：多列外键的 join 会重复计数（读数偏多，不影响结论）。',
+  ],
   ['reminder:channels:verify', 'scripts/reminder-channels-verify.ts', '三入口渠道事实与跨渠道提醒', '隔离库、loopback 模型、真实共存核心/控制台与 Python/页面夹具；不发真实 QQ，不打开正式库。'],
   [
     'postlv2:avatar-opening:verify',
@@ -2091,6 +2193,27 @@ export const PL2_CONTROL_GATES: readonly GateSpec[] = ([
       '只有 `main.ts` 的内联端口与 Python 外壳**无法 import**，才退回**窄范围**文本判据，且在读数里写明。',
   ],
   ['postlv2:database-env:verify', 'scripts/postlv2-database-env-verify.ts', '数据库环境加载前置保护', '临时 cwd/.env + 假插件；不打开数据库，覆盖晚加载与旧 sandbox 标记。'],
+  [
+    'thinhost:lgmigration:verify',
+    'scripts/thinhost-lgmigration-verify.ts',
+    'M12 W1-b：**不经 plugin-sql**，LG 迁移体系能从零建出六张基础表 + 幂等',
+    '隔离 PostgreSQL（`lg_test_` 前缀，失败关闭；schema 重建与 `create extension vector` 用超级用户）。' +
+      '· 正控 P1–P5：23 个迁移全过 · 六表 6/6 · 外键 12 · 索引 8 · 表 43。' +
+      '· 负控 N1：**抽掉迁移 0023 ⇒ 六张表建不出来**（证明结论不是"别处也建了表"）。' +
+      '· 幂等 I0–I2：**两遍都走生产路径** `applyKernelMigrations`，第二遍无错且列数零变化。' +
+      '⚠️ 判据纪律：**两遍必须同源**（第一版第一遍走门自己的循环、第二遍走生产路径，' +
+      '报出"509→512 多 3 列" —— 那是**量具的错**，不是迁移的错）。',
+  ],
+  [
+    'thinhost:base-ddl:verify',
+    'scripts/thinhost-base-ddl-verify.ts',
+    'M12 W1-a：基础表 DDL **产物**的性质（不含建表 · 全幂等 · 不改结构）',
+    '隔离 PostgreSQL（`lg_test_` 前缀，失败关闭）；**前置**：六张表须已由迁移 0023 建出。' +
+      '⚠️ 它**不测**"能从空库建表" —— 实测迁移 0023 已完整覆盖六张表，本产物已缩成' +
+      '只有外键与索引（0 条建表），在空库上本就建不出表。' +
+      '📌 保留价值：它是"0023 是否仍与旧宿主等价"的**可执行比对物**。' +
+      '含负控 N1（去掉一个索引 ⇒ 比对必须报出该差异）。',
+  ],
   ['postlv2:oss-mechanisms:verify', 'scripts/postlv2-oss-mechanisms-verify.ts', 'AIRI / LiveKit / Pipecat / MaiBot 机制功能', '实际 Web Audio 播放器受控时钟、标准库 Python 桥、隔离库与 TurnGateway；零真实模型，不作性能或人格收益验收。'],
   ['postlv2:image:verify', 'scripts/postlv2-image-input-verify.ts', '图片输入离线整链', '隔离库、loopback 模型/QQ 夹具，不发真消息，不依赖外部资产。'],
   ['learning:contracts:verify', 'scripts/learning-skills-verify.ts', '学习技能离线契约', '--offline 使用临时资料库与论文 worker 夹具；外部资产指纹独立验收。'],

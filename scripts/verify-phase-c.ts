@@ -15,14 +15,15 @@
  *
  * 跑法：node_modules/.bin/tsx scripts/verify-phase-c.ts
  */
+import type { Character } from '../src/infrastructure/runtime/eliza-types.ts'
+import { createThinHostRuntime } from '../src/infrastructure/runtime/thin-host-factory.ts'
 import 'dotenv/config'
 
 // 必须在任何会碰数据库的 import 之前
 import { isolateDatabase } from '../src/dev/sandbox.ts'
 isolateDatabase('verify-phase-c')
 
-import { AgentRuntime, type Character } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+
 import { sql } from 'drizzle-orm'
 
 import { character } from '../src/character/index.ts'
@@ -72,8 +73,11 @@ function section(title: string): void {
 // 装配
 // ---------------------------------------------------------------------------
 
-const runtime = new AgentRuntime({ character: character as Character, plugins: [] })
-const dbReady = await initDatabase(runtime, sqlPlugin)
+const runtime = createThinHostRuntime({
+    character: character,
+    settings: {},
+  })
+const dbReady = await initDatabase(runtime)
 const kernel = await initKernel(runtime, { definition: characterDefinitionFromCharacter(character) })
 const db = kernel.stores.db
 const characterId = kernel.characterId

@@ -10,13 +10,15 @@
  * 与 stdout 上的控制台回声并排打印，并各自检查 `来源与范围：` / `[C1]`。
  */
 
+import type { Character } from '../../src/infrastructure/runtime/eliza-types.ts'
+import { createThinHostRuntime } from '../../src/infrastructure/runtime/thin-host-factory.ts'
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, copyFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { AgentRuntime, type Character } from '@elizaos/core'
-import sqlPlugin from '@elizaos/plugin-sql'
+
+
 import { sql } from 'drizzle-orm'
 
 import { character } from '../../src/character/index.ts'
@@ -77,13 +79,12 @@ const echo = (cut === null ? body : body.slice(0, cut.index)).trim()
  */
 process.env.PGLITE_DATA_DIR = dbDir
 process.env.PROJECT_LG_SANDBOX = dbDir
-const runtime = new AgentRuntime({
-  character: character as Character,
-  plugins: [sqlPlugin],
-  conversationLength: 16,
-  settings: { OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? 'placeholder', OPENAI_BASE_URL: process.env.OPENAI_BASE_URL ?? '' },
-} as never)
-await initDatabase(runtime, sqlPlugin)
+const runtime = createThinHostRuntime({
+    character: character,
+    settings: { OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? 'placeholder', OPENAI_BASE_URL: process.env.OPENAI_BASE_URL ?? '' },
+    conversationLength: 16,
+  })
+await initDatabase(runtime)
 const db = getRawDb(runtime)
 const q = async (text: string): Promise<Record<string, unknown>[]> => rowsOf(await db.execute(sql.raw(text)))
 const assistantEvents = await q(

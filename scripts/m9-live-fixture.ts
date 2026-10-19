@@ -42,8 +42,8 @@ async function main(): Promise<void> {
   process.env.PGLITE_DATA_DIR = resolved
   process.env.PROJECT_LG_SANDBOX = resolved
 
-  const { AgentRuntime } = await import('@elizaos/core')
-  const sqlPlugin = (await import('@elizaos/plugin-sql')).default
+  const { createThinHostRuntime } = await import('../src/infrastructure/runtime/thin-host-factory.ts')
+  
   const { character } = await import('../src/character/index.ts')
   const { initDatabase } = await import('../src/db/index.ts')
   const { getRawDb } = await import('../src/infrastructure/persistence/db.ts')
@@ -61,16 +61,15 @@ async function main(): Promise<void> {
   const { userId } = resolveIds(userName)
   const ingress = createHumanConsoleUserTurnIngress()
 
-  const runtime = new AgentRuntime({
-    character: character as never,
-    plugins: [sqlPlugin],
-    conversationLength: 16,
-    settings: {
+  const runtime = createThinHostRuntime({
+      character: character,
+      settings: {
       OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? 'placeholder',
       OPENAI_BASE_URL: process.env.OPENAI_BASE_URL ?? '',
     },
-  } as never)
-  await initDatabase(runtime, sqlPlugin)
+      conversationLength: 16,
+    })
+  await initDatabase(runtime)
   const db = getRawDb(runtime)
 
   /* 每条夹具会话自己的序号计数 */
