@@ -18,17 +18,33 @@
 |---|---|
 | 角色内核 | 持久记忆、来源归因、可重放投影、关系、情绪、信念、目标/承诺及受控工具链已有实现；功能开关和历史里程碑结果分别记录 |
 | 材料驱动提醒 | 可从文字、近期原图及已授权工具结果提出多项提醒；程序核对日期、扣除提前分钟、去重并复用现有持久化调度，支持查看、改期和取消；需自行配置提醒出口与模型 |
+| 联网查证 | 当前主入口使用 DeepSeek 原生搜索及受控 HTTPS 来源读取，最多读取两页；服务器模板默认关闭，启用需官方 DeepSeek 端点及自己的可用凭据；不再以 Tavily Key 作为当前主入口前置 |
 | PostgreSQL | 新增显式后端选择、连接目标核对、单认知核心资格、迁移对账及在线备份恢复工具；支持数据库独立运行、多个管理/只读连接，多个认知写核心仍属后续阶段 |
 | QQ / 语音 / Live2D | 可选入口复用同一 LG 核心；新增白名单群聊、当前群成员私聊、逐人身份与房间隔离，QQ 多用户缺省关闭 |
 | 3D / Omni 原生语音 | 新增 three-vrm 呈现、Qwen3.8-Omni-Flash-Realtime / Liora Mira、LG 上下文/工具接线与取消/更正；仅发布源码，公开副本未激活生产或验收真人设备 |
 | 多用户 / 管理 UI | 身份、来源房间、受限召回与后台归因已有实现；服务器快照包含受限管理入口源码，其生产启用与完整拒绝语义验收不由本次公开发布认证 |
 | Linux 工具与入口 | 同一核心可常驻服务器；Python 路径可配置，数学 worker 区分冷启动与求解期限，子进程超时/取消按平台清理；微信群入口依赖独立外部桥、账号与白名单 |
+| PC 远程动作 | 等待 PC 执行回执后区分完成、拒绝、失败与结果不明；超时或断线不自动重发；需自行配置执行端、SSH 与令牌，真实双机及鼠标整链未在公开副本验收 |
+| 备份与部署检查 | 已包含 PostgreSQL 同快照备份 v2、隔离恢复校验、只读依赖健康和源码指纹清单；没有自动周期备份、离机副本或 PITR，公开副本的真实数据库备份/恢复门仍为 NOT RUN |
 
 多人入口保持同一个苏沐薇、唯一全局情绪、逐人关系与 QQ 号唯一存档。私聊和不同群的资料按来源房间授权，过滤先于截断；原主人具名跨用户查询只在私聊或本机入口开放并带审计。普通群成员不继承主人的桌面、任务、提醒或工作流权限。拒绝行为的真模型/真人验收仍须单列，本公开副本没有“零失败拒绝”结论。设置、触发规则和证据边界见 [QQ 多用户与群聊](docs/QQ-GROUPS.md)。
 
 ## 服务器安装
 
-使用 Linux、Node.js 22（采样服务器为 22.23.3）与 pnpm 12.4.1。完整流程、PostgreSQL 初始化/迁移、Python 独立运行环境和 systemd 模板见 [服务器版指南](docs/SERVER-EDITION.md)。桌面、鼠标和 VRM 在用户 PC；服务器不会自动取得用户桌面控制权。
+使用 Linux、Node.js 22.13+、pnpm 12.4.1 与独立 PostgreSQL 17 + pgvector。先在没有运行配置和数据的新 checkout 安装并执行有限源码检查：
+
+```sh
+git clone --branch main https://github.com/Rick2857/sumuwei.git
+cd sumuwei
+pnpm install --frozen-lockfile
+pnpm ci:source
+cp .env.server.example .env
+cp .env.qq.example .env.qq
+```
+
+填写自己的模型、数据库连接、`LG_PG_EXPECT_DATABASE` / `LG_PG_EXPECT_USER` 和 QQ/OneBot 配置；不使用 QQ 时无需复制或配置 `.env.qq`。配置文件仅由服务账号读取。准备数据库扩展与账号后，先用 `pnpm migrate` 检查目标和待执行项，确认自己的备份与维护窗口后再执行 `pnpm migrate:apply`。完成依赖和渠道配置后，CLI 用 `pnpm chat`，QQ 常驻入口用 `pnpm qq:chat`；只启动一个认知核心。
+
+完整流程、Python 独立运行环境和 systemd 模板见 [服务器版指南](docs/SERVER-EDITION.md)。桌面、鼠标和 VRM 在用户 PC；服务器不会自动取得用户桌面控制权。下方 PGlite 命令仅为历史运行兼容入口，服务器配置使用本节的 `.env.server.example`。
 
 ## 兼容的本地最小使用
 
@@ -73,7 +89,9 @@ LG_PG_EXPECT_DATABASE=YOUR_DATABASE
 
 连接串必须填自己的值并保留在本地。`db:init` 仅保留创建本 checkout 全新 PGlite 库的兼容功能，会拒绝外部数据库配置；它不会初始化、导入或覆盖 PostgreSQL，也不用于当前测试验收。已有 PGlite 数据需要按[迁移计划](docs/post-lv2/PostgreSQL-Migration-Execution-Plan-2026-10-12.md)和[Runbook](docs/post-lv2/PostgreSQL-Migration-Runbook.md)单独演练、备份及切换，不能只改连接串就宣称数据已迁移。
 
-`scripts/postgresql/compose.yml` 是固定镜像、loopback 绑定的试验配置，不是通用生产部署器；使用前确认容器、卷、端口和凭据文件属于自己的隔离环境。试验角色与授权脚本在同目录。启动期 DDL 仍限制运行/迁移账号分离，当前单核心资格也不等于多写核心并发已验收。见[维护手册](docs/post-lv2/PostgreSQL-Migration-Maintenance-Manual.md)和[已知局限](docs/post-lv2/PostgreSQL-Migration-Known-Limitations.md)。
+`scripts/postgresql/compose.yml` 是固定镜像、loopback 绑定的试验配置，不是通用生产部署器；使用前确认容器、卷、端口和凭据文件属于自己的隔离环境。试验角色与授权脚本在同目录。
+
+当前启动流程在六张插件基础表齐全时跳过插件建表；缺表时，旧宿主仍尝试插件初始化，薄宿主则拒绝启动期 DDL。该检查只核对表名，不验证完整列结构，也不证明运行/迁移账号分离已完整验收。薄宿主还要求启用 ContextCompiler，不能与 `CHARACTER_CONTEXT_COMPILER_V1=0` 同用。当前单核心资格不等于多写核心并发已验收。当前宿主行为见[服务器指南](docs/SERVER-EDITION.md)；历史迁移维护与边界见[维护手册](docs/post-lv2/PostgreSQL-Migration-Maintenance-Manual.md)和[已知局限](docs/post-lv2/PostgreSQL-Migration-Known-Limitations.md)。
 
 原开发环境的[迁移验收报告](docs/post-lv2/PostgreSQL-Migration-Acceptance-Report.md)保留工程、数据与首用的分列结果；其生产配置、历史计数和未公开 artifacts 不属于本公开副本的实测证据。公开副本的最新检查单独记录在 [PUBLIC-VERIFICATION](docs/PUBLIC-VERIFICATION.md)。
 
