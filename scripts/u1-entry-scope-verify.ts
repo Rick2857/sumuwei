@@ -197,8 +197,8 @@ const OWNER = 'u-owner'
   const bad = resolveEntryScope({ entryKind: 'telepathy' as EntryKind, ownerUserId: OWNER, resolvedInboundUserId: OWNER })
   record(
     'T6.1',
-    '未登记的入口种类 ⇒ 失败关闭（闭集是四条：' + ENTRY_KINDS.join(' / ') + '）',
-    bad.failClosed === true && bad.scope === undefined && ENTRY_KINDS.length === 4,
+    '未登记的入口种类 ⇒ 失败关闭（含微信闭集：' + ENTRY_KINDS.join(' / ') + '）',
+    bad.failClosed === true && bad.scope === undefined && ENTRY_KINDS.length === 5,
     `failClosed=${String(bad.failClosed)} · kinds=${ENTRY_KINDS.length}`
   )
 }

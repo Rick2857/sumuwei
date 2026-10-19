@@ -51,6 +51,53 @@ const SAFE_PURE = { parallel: 'safe' as const }
 // ===========================================================================
 
 export const OFFLINE_GATES: readonly GateSpec[] = [
+  /*
+   * ============================================================================
+   *  薄宿主（thinhost）五道门 · 2026-10-18
+   * ============================================================================
+   * 为什么它们必须在门表里（不是"跑一次就算"）：
+   *   这次替换的核心不是"加功能"，而是**换掉生产进程的宿主**。
+   *   一旦门表里没有它们，任何人改 `src/main.ts` / `thin-host*.ts` 都可能
+   *   把"提前 return""漏一个方法""把补丁加回来"重新引入 —— 而这些**全部**
+   *   是 2026-10-18 在生产上真实发生过的故障（见 docs/post-lv2/
+   *   ThinHost-Replacement-Attribution-2026-10-18.md §7）。
+   *
+   * ⚠️ ①③⑤ 是纯静态/纯结构（不碰数据库，可离线跑）；
+   *    ②④ 需要真实 PostgreSQL（`lg_test_` 前缀，跑完即删）⇒ 归 `PL2_CONTROL_GATES`。
+   */
+  {
+    id: 'thinhost:surface:verify',
+    title: '薄宿主接口面穷举（扫描全部 src/ 的 runtime.<方法> 调用）',
+    argv: tsx('scripts/thinhost-surface-verify.ts'),
+    entry: 'scripts/thinhost-surface-verify.ts',
+    resources: { ...SAFE_PURE },
+    why:
+      '穷举 `src/**` 里所有 `runtime.<标识符>` 调用（剥注释后）并逐个断言薄宿主已实现。' +
+      '⚠️ 这道门是第三次生产故障（`ensureWorldExists is not a function`）的直接补丁：' +
+      '接口面必须由机器从代码里读出来，不能靠人的记忆。',
+  },
+  {
+    id: 'thinhost:retirement:verify',
+    title: '薄宿主退役回归锁（guard-timers 不回来 / 开关缺省 off / 无提前 return）',
+    argv: tsx('scripts/thinhost-retirement-verify.ts'),
+    entry: 'scripts/thinhost-retirement-verify.ts',
+    resources: { ...SAFE_PURE },
+    why:
+      '`guard-timers.ts` 已退役（薄宿主不建那些定时器 ⇒ 补丁无对象）。' +
+      '本门断言它不被重新引入、开关缺省 off、`main.ts` 只替换绑定不提前 return。',
+  },
+  {
+    id: 'thinhost:uuid:parity',
+    title: 'stringToUuid 本地实现与上游逐值一致（卸载 ElizaOS 的前置闸）',
+    argv: tsx('scripts/thinhost-uuid-parity.ts'),
+    entry: 'scripts/thinhost-uuid-parity.ts',
+    resources: { ...SAFE_PURE },
+    why:
+      '这个函数决定生产库里**每一个**身份/房间/消息 id 的推导，差一位 ⇒ 记忆读不出来。' +
+      '⚠️ 第一版把上游的"版本位清零"误写成"设成 5"，25 个用例全部不一致 —— ' +
+      '**普通单测与 typecheck 都发现不了**，只有与上游逐值比对能抓到。' +
+      '依赖卸载后本门改用冻结语料核对（已固化在脚本里）。',
+  },
   {
     id: 'typecheck',
     title: '类型检查（tsc --noEmit）',
@@ -2014,6 +2061,25 @@ export const PL2_GATES: readonly GateSpec[] = [
  * ⇒ 它们仍可用 `pnpm <id>` 显式跑；"显式"与"自动带出"是两件事。
  */
 export const PL2_CONTROL_GATES: readonly GateSpec[] = ([
+  /*
+   * 薄宿主 · 需要真实 PostgreSQL 的两道门（`lg_test_` 前缀，跑完即删）。
+   * ⚠️ 它们**不能**进离线 lane：`cli:exit:verify` 与等价门都要真的连一次库。
+   */
+  [
+    'thinhost:wiring:verify',
+    'scripts/thinhost-wiring-verify.ts',
+    '薄宿主接线：开关缺省 off · 非法值失败关闭 · 工厂产出 · adapter 结构兼容 · 收尾三注入点',
+    '**不碰数据库**（用假 pool，只验结构与收尾链）。与 `thinhost:surface:verify` 分工：' +
+      '那道门管"接口面全不全"，这道门管"装配与收尾能不能用"。',
+  ],
+  [
+    'thinhost:initdb:verify',
+    'scripts/thinhost-initdb-verify.ts',
+    '薄宿主装配闭环：initDatabase 成功 · getRawDb 取到句柄 · 启动期不跑 DDL · main.ts 无提前 return',
+    '**真实 PostgreSQL 隔离测试库**（`lg_test_` 前缀，跑完即删，**绝不碰 sumuwei**）。' +
+      '⚠️ `I2-getRawDb-works` 是 2026-10-18 生产故障 A（`no_db_handle`）的崩溃点，' +
+      '静态结构判据抓不到它 —— 必须真跑一次 initDatabase。',
+  ],
   ['reminder:channels:verify', 'scripts/reminder-channels-verify.ts', '三入口渠道事实与跨渠道提醒', '隔离库、loopback 模型、真实共存核心/控制台与 Python/页面夹具；不发真实 QQ，不打开正式库。'],
   [
     'postlv2:avatar-opening:verify',

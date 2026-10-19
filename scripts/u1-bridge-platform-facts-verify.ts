@@ -52,7 +52,7 @@ expectProblem('正控 合法 private ⇒ 合法', privateFacts, undefined)
 expectProblem('正控 合法 group（带 groupId）⇒ 合法', groupFacts, undefined)
 
 expectProblem('负控 多一个未知键 ⇒ 整条作废', { ...privateFacts, extra: 'x' }, 'bridge_bad_platform_facts_key')
-expectProblem('负控 transport 不在闭集', { ...privateFacts, transport: 'wechat' }, 'bridge_bad_platform_facts_transport')
+expectProblem('负控 transport 不在闭集', { ...privateFacts, transport: 'discord' }, 'bridge_bad_platform_facts_transport')
 expectProblem('负控 selfId 空串', { ...privateFacts, selfId: '   ' }, 'bridge_bad_platform_facts_self')
 expectProblem('负控 senderUserId 空串', { ...privateFacts, senderUserId: '' }, 'bridge_bad_platform_facts_sender')
 expectProblem('负控 messageType 未知', { ...privateFacts, messageType: 'channel' }, 'bridge_bad_platform_facts_message_type')

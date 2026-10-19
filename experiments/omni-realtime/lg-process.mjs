@@ -50,7 +50,7 @@ export async function startLG({ endpoint, token, onDiagnostic = () => {}, produc
       socket = connect({ host: '127.0.0.1', port: coexist.avatarPort });
       socket.on('error', () => onDiagnostic('lg_avatar_transport_error'));
       await new Promise((done, reject) => { socket.once('connect', done); socket.once('error', reject); });
-      socket.write(`LG_ENTRY ${coexist.avatarToken}\n`);
+      socket.write(`LG_ENTRY ${coexist.avatarToken} v1\n`);
       protocolLines = createInterface({ input: socket });
       protocolLines.on('line', readProtocol); transport = socket;
       qqShell = spawn(process.execPath, [root + 'node_modules/tsx/dist/cli.mjs', root + 'scripts/qq/chat.ts'], {

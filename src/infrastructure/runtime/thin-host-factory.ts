@@ -21,6 +21,7 @@
  */
 
 import pg from 'pg'
+import { createRequire } from 'node:module'
 
 import type { AgentRuntime } from '@elizaos/core'
 
@@ -62,14 +63,44 @@ export interface ThinHostFactoryOptions {
  */
 export function createThinHostRuntime(options: ThinHostFactoryOptions): AgentRuntime {
   const url = options.settings.POSTGRES_URL ?? process.env.POSTGRES_URL ?? ''
-  if (url === '') {
+  const dataDir = options.settings.PGLITE_DATA_DIR ?? process.env.PGLITE_DATA_DIR ?? ''
+  const backend = options.settings.CHARACTER_DB_BACKEND ?? process.env.CHARACTER_DB_BACKEND ?? ''
+
+  /*
+   * ⚠️⚠️ 2026-10-18 **修正一个过严的判断**。
+   *
+   * 第一版这里写的是"薄宿主只支持 PostgreSQL，PGlite 一律拒绝"，理由是
+   * 「PGlite 是 plugin-sql 的嵌入式库，薄宿主不经它」。
+   *
+   * 那个理由**站不住**：`getRawDb()` 需要的只是 `{ execute(query) }` 形状的句柄，
+   * 而 drizzle 的 `drizzle-orm/pglite` 与 `drizzle-orm/node-postgres` **提供的是同一个接口**。
+   * 真正不能做的是"偷偷回落"——那会让"这次到底跑在哪个库上"不可判定。
+   *
+   * 代价是实测出来的：`pnpm cli:exit:verify`（只读门，跑在 PGlite 沙箱上）
+   * 在薄宿主下**起不来** ⇒ 报「薄宿主只支持 PostgreSQL 后端」。
+   * ⇒ 只读命令 / 沙箱实验被迫留在旧宿主上，那等于**没有换干净**。
+   *
+   * 现在的做法：按后端显式二选一，**两个都给真句柄，不做回落**；
+   * 两个都不成立时**具名失败**（不说"不支持 PGlite"这种半真话）。
+   */
+  let pool: { query: (t: string, v?: unknown[]) => Promise<unknown>; end?: () => Promise<void>; ended?: boolean }
+  if (url !== '') {
+    // 生产 PG 池：与旧宿主同量级（plugin-sql 的 pg.Pool 缺省 max=10）
+    pool = new pg.Pool({ connectionString: url, max: 10 })
+  } else if (backend === 'pglite' && dataDir !== '') {
+    // PGlite：与旧宿主同一条路径（plugin-sql 也是这么建 PGlite 的）
+    pool = new PglitePool(dataDir)
+  } else {
     throw new Error(
-      '[thin-host] 薄宿主只支持 PostgreSQL 后端，但 POSTGRES_URL 为空。\n' +
-        '（PGlite 是 plugin-sql 的嵌入式库，薄宿主不经它 —— 请用真实 PostgreSQL。）'
+      '[thin-host] 没有可用的数据库连接。\n' +
+        `  CHARACTER_DB_BACKEND=${backend === '' ? '(未设置)' : backend}` +
+        ` · POSTGRES_URL=${url === '' ? '(空)' : '(有)'}` +
+        ` · PGLITE_DATA_DIR=${dataDir === '' ? '(空)' : '(有)'}\n` +
+        '  需要二者之一：postgres（给 POSTGRES_URL）或 pglite（给 PGLITE_DATA_DIR）。\n' +
+        '  （本次没有改动任何数据。）'
     )
   }
-  // 生产 PG 池：与旧宿主同量级（plugin-sql 的 pg.Pool 缺省 max=10）
-  const pool = new pg.Pool({ connectionString: url, max: 10 })
+
   const host = new ThinHostRuntime({
     character: options.character,
     agentId: options.agentId,
@@ -81,6 +112,61 @@ export function createThinHostRuntime(options: ThinHostFactoryOptions): AgentRun
   // ⚠️ 类型标注是上游 `AgentRuntime`，靠**结构兼容**通过 —— 这就是"换实现不换接口"。
   //    调用点（51 处）因此一行不改。
   return host as unknown as AgentRuntime
+}
+
+/**
+ * PGlite 连接池 —— 与 `getRawDb()` 需要的形状对齐。
+ *
+ * ⚠️ **不用** `@electric-sql/pglite` 直接 import：它只是 `plugin-sql` 的传递依赖，
+ *    本仓库没有直接声明（pnpm 严格依赖隔离 ⇒ 直接 import 会 ERR_MODULE_NOT_FOUND）。
+ *    因此这里用 `createRequire` 按 plugin-sql 的**同一份**解析，避免装出第二个 PGlite 实例
+ *    （两个实例指向同一个目录会互相损坏 —— 这正是 `src/dev/sandbox.ts` 记的进程级单例坑）。
+ */
+class PglitePool {
+  private clientPromise: Promise<unknown> | undefined
+  private closed = false
+
+  constructor(private readonly dataDir: string) {}
+
+  private async client(): Promise<{
+    query: (t: string, v?: unknown[]) => Promise<unknown>
+    close: () => Promise<void>
+  }> {
+    if (this.clientPromise === undefined) {
+      const requireFromHere = createRequire(import.meta.url)
+      const resolved = requireFromHere.resolve('@electric-sql/pglite')
+      const mod = (requireFromHere(resolved) as { PGlite: new (d: string) => unknown }).PGlite
+      this.clientPromise = (async () => {
+        const c = new mod(this.dataDir) as {
+          query: (t: string, v?: unknown[]) => Promise<unknown>
+          waitReady: Promise<void>
+          close: () => Promise<void>
+        }
+        await c.waitReady
+        return c
+      })()
+    }
+    return this.clientPromise as Promise<{
+      query: (t: string, v?: unknown[]) => Promise<unknown>
+      close: () => Promise<void>
+    }>
+  }
+
+  async query(text: string, values?: unknown[]): Promise<unknown> {
+    const c = await this.client()
+    return c.query(text, values as never[])
+  }
+
+  async end(): Promise<void> {
+    if (this.closed) return
+    this.closed = true
+    const c = await this.client()
+    await c.close()
+  }
+
+  get ended(): boolean {
+    return this.closed
+  }
 }
 
 /** 当前进程实际在用的宿主（日志与读数都要靠它，不能猜） */

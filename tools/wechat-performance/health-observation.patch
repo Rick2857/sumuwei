@@ -1,0 +1,82 @@
+--- a/src/sessions/health_monitor.rs
++++ b/src/sessions/health_monitor.rs
+@@ -10,6 +10,14 @@
+ 
+ /// How often to run the health scan (in seconds).
+ const SCAN_INTERVAL_SECS: u64 = 1;
++
++// Process crash checks stay fast; healthy UI observations need not traverse the desktop every second.
++const HEALTHY_OBSERVATION_INTERVAL_SECS: u64 = 10;
++
++fn observation_due(last: Option<Instant>, now: Instant) -> bool {
++    last.map(|at| now.duration_since(at).as_secs() >= HEALTHY_OBSERVATION_INTERVAL_SECS)
++        .unwrap_or(true)
++}
+ 
+ /// Kill WeChat if no IA state has been identified for this long (in seconds).
+ const UNRESPONSIVE_TIMEOUT_SECS: u64 = 60;
+@@ -62,6 +70,7 @@
+         tracing::info!("[health] WeChat health monitor started");
+ 
+         let mut last_identified = Instant::now();
++        let mut last_observed: Option<Instant> = None;
+         let mut was_running = false;
+         let mut restart_count: u32 = 0;
+         let mut window_start = Instant::now();
+@@ -89,6 +98,7 @@
+             let wechat_pid = match find_wechat_pid() {
+                 Some(pid) => {
+                     if !was_running {
++                        last_observed = None;
+                         tracing::info!("[health] WeChat process found (pid={})", pid);
+                         was_running = true;
+                         waiting_restart_since = None;
+@@ -137,6 +147,11 @@
+             };
+ 
+             // Run a11y + identify to see if we can detect any state
++            let now = Instant::now();
++            if !observation_due(last_observed, now) {
++                continue;
++            }
++            last_observed = Some(now);
+             let exec_options = ExecOptions {
+                 session: Some(session.clone()),
+                 timeout_ms: 10_000,
+@@ -145,6 +160,7 @@
+             let a11y = match get_a11y_desktop(&exec_options).await {
+                 Ok(tree) => tree,
+                 Err(_) => {
++                    last_observed = None;
+                     // a11y failed — count as unresponsive, don't reset timer
+                     check_and_kill(wechat_pid, &last_identified);
+                     continue;
+@@ -160,11 +176,28 @@
+                 // State identified — WeChat is responsive
+                 last_identified = Instant::now();
+             } else {
++                last_observed = None;
+                 // No state identified — check timeout
+                 check_and_kill(wechat_pid, &last_identified);
+             }
+         }
+     });
++}
++
++#[cfg(test)]
++mod cadence_tests {
++    use super::*;
++    use std::time::Duration;
++
++    #[test]
++    fn first_failure_and_restart_are_immediate_but_healthy_scans_are_bounded() {
++        let now = Instant::now();
++        assert!(observation_due(None, now));
++        assert!(!observation_due(Some(now), now + Duration::from_secs(1)));
++        assert!(!observation_due(Some(now), now + Duration::from_secs(9)));
++        assert!(observation_due(Some(now), now + Duration::from_secs(10)));
++        assert!(observation_due(Some(now), now + Duration::from_secs(11)));
++    }
+ }
+ 
+ /// If time since last identified state exceeds the timeout, kill the WeChat process.

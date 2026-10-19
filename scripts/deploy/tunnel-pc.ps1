@@ -56,7 +56,19 @@ param(
     [string] $IdentityFile = "$env:USERPROFILE\.ssh\lg_tunnel_ed25519",
     [int] $KeepAliveSeconds = 30,
     [int] $ReconnectDelaySeconds = 5,
-    [int] $MaxAttempts = 0   # 0 = 一直重连
+    [int] $MaxAttempts = 0,   # 0 = 一直重连
+    <#
+    ADR-146 `R-146` ③：执行端的**第二个**反向转发（复用同一条 SSH 连接）。
+    ⚠️ 两个都必须给；只给一个会被脚本拒（见下方校验）。
+
+    ⚠️⚠️ 类型**必须**是 `[Nullable[int]]`，不能写 `[int]`：
+    ⚠️⚠️   `[int] $X = $null` 在 PowerShell 里得到的是 **0**，不是 `$null`。
+    ⚠️⚠️   ⇒ `$null -ne $X` 恒为真 ⇒ 不传参数也会进"执行端"分支，
+    ⚠️⚠️     然后被判"端口 0 不在 1024-65535" ⇒ **脚本直接退出**。
+    ⚠️⚠️   本轮自己的负控当场抓到（原注释写的"缺省不影响今天的行为"是句假话）。
+    #>
+    [Nullable[int]] $ExecutorServerPort = $null,
+    [Nullable[int]] $ExecutorPcPort = $null
 )
 
 $ErrorActionPreference = 'Stop'
@@ -83,6 +95,38 @@ if ($ServerPort -lt 1024 -or $ServerPort -gt 65535) { Write-Fail "ServerPort 必
 if ($PcPort    -lt 1     -or $PcPort    -gt 65535) { Write-Fail "PcPort 不合法"; exit 2 }
 
 # ---------------------------------------------------------------------------
+# 执行端那条转发（2026-10-17 · ADR-146 `R-146` ③：复用现有隧道，**新开一个端口**）
+# ---------------------------------------------------------------------------
+# ⚠️ 裁定是"**复用现有 SSH 隧道**，新开一个端口" ⇒ **一条 SSH 连接、两个 `-R`**：
+#     服务器 127.0.0.1:<ServerPort>          → 电脑 <聊天/皮套服务>
+#     服务器 127.0.0.1:<ExecutorServerPort>  → 电脑 <执行端>
+#
+#   为什么值得多一个端口，而不是让执行端复用聊天那条：
+#   两边是**两个独立的服务端口**，核心可以分别判断"皮套在不在"和"执行端在不在"，
+#   而不必靠"这条连接上有没有多一个人在说话"去猜。
+#   ⚠️ 但它们**共享同一条 TCP 连接**的心跳 ⇒ 电脑休眠 ⇒ **两条一起断**。
+#     这是"复用隧道"这个裁定的**必然代价**，不是可以两全的事；如实记为 `L-146-03`。
+#
+# ⚠️ 两组参数**必须同时给或同时不给** —— 只给一半会开出一条没有对端的转发，
+#   表现为"服务器上端口在听，但连上去没人应答"。那种形状比"没这条隧道"更难查。
+if (($null -eq $ExecutorServerPort) -ne ($null -eq $ExecutorPcPort)) {
+    Write-Fail "ExecutorServerPort 与 ExecutorPcPort 必须**同时**给或同时不给（只给一半会开出一条没有对端的转发）"
+    exit 2
+}
+if ($null -ne $ExecutorServerPort) {
+    if ($ExecutorServerPort -lt 1024 -or $ExecutorServerPort -gt 65535) {
+        Write-Fail "ExecutorServerPort 必须在 1024-65535"; exit 2
+    }
+    if ($ExecutorServerPort -eq $ServerPort) {
+        Write-Fail "ExecutorServerPort 不能与 ServerPort 相同（$ServerPort）—— 两条转发会互相覆盖"; exit 2
+    }
+    if ($ExecutorPcPort -lt 1 -or $ExecutorPcPort -gt 65535) { Write-Fail "ExecutorPcPort 不合法"; exit 2 }
+    if ($ExecutorPcPort -eq $PcPort) {
+        Write-Fail "ExecutorPcPort 不能与 PcPort 相同（$PcPort）—— 两条转发指向同一个本地服务"; exit 2
+    }
+}
+
+# ---------------------------------------------------------------------------
 # 隧道参数（逐条都有理由，不是抄来的）
 # ---------------------------------------------------------------------------
 $args = @(
@@ -107,10 +151,28 @@ $args = @(
     '-R', "${ServerPort}:127.0.0.1:${PcPort}"
     $Server
 )
+# ⚠️ 第二条转发加进**同一个** ssh 调用里（ssh 允许多个 -R），
+#   因为 `R-146` ③ 的裁定就是"**复用现有 SSH 隧道**，新开一个端口" ——
+#   是一条连接、两个服务端端口，**不是**两条连接。
+#   ⚠️ 别改成两次 ssh 调用：那就成了两条连接，而"一条连接"正是这条裁定要的
+#   （电脑只需要一条出站、服务器只需要一条心跳）。
+#   ⚠️ 也别改成两条隧道脚本：端口对不上时错误信息会指到错的那条上。
+if ($null -ne $ExecutorServerPort) {
+    # -R 必须放在服务器名**之前**，所以要把服务器名摘掉、加完再放回去
+    $target = $args[$args.Count - 1]
+    $args = $args[0..($args.Count - 2)]
+    $args += @('-R', "${ExecutorServerPort}:127.0.0.1:${ExecutorPcPort}", $target)
+}
 
 Write-Stage "电脑 → 服务器 反向隧道"
 Write-Stage "  服务器端点 : 127.0.0.1:$ServerPort"
 Write-Stage "  电脑端点   : 127.0.0.1:$PcPort"
+if ($null -ne $ExecutorServerPort) {
+    Write-Stage "  执行端     : 服务器 127.0.0.1:$ExecutorServerPort -> 电脑 127.0.0.1:$ExecutorPcPort"
+    Write-Stage "              （**同一条** SSH 连接上的第二个 -R）"
+    Write-Stage "              ⚠️ 两条共享心跳 ⇒ 电脑休眠会**两条一起断**（L-146-03）"
+    Write-Stage "    上线后核对：ss -ltnp | grep ':$ExecutorServerPort'   # 期望 127.0.0.1，不是 0.0.0.0"
+}
 Write-Stage "  密钥       : $IdentityFile"
 Write-Stage "  心跳       : ${KeepAliveSeconds}s × 3"
 Write-Stage ""

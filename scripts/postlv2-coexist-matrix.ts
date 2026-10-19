@@ -29,6 +29,7 @@ import {
 } from './coexist/harness.ts'
 import { cleanupSandbox, isolateDatabase, PRODUCTION_DB_DIR } from '../src/dev/sandbox.ts'
 import { digestTree, openRawPGlite } from '../src/infrastructure/persistence/production-db-safety.ts'
+import { ENTRY_PROTOCOL_VERSION } from '../src/infrastructure/qq/entry-handshake.ts'
 
 const recorder = createRecorder()
 const { check, observe, notRun, notApplicable } = recorder
@@ -312,7 +313,7 @@ const short = (text: string, limit = 100): string =>
     const bad = connect({ host: '127.0.0.1', port: host.qqPort })
     const badReader = new LineReader(bad)
     await new Promise<void>((done) => bad.once('connect', () => done()))
-    bad.write(`LG_ENTRY ${host.qqToken}\n`)
+    bad.write(`LG_ENTRY ${host.qqToken} v${ENTRY_PROTOCOL_VERSION}\n`)
     await badReader.next()
     bad.write('{ not json at all\n')
     const malformed = await badReader.next()

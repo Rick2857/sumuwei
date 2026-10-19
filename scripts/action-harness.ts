@@ -113,6 +113,7 @@ export function createReporter(): Reporter {
 // ---------------------------------------------------------------------------
 
 export interface ActionTestBedOptions {
+  delegator?: ActionGatewayOptions['delegator']
   label: string
   /** 额外登记的能力（故障注入 / 部分成功用） */
   extraCapabilities?: readonly CapabilityDefinition[]
@@ -202,6 +203,7 @@ export async function createActionTestBed(options: ActionTestBedOptions): Promis
   const sandboxOptions = { root: sandboxRoot }
 
   const gateway = createActionGateway({
+    ...(options.delegator ? { delegator: options.delegator } : {}),
     registry,
     ledger,
     adapters: [

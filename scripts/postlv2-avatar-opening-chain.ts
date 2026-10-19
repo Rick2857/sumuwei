@@ -46,6 +46,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { createRecorder, freePort, startFakeModel, writeEvidence, ROOT } from './coexist/harness.ts'
 import { cleanupSandbox, isolateDatabase } from '../src/dev/sandbox.ts'
 import { latestSchemaVersion } from '../src/infrastructure/persistence/migrations.ts'
+import { ENTRY_PROTOCOL_VERSION } from '../src/infrastructure/qq/entry-handshake.ts'
 
 const recorder = createRecorder()
 const { check, observe, notRun } = recorder
@@ -86,7 +87,7 @@ class MinimalOpeningShell {
       socket.once('error', fail)
     })
     const shell = new MinimalOpeningShell(socket)
-    shell.write(`LG_ENTRY ${token}`)
+    shell.write(`LG_ENTRY ${token} v${ENTRY_PROTOCOL_VERSION}`)
     const hello = await shell.nextLine(10_000)
     if (hello === undefined || !hello.startsWith('LG_ENTRY_READY')) {
       throw new Error(`handshake_failed:${hello ?? 'timeout'}`)

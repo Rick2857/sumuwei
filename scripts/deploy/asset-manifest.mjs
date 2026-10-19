@@ -70,7 +70,7 @@
  *  2. **缺失就如实记 `missing: true`，不失败。**
  *     开发机可能根本没下过模型（`m9.5:embedding:download` 是可选项）。
  *     一个诚实的"没有"比一个假的"失败"有用得多。
- *  3. **`--verify` 的退出码只对 `model/resource/config` 说话。**
+ *  3. **`--verify` 的退出码覆盖源码清单与 `model/resource/config`。**
  *     `rebuild` 类在服务器上"不存在"是**正常状态**（这正是要点），
  *     把它算作 FAIL 会让门永远红。需要严格时用 `--strict-rebuild`。
  *  4. **不碰生产数据库。** 本脚本只读文件系统 + package.json + .gitignore。
@@ -99,8 +99,9 @@ import { createReadStream } from 'node:fs'
 import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, existsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { sourceManifest, verifySourceManifest } from './source-manifest.mjs'
 
-const SCHEMA_VERSION = 'deploy-asset-manifest@1'
+const SCHEMA_VERSION = 'deploy-asset-manifest@2'
 const SCRIPT_PATH = fileURLToPath(import.meta.url)
 const DEFAULT_ROOT = resolve(dirname(SCRIPT_PATH), '..', '..')
 const DEFAULT_OUT = 'artifacts/deploy/local/asset-manifest.json'
@@ -612,6 +613,7 @@ async function buildManifest(root, opts) {
 
   return {
     schemaVersion: SCHEMA_VERSION,
+    source: sourceManifest(root),
     generator: 'scripts/deploy/asset-manifest.mjs',
     generatedAt: new Date().toISOString(),
     repoRoot: root,
@@ -650,7 +652,8 @@ async function verifyManifest(root, manifestPath, opts) {
   }
 
   const rows = []
-  let failures = 0
+  let failures = verifySourceManifest(root, manifest.source) ? 0 : 1
+  console.log(failures ? 'FAIL source files changed/missing or manifest invalid' : 'PASS source tree fingerprint')
   let hashed = 0
 
   for (const e of manifest.entries ?? []) {

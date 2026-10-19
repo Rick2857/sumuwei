@@ -3,6 +3,7 @@ import { createInterface } from 'node:readline'
 import { createInterface as createPrompt } from 'node:readline/promises'
 import { randomUUID } from 'node:crypto'
 import { ensureEntryTokens } from './readiness.ts'
+import { ENTRY_PROTOCOL_VERSION } from '../../src/infrastructure/qq/entry-handshake.ts'
 
 const tokens = process.env.CHARACTER_COEXIST_CLI_TOKEN && process.env.CHARACTER_COEXIST_CLI_PORT
   ? { cli: process.env.CHARACTER_COEXIST_CLI_TOKEN, cliPort: Number(process.env.CHARACTER_COEXIST_CLI_PORT) }
@@ -13,7 +14,7 @@ const lines = createInterface({ input: socket })
 const pending = new Map<string, { resolve: (text: string) => void; reject: (error: Error) => void }>()
 const displayed = new Set<string>()
 const ready = new Promise<void>((resolve, reject) => {
-  socket.once('connect', () => socket.write(`LG_ENTRY ${tokens.cli}\n`))
+  socket.once('connect', () => socket.write(`LG_ENTRY ${tokens.cli} v${ENTRY_PROTOCOL_VERSION}\n`))
   socket.once('error', reject)
   lines.on('line', line => {
     if (line.startsWith('LG_ENTRY_READY cli ')) { resolve(); return }

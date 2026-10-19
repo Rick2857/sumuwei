@@ -10,9 +10,9 @@
 
 本仓库是经过脱敏的公开源码发行副本，采用 **Apache-2.0**。它包含当前实现、脚本、合成测试夹具和技术文档。个人标识及教育背景示例已替换为虚构值；角色设定保留。
 
-## 当前进展（服务器源码快照，2026-10-18 发布）
+## 当前进展（2026-10-19 源码更新）
 
-本次内容以已运行服务器的源码快照为来源，新增 Linux 生命周期/进程清理、文档和数学 worker 适配、微信桥接适配器及服务器部署工具；包含发布期间服务器新增的启动 DDL 解耦与可选薄 Node 宿主。公开副本仍需配置接收者自己的 PostgreSQL、模型、账号与资源。发布不重启原服务器，也不包含其数据或凭据。
+本次在 2026-10-18 服务器发行版上合入已提交开发源码的脱敏增量，增加同快照备份 v2、远程动作回执结算、依赖健康与源码指纹，及薄宿主收尾和回归检查。可选薄 Node 宿主缺省仍关闭，ElizaOS 依赖仍在；后续卸载计划保持[草案状态](docs/DEPENDENCY-REMOVAL-PLAN.md)。公开副本仍需配置接收者自己的 PostgreSQL、模型、账号与资源，发布不包含原环境数据或凭据。功能与使用边界见[三个能力说明](docs/PRIORITY-THREE.md)。
 
 | 范围 | 状态与边界 |
 |---|---|
@@ -32,7 +32,7 @@
 
 ## 兼容的本地最小使用
 
-以下是创建新 PGlite 实验库的兼容用法，适合本地验证；服务器长期运行优先使用独立 PostgreSQL。原个人电脑版请使用 `desktop` 分支。
+以下保留创建新 PGlite 库的历史运行兼容入口，不用于后续数据库测试验收；服务器长期运行与后续测试使用独立 PostgreSQL。原个人电脑版请使用 `desktop` 分支。
 
 ```powershell
 pnpm install --frozen-lockfile
@@ -61,7 +61,7 @@ QQ 配置模板见 `.env.qq.example`。联网、桌面、本机文件、后台�
 
 ## 长期部署：PostgreSQL
 
-长期运行、在线管理和备份可使用独立 PostgreSQL + pgvector。代码保留 PGlite 缺省以兼容本地初始化与离线测试；切换需要显式配置，不会因为环境中碰巧有连接串就静默换库。
+长期运行、在线管理和备份可使用独立 PostgreSQL + pgvector。代码保留 PGlite 缺省以兼容历史运行工具；后续数据库验收统一隔离 PostgreSQL，旧 PGlite 测试入口待迁移。切换需要显式配置，不会因为环境中碰巧有连接串就静默换库。
 
 在自己的数据库完成扩展、schema 和账号准备后，在本地 `.env` 中设置：
 
@@ -71,7 +71,7 @@ POSTGRES_URL=postgresql://YOUR_USER:YOUR_PASSWORD@127.0.0.1:55432/YOUR_DATABASE
 LG_PG_EXPECT_DATABASE=YOUR_DATABASE
 ```
 
-连接串必须填自己的值并保留在本地。`db:init` 仅创建本 checkout 的全新 PGlite 测试库，会拒绝外部数据库配置；它不会初始化、导入或覆盖 PostgreSQL。已有 PGlite 数据需要按[迁移计划](docs/post-lv2/PostgreSQL-Migration-Execution-Plan-2026-10-12.md)和[Runbook](docs/post-lv2/PostgreSQL-Migration-Runbook.md)单独演练、备份及切换，不能只改连接串就宣称数据已迁移。
+连接串必须填自己的值并保留在本地。`db:init` 仅保留创建本 checkout 全新 PGlite 库的兼容功能，会拒绝外部数据库配置；它不会初始化、导入或覆盖 PostgreSQL，也不用于当前测试验收。已有 PGlite 数据需要按[迁移计划](docs/post-lv2/PostgreSQL-Migration-Execution-Plan-2026-10-12.md)和[Runbook](docs/post-lv2/PostgreSQL-Migration-Runbook.md)单独演练、备份及切换，不能只改连接串就宣称数据已迁移。
 
 `scripts/postgresql/compose.yml` 是固定镜像、loopback 绑定的试验配置，不是通用生产部署器；使用前确认容器、卷、端口和凭据文件属于自己的隔离环境。试验角色与授权脚本在同目录。启动期 DDL 仍限制运行/迁移账号分离，当前单核心资格也不等于多写核心并发已验收。见[维护手册](docs/post-lv2/PostgreSQL-Migration-Maintenance-Manual.md)和[已知局限](docs/post-lv2/PostgreSQL-Migration-Known-Limitations.md)。
 
@@ -91,13 +91,13 @@ LG_PG_EXPECT_DATABASE=YOUR_DATABASE
 
 ```powershell
 pnpm typecheck
-pnpm ci:offline
+pnpm ci:source
 pnpm postgresql:g01:verify
 ```
 
-`ci:offline` 只用于没有 `.env*` 真实配置和 `data/` 的新 checkout：先创建并关闭空的合成测试库，再经受控迁移入口验证和关闭，再运行原有 `m4.5:ci`。已有运行数据时它会拒绝启动，请另用测试 checkout。
+`ci:source` 只用于没有真实配置与数据的新 checkout：类型、脚本清单、薄宿主接线/接口/退役/UUID、工具依赖与源码清单、进程清理检查，不打开数据库。托管 workflow 使用该有限检查链。旧 `ci:offline` 因仍依赖 PGlite，现以非零退出明确拒绝；迁移至隔离 PostgreSQL 前，完整数据库回归为 NOT RUN。
 
-`m4.5:ci` 运行离线回归并读取门结果。最后的汇总器退出码为零不代表所有 live 门通过；缺少真实链证据时 G14 应显示 `not-run`。不要提交伪造的 PASS 文件来消除这个状态。提示能力审计会检查当前源码；未公开的原运行 prompt 归档检查应显示 `NOT RUN`。
+历史 `m4.5:ci` 的聚合器退出码为零也不代表所有 live 门通过；后续重跑其数据库部分前须先迁移测试后端。缺少真实链证据时 G14 为 `not-run`，不能复制历史 PASS 文件补绿。当前发行的专项检查与历史全量读数分别记录在 [PUBLIC-VERIFICATION.md](docs/PUBLIC-VERIFICATION.md)。
 
 `postgresql:g01:verify` 验证配置/目标隔离的程序判据，不打开数据库；真正需要 PostgreSQL、迁移源副本或模型的检查另有前置条件。不要在装有生产配置的 checkout 中直接批量运行迁移/切换脚本，也不能把无凭据的 NOT RUN 当成真实 PG 验证通过。
 
@@ -105,7 +105,7 @@ pnpm postgresql:g01:verify
 
 ## 数据与许可
 
-仓库不包含原数据库、对话记录、凭证、模型权重、Live2D 模型、展示截图或声音样本。两个 1 像素 PNG 是合成测试夹具。
+仓库不包含原数据库、对话记录、凭证、模型权重、Live2D 模型、展示截图或声音样本。两张既有 PNG 是合成测试夹具，本次保持其公开版本原始字节。
 
 历史技术文档中的里程碑结论与生产激活记录属于原开发环境；其中的旧提交、hash、未随仓库公开的证据路径不能用作本副本的验证结论。当前发行副本的读数会单独记录。
 

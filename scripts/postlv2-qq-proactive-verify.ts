@@ -17,6 +17,7 @@ import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { createServer } from 'node:net'
 import { resolve } from 'node:path'
+import { ENTRY_PROTOCOL_VERSION } from '../src/infrastructure/qq/entry-handshake.ts'
 import { sql } from 'drizzle-orm'
 import { AgentRuntime, type Character, type Plugin } from '@elizaos/core'
 import sqlPlugin from '@elizaos/plugin-sql'
@@ -1760,7 +1761,7 @@ section('18. WP5-B 外壳侧端到端：模拟 OneBot + 假核心 ⇒ 真的调�
         const line = buffer.slice(0, at)
         buffer = buffer.slice(at + 1)
         if (!handshaken) {
-          handshaken = line.trim() === `LG_ENTRY ${COEXIST_TOKEN}`
+          handshaken = line.trim() === `LG_ENTRY ${COEXIST_TOKEN} v${ENTRY_PROTOCOL_VERSION}`
           socket.write(`LG_ENTRY_READY qq_private dm-wp5-qq\n`)
           continue
         }

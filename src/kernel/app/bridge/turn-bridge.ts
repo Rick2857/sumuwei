@@ -768,7 +768,7 @@ export class TurnBridge {
     return this.host.cancelTurn?.bind(this.host)
   }
 
-  /** ADR-146：执行端回的动���结果（**可选**；缺席时桥如实说"没有这个能力"） */
+  /** ADR-146：执行端回的动作结果（**可选**；缺席时桥如实说"没有这个能力"） */
   get hostActionResult(): TurnBridgeHost['actionResult'] {
     return this.host.actionResult?.bind(this.host)
   }

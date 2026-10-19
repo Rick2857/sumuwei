@@ -30,6 +30,18 @@
  *    （本机固定回复夹具）；**不连真实 QQ / 皮套**。
  */
 import assert from 'node:assert/strict'
+
+/*
+ * ⚠️ **核心日志的全局尾**（2026-10-18 补）。
+ *
+ * 起因：入口换手超时（`entry_exchange_timeout`）时，**门只说"超时"，不说"核心那边发生了什么"**
+ *    —— 而核心的 stdout/stderr 只在证据文件里（那要等门跑完才写）⇒ 异常路径上**看不到任何线索**。
+ *    这违反"量具不许骗人"：输出里看不到哪一条挂了、报什么。
+ *
+ * ⇒ 做法：核心的每一行 stdout/stderr 都进这里，超时异常里带上尾 25 行。
+ */
+const coreLog: string[] = []
+const coreLogTail = (): string => coreLog.slice(-25).join('\n')
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { createServer as createHttpServer } from 'node:http'
 import { createServer as createNetServer, connect as connectNet, type Server, type Socket } from 'node:net'
@@ -37,6 +49,7 @@ import { createInterface } from 'node:readline'
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
+import { ENTRY_PROTOCOL_VERSION } from '../src/infrastructure/qq/entry-handshake.ts'
 import { setTimeout as delay } from 'node:timers/promises'
 import {
   CHAT_ENTRY_KEYS,
@@ -238,7 +251,7 @@ class EntryShell {
         this.socket.once('connect', () => done())
         this.socket.once('error', reject)
       })
-      this.socket.write(`LG_ENTRY ${token}\n`)
+      this.socket.write(`LG_ENTRY ${token} v${ENTRY_PROTOCOL_VERSION}\n`)
       const hello = await this.reader.next()
       if (hello === undefined) throw new Error('entry_handshake_no_response')
       if (!hello.startsWith('LG_ENTRY_READY')) throw new Error(`entry_handshake_failed: ${hello}`)
@@ -280,7 +293,7 @@ class EntryShell {
     const result = await Promise.race([
       answer,
       delay(120_000).then(() => {
-        throw new Error(`entry_exchange_timeout: ${requestId}`)
+        throw new Error(`entry_exchange_timeout: ${requestId}\n--- core log tail ---\n${coreLogTail()}`)
       }),
     ])
     assert.equal(result.kind, expectKind, `${requestId} 期望 ${expectKind}，收到 ${String(result.kind)}`)
@@ -416,8 +429,8 @@ try {
   )
   const stdout: string[] = []
   const stderr: string[] = []
-  createInterface({ input: child.stdout, crlfDelay: Infinity }).on('line', (line) => stdout.push(line))
-  createInterface({ input: child.stderr, crlfDelay: Infinity }).on('line', (line) => stderr.push(line))
+  createInterface({ input: child.stdout, crlfDelay: Infinity }).on('line', (line) => { stdout.push(line); coreLog.push(line) })
+  createInterface({ input: child.stderr, crlfDelay: Infinity }).on('line', (line) => { stderr.push(line); coreLog.push(line) })
   const exited = new Promise<number | null>((done) => child!.once('close', (code) => done(code)))
 
   const waitForReady = async (): Promise<void> => {
@@ -536,7 +549,7 @@ try {
     const rogue = connectNet({ host: '127.0.0.1', port: qqPort })
     const rogueReader = new LineReader(rogue)
     await new Promise<void>((done) => rogue.once('connect', () => done()))
-    rogue.write(`LG_ENTRY ${qqToken}\n`)
+    rogue.write(`LG_ENTRY ${qqToken} v${ENTRY_PROTOCOL_VERSION}\n`)
     await rogueReader.next()
     rogue.write('{ this is not json\n')
     const rejected = await rogueReader.next()

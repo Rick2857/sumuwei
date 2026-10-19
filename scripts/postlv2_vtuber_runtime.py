@@ -369,7 +369,11 @@ class LGBridgeClient:
         if not token:
             raise RuntimeError("连接档必须带 token：共享核心拒绝无鉴权的入口")
         self.socket_reader, self.socket_writer = await asyncio.open_connection(host, port)
-        self.socket_writer.write(("LG_ENTRY " + token + "\n").encode("utf-8"))
+        # 入口握手要带协议版本（ADR-146 D07）：缺版本 => 核心回
+        # "protocol_version_unsupported" 并拒绝连接。
+        # ⚠️ Python 侧读不到 TS 的常量，这里与 ENTRY_PROTOCOL_VERSION 同值（1）；
+        #    改版本时两处必须一起改（src/infrastructure/qq/entry-handshake.ts）。
+        self.socket_writer.write(("LG_ENTRY " + token + " v1\n").encode("utf-8"))
         await self.socket_writer.drain()
         hello = await self.socket_reader.readline()
         text = hello.decode("utf-8", errors="replace").strip()

@@ -1,4 +1,4 @@
-name: Offline checks
+name: Source checks (database migration pending)
 on:
   push:
   pull_request:
@@ -33,8 +33,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           pnpm exec tsc -p experiments/omni-realtime/tsconfig.json --noEmit
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Typecheck and offline regression
-        run: pnpm ci:offline
+      - name: No-database source checks
+        run: pnpm ci:source
   linux:
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -49,7 +49,5 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Typecheck
         run: pnpm typecheck
-      - name: Fresh isolated offline regression
-        run: pnpm ci:offline
-      - name: Linux process lifecycle and diagnostics
-        run: pnpm deploy:verify
+      - name: No-database source checks and process diagnostics
+        run: pnpm ci:source

@@ -160,7 +160,7 @@ export function revalidateAgainstSnapshot(
   }
 
   // ④ 序号在，但**控件名对不上** ⇒ 那就是点到了别的东西
-  //    ⚠️ 线上带控件名时才有这一条；核心没给名就跳��（"没给" ≠ "不用核对"，
+  //    ⚠️ 线上带控件名时才有这一条；核心没给名就跳过（"没给" ≠ "不用核对"，
   //    但也没有可比的基准 —— 那由核心侧保证给全，执行端如实说"这一条我核不了"）
   const claimedName = request.name
   if (typeof claimedName === 'string' && claimedName !== '' && claimedName !== element.name) {

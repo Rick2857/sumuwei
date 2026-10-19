@@ -88,7 +88,7 @@ export function verifyEntryHandshake(line: string | undefined, expectedToken: st
   if (trimmed === '') return { ok: false, code: 'empty' }
   if (!trimmed.startsWith(ENTRY_HANDSHAKE_PREFIX)) return { ok: false, code: 'malformed' }
 
-  // 尾��是可选的 `v<主版本>`
+  // 尾巴是可选的 `v<主版本>`
   const rest = trimmed.slice(ENTRY_HANDSHAKE_PREFIX.length)
   const parts = rest.split(' ')
   const presented = parts[0] ?? ''

@@ -6,7 +6,7 @@ Read `docs/architecture/invariants.md` before changing architecture or persisten
 
 Keep changes surgical. Use isolated databases for tests. Never copy production data into test fixtures, logs, screenshots, commits or bug reports.
 
-Run `pnpm typecheck` and relevant checks for code changes. Before delivery run `pnpm m4.5:ci`; inspect the reported hard-gate statuses separately from its exit code. The aggregator can exit zero with a live gate marked not-run.
+Run `pnpm typecheck` and relevant checks for code changes. Subsequent database tests must use isolated PostgreSQL, never production or a PGlite fallback. Existing PGlite test entries await migration; do not rerun them. Preserve historical PGlite evidence as `backend=pglite / historical`, never as PostgreSQL acceptance. `pnpm ci:source` runs only the listed no-database checks; full `m4.5:ci` and live gates are NOT RUN until the relevant database harnesses migrate. `pnpm ci:offline` refuses the legacy database lane explicitly. Historical aggregator exit zero could include a live gate marked not-run.
 
 Historical documentation describes the original development repository; its source hashes, commit references and production activation statements do not prove this distribution was activated or that a fresh test run passed. See `docs/PUBLIC-DISTRIBUTION.md`.
 

@@ -20,6 +20,7 @@ import { createInterface } from 'node:readline'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
+import { ENTRY_PROTOCOL_VERSION } from '../../src/infrastructure/qq/entry-handshake.ts'
 
 export const ROOT = resolve(import.meta.dirname, '..', '..')
 export { delay }
@@ -147,7 +148,7 @@ export class EntryShell {
         this.socket.once('connect', () => done())
         this.socket.once('error', reject)
       })
-      this.socket.write(`LG_ENTRY ${token}\n`)
+      this.socket.write(`LG_ENTRY ${token} v${ENTRY_PROTOCOL_VERSION}\n`)
       const hello = await this.reader.next()
       if (hello === undefined) throw new Error('entry_handshake_no_response')
       if (!hello.startsWith('LG_ENTRY_READY')) throw new Error(`entry_handshake_failed: ${hello}`)

@@ -164,6 +164,8 @@ export interface ActionEffect {
      * ⚠️ 按上面 `message_sent` 的先例**新增**（"这个闭集按需扩"），不是替换既有值。
      */
     | 'action_delegated'
+    /** PC execution receipt confirmed completion before the terminal ledger event. */
+    | 'action_completed_remote'
   /** 人类可读说明 */
   detail?: string
   /** 机器可比对的指纹（如文件内容的 sha256 前缀）—— "外部状态真的变了吗"的判据 */

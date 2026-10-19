@@ -25,7 +25,6 @@ import {
   EventType,
   ModelType,
   logger,
-  stringToUuid,
   type Memory,
   type Plugin,
   type UUID,
@@ -33,6 +32,19 @@ import {
 import sqlPlugin from '@elizaos/plugin-sql'
 import openaiPlugin from '@elizaos/plugin-openai'
 import bootstrapPlugin from '@elizaos/plugin-bootstrap'
+
+/*
+ * ⚠️ `stringToUuid` 已从 ElizaOS 独立出来（2026-10-18）。
+ *
+ * 为什么它必须独立：这个函数决定生产库里**每一个**身份/房间/消息 id 的推导
+ * （`user-*` / `agent-entity-*` / `world-*` / `room-*` / `msg-*`），
+ * 差一位 ⇒ 同一个人算出不同 id ⇒ 记忆读不出来。
+ *
+ * 逐值比对证明（`pnpm thinhost:uuid:parity`，25 个用例**逐字节一致**）：
+ * ⚠️ 上游把 UUID 版本位**清成 0**，不是设成 5 —— 第一版照"标准 v5"写就全错，
+ *    是这道门把它抓出来的。见 `src/kernel/contracts/uuid.ts`。
+ */
+import { stringToUuid } from './kernel/contracts/uuid.ts'
 
 import { character } from './character/index.ts'
 import { buildTurnContext } from './context/builder.ts'
@@ -261,7 +273,6 @@ import {
 } from './kernel/contracts/index.ts'
 import { hashSeed, shortHash } from './infrastructure/persistence/seed-hash.ts'
 import { characterDefinitionFromCharacter } from './infrastructure/runtime/seed-projection.ts'
-import { withGuardTimersUnrefed } from './infrastructure/runtime/guard-timers.ts'
 import { requiresModelConnectivity } from './invocation.ts'
 import {
   contaminatedMemories,
@@ -777,8 +788,9 @@ import {
   isDesktopCapability,
 } from './kernel/action/desktop-capability.ts'
 import { createDesktopAdapters } from './infrastructure/action/adapters/desktop-control.ts'
-import { ActionDelegation } from './kernel/app/bridge/action-delegation.ts'
 import { ExecutorClient } from './infrastructure/action/executor-client.ts'
+import { executorDelegator, withExecutorTurnSignal, type ExecutorLink } from './infrastructure/action/executor-delegator.ts'
+import { capabilityHealth } from './infrastructure/action/capability-health.ts'
 /*
  * post-Lv2 / ADR-110 `D05`：QQ 主动联系的**目标发送能力**。
  *
@@ -1053,18 +1065,24 @@ async function buildRuntime(userName: string): Promise<AgentRuntime> {
   }
 
   /*
-   * 薄宿主选择（thinhost，2026-10-18）—— 缺省仍是 ElizaOS，本段逐字不变
+   * ============================================================================
+   *  薄宿主选择（thinhost，2026-10-18）—— **缺省仍是 ElizaOS，本段逐字不变**
+   * ============================================================================
+   * 实测依据（本机 + Linux 服务器配对，见 docs/post-lv2/ThinHost-Replacement-Attribution-2026-10-18.md）：
+   *   · 稳态空闲 CPU：1.019% → 0.009% 单核（bootstrap 的 TASK 每 1000ms 查库
+   *     与 embedding 每 100ms 唤醒被去掉）
+   *   · 上游 30s 守卫定时器：2 → 0（`guard-timers.ts` 补丁随之可退役）
+   *   · 内存与启动时间基本持平（**不虚报这两项收益**）
    *
-   * 实测（本机 + Linux 服务器配对，docs/post-lv2/ThinHost-Replacement-Attribution-2026-10-18.md）：
-   *   · 稳态空闲 CPU 1.019% → 0.009% 单核
-   *   · 上游 30s 守卫定时器 2 → 0
-   *   · 内存与启动时间基本持平（不虚报这两项）
+   * ⚠️ 开关缺省 off：换宿主不是加功能，缺省 on 会让人无声地换掉底座。
+   *    生产激活仍需**独立授权**（先例 ADR-048/065/067/071/112）。
    *
-   * ⚠️⚠️ 这里**只能替换 runtime 这个绑定，绝不能提前 return**。
+   * ⚠️⚠️ 这里**只能替换 `runtime` 这个绑定，绝不能提前 `return`**。
    *    第一版写成 `if (thinHostEnabled()) { … return thin }` ⇒ 后面的
-   *    initDatabase / 生产状态机 / buildKernel 全部被跳过 ⇒
-   *    getRawDb() 抛 no_db_handle ⇒ 核心起不来（真实发生过一次故障）。
-   *    薄宿主同样要经 openDatabase() 注册适配器、走租约与 pre-open 快照。
+   *    `initDatabase` / 生产状态机 / `buildKernel` 全部被跳过 ⇒
+   *    `getRawDb()` 抛 `no_db_handle`（「拿不到底层数据库句柄」）⇒ 核心起不来。
+   *    （这是本轮真实发生的一次故障，见决策文档 §8。）
+   *    薄宿主同样要经 `openDatabase()` 注册适配器、走租约与 pre-open 快照。
    */
   const runtime: AgentRuntime = thinHostEnabled()
     ? (() => {
@@ -1352,6 +1370,7 @@ interface SharedConsumerDelegate {
   drainSemanticTail(traceId?: ReturnType<typeof asTraceId>): Promise<void>
   /** S8：故事装配实例（owner 在 `open()` 里建一次；借用者复用**同一个**） */
   readonly storyCognition: ReturnType<typeof createStoryCognition> | undefined
+  readonly executorLink: ChatSession['executorLink']
 }
 
 class ChatSession {
@@ -1497,17 +1516,17 @@ class ChatSession {
    *    ⇒ 网关的 `delegator` 返回 `undefined` ⇒ **走本地适配器，逐字旧行为**。
    *    ⚠️ 这条必须成立：那时 `desktop.operate` 若直接失效，
    *    就是**没通知任何人地改变了既有行为**。
-   * ⚠️ 至今**没有任何代码给它赋值** ⇒ 委派面尚未真正启用；
-   *    传输层（核心 → 经隧道 → PC 执行端）建起来之后才会赋值。
+   * ⚠️ **2026-10-18 更正**：本注释此前写"至今**没有任何代码给它赋值**"——**这句已过时**。
+   *    赋值点**存在**（`attachExecutorIfConfigured()`）：`CHARACTER_EXECUTOR_ENABLED=true`
+   *    且**连上**执行端时才会赋值；**缺省关** ⇒ 从不赋值 ⇒ 委派面未启用、走本地适配器。
+   * ⚠️ 本文件的工作区 diff 同时混着别的批次 ⇒ 这段接线随 `main.ts` 一起提交
+   *    （ADR-146 `L-146-07`）。
    */
-  executorLink:
-    | {
-        /** 把一行委派写上线 */
-        readonly send: (payload: Record<string, unknown>) => void
-        /** ADR-146 `D06`：按轮次判是否已取消（由 `TurnCancellationRegistry` 提供） */
-        readonly isCancelled: (turnRequestId: string) => boolean
-      }
-    | undefined = undefined
+  private ownedExecutorLink: ExecutorLink | undefined = undefined
+
+  get executorLink(): typeof this.ownedExecutorLink {
+    return this.consumers?.executorLink ?? this.ownedExecutorLink
+  }
 
   /**
    * 各入口的取消表（`D05`：打断皮套**不**取消 QQ ⇒ 每入口一份）。
@@ -1520,11 +1539,12 @@ class ChatSession {
 
   /** 装配/拆除执行端连接（ADR-146）。**连不上就是没装** ⇒ 逐字旧行为。 */
   attachExecutorLink(link: ChatSession['executorLink']): void {
-    this.executorLink = link
+    this.ownedExecutorLink = link
   }
 
   /** 只连一次（多处调用点会重复进来） */
   private executorStarting = false
+  private executorClosing = false
   private executorClient: ExecutorClient | undefined
 
   /**
@@ -1538,6 +1558,7 @@ class ChatSession {
    * ⚠️ 断开时**清空** link ⇒ 自动落回本地。
    */
   async attachExecutorIfConfigured(log: (message: string) => void): Promise<void> {
+    if (this.consumers !== undefined || this.executorClosing) return
     if (process.env['CHARACTER_EXECUTOR_ENABLED'] !== 'true') return
     if (this.executorStarting || this.executorLink !== undefined) return
     const rawPort = process.env['CHARACTER_EXECUTOR_PORT'] ?? ''
@@ -1555,18 +1576,19 @@ class ChatSession {
     const client = new ExecutorClient({
       host: process.env['CHARACTER_EXECUTOR_HOST'] ?? '127.0.0.1',
       port, token,
-      onResult: () => undefined,
       onLog: (m) => log(`[executor] ${m}`),
       onConnected: (connected) => {
-        // ⚠️ 断开 ⇒ 清空 link ⇒ 网关立刻落回本地
+        // 断开后清空 link；远程模式下 Gateway 拒绝新动作，不回退本地。
         if (!connected) this.attachExecutorLink(undefined)
       },
     })
+    this.executorClient = client
+    closeExecutorOnShutdown = () => this.closeExecutor()
     try {
       await client.connect()
-      this.executorClient = client
+      if (this.executorClosing) return
       this.attachExecutorLink({
-        send: (payload) => { void client.send(payload) },
+        send: (payload, signal) => client.send(payload, signal),
         isCancelled: (turnRequestId) => this.isTurnCancelledSomewhere(turnRequestId),
       })
       log(`[executor] 已连接 ⇒ 委派面启用（仅 desktop.operate）`)
@@ -1581,6 +1603,7 @@ class ChatSession {
 
   /** 关停时关掉连接 */
   async closeExecutor(): Promise<void> {
+    this.executorClosing = true
     await this.executorClient?.close().catch(() => undefined)
     this.executorClient = undefined
     this.attachExecutorLink(undefined)
@@ -1952,12 +1975,16 @@ class ChatSession {
       userRef: this.scopedIdentity?.externalId ?? this.qqOwnerId ?? this.userName,
       deriveUserId: ({ transport, externalId }) => stringToUuid(`user-${transport}-${externalId}`),
     })
+    const executorSession = this
     return new TurnGateway({
       ...(this.flags.actionEnabled && this.flags.taskAutonomyEnabled && this.flags.toolDecisionMode === 'role'
         ? { desktopCapabilities: {
             inspect: this.flags.desktopInspectEnabled,
             operate: this.flags.desktopOperateEnabled,
             connected: verifyDesktopRuntimeSync().ok,
+            get operateConnected() {
+              return process.env.CHARACTER_EXECUTOR_ENABLED === 'true' ? executorSession.executorLink !== undefined : undefined
+            },
           } } : {}),
       ...(this.flags.workflowSkillsEnabled ? { workflowSkills: this.workflowSkills } : {}),
       kernel: this.kernel,
@@ -2564,7 +2591,8 @@ class ChatSession {
                   connectionStates: (() => {
                     const runtime = verifyDesktopRuntimeSync()
                     const state: ToolConnectionState = runtime.ok ? 'connected' : 'disconnected'
-                    return { [DESKTOP_INSPECT]: state, [DESKTOP_OPERATE]: state,
+                    return { [DESKTOP_INSPECT]: state, [DESKTOP_OPERATE]: process.env.CHARACTER_EXECUTOR_ENABLED === 'true'
+                      ? this.executorLink ? 'connected' as const : 'disconnected' as const : state,
                       [ARXIV_RESEARCH]: verifyArxivRuntimeSync() ? 'connected' as const : 'disconnected' as const }
                   })(),
                 })
@@ -2593,7 +2621,8 @@ class ChatSession {
   private toolCapabilitiesForTurn(): readonly string[] {
     const base = TASK_CAPABILITY_IDS.filter((capability) => this.isTaskCapabilityEnabled(capability))
     if (this.flags.toolDecisionMode !== 'role') return base
-    return [...base, SYSTEM_ECHO, SANDBOX_FILE_READ, SANDBOX_FILE_WRITE]
+    return [...base, SYSTEM_ECHO, ...[SANDBOX_FILE_READ, SANDBOX_FILE_WRITE].filter(capability =>
+      capabilityHealth(capability, { sandboxRoot: this.flags.actionSandboxRoot }).ready)]
   }
 
   /**
@@ -2604,24 +2633,25 @@ class ChatSession {
    */
   private isTaskCapabilityEnabled(capability: string): boolean {
     const flags = this.flags
+    const ready = () => capabilityHealth(capability).ready
     switch (capability) {
       case WORKFLOW_SKILL:
-        return flags.workflowSkillsEnabled
+        return flags.workflowSkillsEnabled && ready()
       case PERSONAL_LIBRARY_SEARCH:
-        return flags.personalLibraryEnabled
+        return flags.personalLibraryEnabled && ready()
       case ARXIV_RESEARCH:
-        return flags.arxivResearchEnabled
+        return flags.arxivResearchEnabled && ready()
       case LOCAL_FILE_LIST:
       case LOCAL_FILE_READ:
         return flags.localFileReadEnabled
       case LOCAL_FILE_WRITE:
         return flags.localFileWriteEnabled
       case DOCUMENT_READ:
-        return flags.documentReadEnabled
+        return flags.documentReadEnabled && ready()
       case IMAGE_OCR:
-        return flags.imageOcrEnabled
+        return flags.imageOcrEnabled && ready()
       case MATH_CALCULATE:
-        return flags.mathCalculateEnabled
+        return flags.mathCalculateEnabled && ready()
       case WEB_READ:
         return flags.webReadEnabled
       case WEB_SEARCH:
@@ -2630,7 +2660,7 @@ class ChatSession {
         return flags.weatherEnabled
       case OFFICE_GENERATE:
         // 两条权限都要（矩阵逐字）：生成 + 本机落盘
-        return flags.officeGenerateEnabled && flags.localFileWriteEnabled
+        return flags.officeGenerateEnabled && flags.localFileWriteEnabled && ready()
       case NEWS_READ:
         return flags.newsReadEnabled
       case BROWSER_READ:
@@ -3154,11 +3184,8 @@ class ChatSession {
     /*
      * ADR-146：跨机器委派的**装配**。
      *
-     * ⚠️⚠️ 失败关闭的核心在这里：**执行端不在线 ⇒ `delegator` 返回 `undefined`**
-     *    ⇒ 网关走**本地适配器**，逐字旧行为。
-     *    为什么这条必须成立：电脑关机/休眠 ⇒ 隧道断 ⇒ 执行端不在线
-     *    （`L-146-03` 的必然结果）。那时 `desktop.operate` 直接失效
-     *    就是**没通知任何人地改变了既有行为**。
+     * 远程模式一旦启用，断线或握手失败都拒绝新动作；不能改到核心所在机器执行。
+     * 未启用远程模式时保留本地适配器。派发后的不明结果不自动重试。
      *
      * ⚠️ 委派面只有 `desktop.operate`（裁定 `R-146` ②）：浏览器在 PC 上**是登录态**，
      *    影响面比桌面大（可能落在已登录的网银/邮箱上）⇒ 那是"先不做"，不是"已评估为安全"。
@@ -3166,14 +3193,6 @@ class ChatSession {
      * ⚠️ 闸不在这里：真正的闸是 `ActionDelegation.delegate()`，它 `allowed===false`
      *    时**连 emit 都不碰**。这里只决定"**委派还是本地**"，不重算任何权限。
      */
-    const executorDelegation = this.executorLink === undefined
-      ? undefined
-      : new ActionDelegation({
-        emit: (payload: Record<string, unknown>) => { this.executorLink!.send(payload) },
-        isCancelled: (turnRequestId: string) => this.isTurnCancelledSomewhere(turnRequestId),
-        delegatableCapabilities: [DESKTOP_OPERATE],
-        timeoutMs: 30_000,
-      })
     const desktopPermissions = [
       ...(this.flags.desktopInspectEnabled ? [DESKTOP_INSPECT_PERMISSION] : []),
       ...(this.flags.desktopOperateEnabled ? [DESKTOP_OPERATE_PERMISSION] : []),
@@ -3281,33 +3300,8 @@ class ChatSession {
          * ⚠️ **委派失败绝不落回本地重做**：核心可能已把那次委派提交进账本，
          *    重做 = 同一件事做两遍（同断线时具名拒绝、绝不自动重发的纪律）。
          */
-        delegator: (request, decision) => {
-          if (executorDelegation === undefined) return undefined
-          if (request.capability !== DESKTOP_OPERATE) return undefined
-          return {
-            send: async (req, dec) => {
-              const actionId = String(req.actionId)
-              const turnRequestId = this.entryKey
-              const r = executorDelegation.delegate({
-                turnRequestId,
-                actionId,
-                request: req,
-                admission: dec,
-              })
-              if (!r.ok) {
-                throw new ActionFailureError(
-                  actionFailure('execution_failed', `委派未过（${r.rejection}），未执行`),
-                )
-              }
-              return {
-                effect: {
-                  kind: 'action_delegated',
-                  detail: `已委派 ${req.capability}（${r.actionId}）到 PC 执行端（执行结局由回执持有，不回写账本）`,
-                },
-              }
-            },
-          }
-        },
+        delegator: (request, decision) => executorDelegator(this.executorLink, request, decision, this.payloadStaging,
+          process.env.CHARACTER_EXECUTOR_ENABLED === 'true'),
         dryRun: this.dryRun,
         now: () => Date.now(),
       /*
@@ -4192,6 +4186,9 @@ class ChatSession {
       get storyCognition() {
         return session.storyCognition
       },
+      get executorLink() {
+        return session.executorLink
+      },
     }
   }
 
@@ -4346,6 +4343,15 @@ class ChatSession {
   }
 
   async send(userText: string, streaming?: {
+    onSpeechSegment: (packet: CheckedSpeechSegment) => void
+    signal?: AbortSignal
+    onModelStart?: () => void
+  }, images?: readonly ImageInput[], turnScope?: ScopeContext,
+    groupContext?: readonly import('./kernel/app/bridge/turn-bridge.ts').BridgeGroupContextLine[]): Promise<string> {
+    return withExecutorTurnSignal(streaming?.signal, () => this.sendInReadScope(userText, streaming, images, turnScope, groupContext))
+  }
+
+  private async sendInReadScope(userText: string, streaming?: {
     onSpeechSegment: (packet: CheckedSpeechSegment) => void
     signal?: AbortSignal
     onModelStart?: () => void
@@ -8078,6 +8084,7 @@ async function main(): Promise<void> {
   }
 
   runtimeShutdown = createRuntimeShutdown(runtime, {
+    beforeStop: async () => { await closeExecutorOnShutdown?.() },
     /*
      * INC-01 WP4（`AT4.3`/`AT4.5`）：收尾读数出来**之后**才决定要不要晋升 post-close 快照。
      * `afterClose: true` ⇒ 不重复 stop/close（WP3 的唯一收尾路径刚刚做过），
@@ -8141,20 +8148,21 @@ async function main(): Promise<void> {
   // Character Kernel 必须在 initialize() 之后装配：它要读写自己的表，
   // 而那些表要等 initDatabase() 的迁移跑完才存在。
   //
-  // ⚠️ `withGuardTimersUnrefed` 不是装饰：上游 `AgentRuntime.registerService`
-  //    （`@elizaos/core@1.7.2` dist:50037-50042）为**每个服务**建一个 30s 的
-  //    "初始化超时"定时器却**从不清除**，于是这个进程在命令跑完、库关好之后
-  //    还会被它按住 **30 秒**才退出。实测：`--kernel-status` 墙钟 31.4s，
-  //    其中 29.85s/32.65s 是 CPU profile 里的 `(idle)`。
-  //    作用域收窄到这一次 `initialize()`，只 unref ≥30s 的定时器（不动回调与语义），
-  //    理由与"为什么不用 process.exit()"见该模块的文件头。
-  const initialized = await withGuardTimersUnrefed(() => runtime.initialize())
-  if (initialized.report.unrefed > 0) {
-    logger.info(
-      `[boot] 上游守卫定时器已 unref：${initialized.report.unrefed} 个（延时 ${initialized.report.delays.join('/')}ms）` +
-        ' —— 否则本进程会在收尾后白等这么久才退出（见 infrastructure/runtime/guard-timers.ts）'
-    )
-  }
+  // ⚠️ 2026-10-18：`withGuardTimersUnrefed` 已**退役**，这里直接调 `initialize()`。
+  //
+  // 退役理由（不是"补丁失效"，是**对象不存在**）：
+  //   那个猴子补丁针对的是 `@elizaos/core@1.7.2` 的 `AgentRuntime.registerService`
+  //   （dist:50037-50042）——它为**每个服务**建一个 30 秒"初始化超时"定时器却从不清除，
+  //   于是命令跑完后进程还被它按住 30 秒（实测 `--kernel-status` 墙钟 31.4s）。
+  //   而薄宿主（`ThinHostRuntime.initialize()`）**不注册任何服务**，结构上就不建那些定时器。
+  //   ⇒ 补丁在薄宿主下是**空操作**，留着反而是"每启动一次就把全局 setTimeout 换一轮"的
+  //     无谓猴子补丁。
+  //
+  // ⚠️ 这也意味着：**ElizaOS 宿主已不再是受支持的运行时**。若有人把
+  //    `CHARACTER_THIN_HOST` 关掉，这里会重新暴露在 30 秒退出税下（命令会慢，不会崩）。
+  //    `pnpm cli:exit:verify` 的正控**显式打开**薄宿主，正是为了让这条假设被持续守住。
+  const initialized = await runtime.initialize()
+  void initialized
   attachEventLog(runtime)
   const kernel = await buildKernel(runtime)
 
@@ -8355,17 +8363,21 @@ async function main(): Promise<void> {
           { id: DOCUMENT_READ, on: flags.documentReadEnabled, note: '沙箱内 PDF/DOCX/PPTX/XLSX → 专属 Python 环境的 convert_stream（≤10MiB，30s 硬超时）' },
           { id: WEB_READ, on: flags.webReadEnabled, note: '显式 HTTPS URL → 逐跳地址校验 + Readability 正文提取（解压后 ≤2MiB，15s 总超时，不执行脚本/不加载子资源）' },
           { id: IMAGE_OCR, on: flags.imageOcrEnabled, note: 'PNG/JPEG → 固定本地 OCR 模型（≤16MiB/20MP，30s 硬超时，缺资产零出站失败）' },
-        ].map((entry) => ({
+        ].map((entry) => {
+          const health = entry.on ? capabilityHealth(entry.id) : undefined
+          return ({
           id: entry.id,
           authority: [WORKFLOW_SKILL, PERSONAL_LIBRARY_SEARCH, ARXIV_RESEARCH].includes(entry.id)
             ? 'kernel/action/learning-capabilities.ts' : 'kernel/action/utility-capabilities.ts',
-          availability: entry.on
+          availability: entry.on && health?.ready
             ? DEVELOPER_AVAILABLE
             : developerUnavailable(
+                health?.ready === false ? health.reason :
                 `CHARACTER_${entry.id === WORKFLOW_SKILL ? 'WORKFLOW_SKILLS' : entry.id === PERSONAL_LIBRARY_SEARCH ? 'PERSONAL_LIBRARY' : entry.id === ARXIV_RESEARCH ? 'ARXIV_RESEARCH' : entry.id === MATH_CALCULATE ? 'MATH_CALCULATE' : entry.id === DOCUMENT_READ ? 'DOCUMENT_READ' : entry.id === WEB_READ ? 'WEB_READ' : 'IMAGE_OCR'}_ENABLED=false${entry.id === ARXIV_RESEARCH ? ' 或运行环境未就绪' : ''}：能力已登记，但本次不可用（代码缺省即关闭档）`
               ),
-          note: `${utilityCapabilityLabel(entry.id)} · 当轮内容额度 CHARACTER_TURN_CONTENT_TOKENS=${String(flags.turnContentTokens)} · ${entry.note}`,
-        })),
+          note: `${utilityCapabilityLabel(entry.id)} · 当轮内容额度 CHARACTER_TURN_CONTENT_TOKENS=${String(flags.turnContentTokens)} · ${entry.note}` +
+            (health ? ` · dependencyProbe=${health.reason}@${health.checkedAt}（只证本地依赖，不代表授权或远端连通）` : ''),
+        }) }),
       ],
     })
     /*
@@ -9122,6 +9134,7 @@ let singleCoreQualification: SingleCoreQualification | undefined
  * 它在 `runtimeShutdown` 建好之后才被赋值；在那之前丢失资格只记日志（见下面的回调）。
  */
 let stopAfterQualificationLoss: (() => void) | undefined
+let closeExecutorOnShutdown: (() => Promise<void>) | undefined
 
 /**
  * 进程退出前 flush 遥测缓冲。

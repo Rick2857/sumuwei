@@ -131,6 +131,8 @@ export interface DesktopCapabilityAvailability {
   inspect: boolean
   operate: boolean
   connected: boolean
+  /** Remote operation readiness is independent of the local inspection runtime. */
+  operateConnected?: boolean
 }
 
 /** 回复使用程序给出的当前状态，不把历史自述或一次失败当成能力边界。 */
@@ -141,6 +143,8 @@ export function renderDesktopCapabilityFacts(state: DesktopCapabilityAvailabilit
     `桌面查看 desktop.inspect.state：${state.inspect ? '已启用' : '未启用'}。`,
     `桌面操作 desktop.operate.act：${state.operate ? '已启用' : '未启用'}，动作 ${DESKTOP_ACTION_KINDS.join(' / ')}。`,
     `本机桌面运行时：${state.connected ? '就绪' : '未连接，当前不能调用'}。只有已启用且运行时就绪的能力可用。`,
+    ...(state.operateConnected === undefined ? [] : [
+      `桌面操作使用 PC 执行端：${state.operateConnected ? '已连接' : '未连接，当前不可操作'}；本机运行时的状态不代表 PC 执行端就绪。`]),
     '单击、右键、双击、输入仅操作实际观察到且仍在前台窗口中的控件。' + DESKTOP_LAUNCH_SCOPE,
     '依据本轮动作结果与实际内容说明做过什么。参数校验失败、目标未找到、前台改变或预算耗尽，只表示本次操作未完成，不能据此否认已启用且就绪的能力；确实未启用或未连接时按上面状态说明。',
     '若桌面查看可用，不可说完全够不着桌面；若桌面操作可用，不可说不能点击或只有浏览器能力。',

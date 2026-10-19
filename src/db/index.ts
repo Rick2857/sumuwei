@@ -435,13 +435,31 @@ async function initDatabaseInner(
     }
   }
 
+  /*
+   * ============================================================================
+   *  2026-10-18：不再需要 `@elizaos/plugin-sql` 来建适配器
+   * ============================================================================
+   * 旧宿主时代这里必须 `registerPlugin(sqlPlugin)` —— 那是**唯一**能拿到
+   * `runtime.adapter` 的途径，于是"能不能建库"取决于"上游插件在不在"。
+   *
+   * 薄宿主自己就持有连接（`createThinHostRuntime` 已注入 pool），它的
+   * `registerPlugin()` 同样会把句柄包成 `{ db: {execute} }` 形状。
+   *
+   * ⚠️ 刻意**不**在这里判断"当前是哪个宿主"再分叉：那会让"同一条开库路径"
+   *    在两个宿主下走不同分支，读数无法归因。正确做法是让**两个宿主都实现**
+   *    `registerPlugin`（已经实现），这里照旧调用一次即可 —— 两条路径同形。
+   *
+   * ⚠️ `sqlPlugin` 参数因此**不再是必需的**；保留签名是为了让 168 个既有脚本
+   *    一行不改（那批脚本仍在用旧宿主，先不做无谓的大改）。
+   */
   await runtime.registerPlugin(sqlPlugin)
 
   const adapter = runtime.adapter as unknown as RawDbAdapter | undefined
   if (!adapter) {
     throw new Error(
-      'plugin-sql 未能注册数据库适配器：runtime.adapter 仍为空。' +
-        '检查 PGLITE_DATA_DIR / POSTGRES_URL 配置与 plugin-sql 的初始化日志。'
+      '未能建立数据库适配器：runtime.adapter 仍为空。\n' +
+        '  · 薄宿主：检查 POSTGRES_URL 或 PGLITE_DATA_DIR\n' +
+        '  · 旧宿主：检查 PGLITE_DATA_DIR / POSTGRES_URL 配置与 plugin-sql 的初始化日志'
     )
   }
   const adapterName = adapter.constructor?.name ?? 'unknown-adapter'

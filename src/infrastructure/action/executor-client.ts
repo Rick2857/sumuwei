@@ -41,7 +41,7 @@ export interface ExecutorClientOptions {
   readonly port: number
   readonly token: string
   /** 一次委派的结局（`unknown` 是默认值，绝不默认成功） */
-  readonly onResult: (actionId: string, outcome: ActionOutcome, code?: string) => void
+  readonly onResult?: (actionId: string, outcome: ActionOutcome, code?: string) => void
   readonly onLog?: (message: string) => void
   readonly onConnected?: (connected: boolean) => void
 }
@@ -117,10 +117,8 @@ export class ExecutorClient {
         const result = parseActionResult(parsed)
         if (!result.ok || result.value.kind !== ACTION_RESULT) return
         const wait = this.pending.get(result.value.actionId)
-        // ⚠️ 陌生 actionId 的结果**不**采纳成完成 —— 交给 `onResult` 但不 resolve 任何 pending
-        this.options.onResult(result.value.actionId, result.value.outcome, result.value.code)
+        // Foreign or late action IDs cannot settle another action or reach the result callback.
         if (wait !== undefined) {
-          this.pending.delete(result.value.actionId)
           wait(result.value.outcome, result.value.code)
         }
       })
@@ -132,16 +130,35 @@ export class ExecutorClient {
   }
 
   /** 发一次委派。**返回它在执行端的结局**（含 `unknown`） */
-  send(payload: Record<string, unknown>): Promise<{ outcome: ActionOutcome; code?: string }> {
+  send(payload: Record<string, unknown>, signal?: AbortSignal): Promise<{ outcome: ActionOutcome; code?: string }> {
     const socket = this.socket
     const actionId = String(payload['actionId'] ?? '')
     if (socket === undefined || !this.connected) {
       return Promise.resolve({ outcome: 'unknown' as const, code: 'lg_executor_not_connected' })
     }
     if (actionId === '') return Promise.resolve({ outcome: 'unknown' as const, code: 'lg_executor_missing_action_id' })
+    if (this.pending.has(actionId)) return Promise.resolve({ outcome: 'unknown', code: 'lg_executor_duplicate_action_id' })
+    if (signal?.aborted) return Promise.resolve({ outcome: 'rejected', code: 'lg_executor_cancelled_before_send' })
+    const timeout = payload.timeoutMs
+    if (!Number.isInteger(timeout) || Number(timeout) < 1 || Number(timeout) > 600_000) {
+      return Promise.resolve({ outcome: 'rejected', code: 'lg_executor_bad_timeout' })
+    }
     return new Promise((resolve) => {
-      this.pending.set(actionId, (outcome, code) => resolve(code === undefined ? { outcome } : { outcome, code }))
-      socket.write(`${JSON.stringify(payload)}\n`)
+      const finish = (outcome: ActionOutcome, code?: string): void => {
+        if (this.pending.get(actionId) !== finish) return
+        this.pending.delete(actionId)
+        clearTimeout(deadline)
+        signal?.removeEventListener('abort', aborted)
+        this.options.onResult?.(actionId, outcome, code)
+        resolve(code === undefined ? { outcome } : { outcome, code })
+      }
+      const aborted = (): void => finish('unknown', 'lg_executor_cancelled_inflight')
+      const deadline = setTimeout(() => finish('unknown', 'lg_executor_result_timeout'), Number(timeout))
+      this.pending.set(actionId, finish)
+      signal?.addEventListener('abort', aborted, { once: true })
+      socket.write(`${JSON.stringify(payload)}\n`, error => {
+        if (error) finish('unknown', 'lg_executor_write_failed')
+      })
     })
   }
 
