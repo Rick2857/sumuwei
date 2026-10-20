@@ -18,13 +18,13 @@
 
 | 类别 | 条目数 |
 |---|---:|
-| 已登记门 | 251 |
+| 已登记门 | 250 |
 | 汇总/链入口 | 18 |
 | 文档入口 | 3 |
-| 内部 | 426 |
-| **合计** | **698** |
+| 内部 | 423 |
+| **合计** | **694** |
 
-`scripts/` 下**没有任何 pnpm 入口引用**的脚本文件：**291 个**（见文末）。
+`scripts/` 下**没有任何 pnpm 入口引用**的脚本文件：**305 个**（见文末）。
 
 ## 每条 lane 的入口命令
 
@@ -129,9 +129,9 @@
 
 **内部（1）**：`dump:prompt`
 
-### `eval`（20 条）
+### `eval`（19 条）
 
-**已登记门（7）**：`eval:dryrun` · `eval:m3` · `eval:m4` · `eval:otlp` · `eval:providers` · `eval:scenarios` · `eval:telemetry`
+**已登记门（6）**：`eval:dryrun` · `eval:m3` · `eval:m4` · `eval:otlp` · `eval:scenarios` · `eval:telemetry`
 
 **内部（13）**：`eval:m3:live` · `eval:m3:promptfoo` · `eval:m3:promptfoo:build` · `eval:m4:extraction` · `eval:m4:extraction:live` · `eval:m4:promptfoo` · `eval:m4:promptfoo:assertions` · `eval:m4:promptfoo:build` · `eval:m4:promptfoo:live` · `eval:phoenix-chat` · `eval:promptfoo` · `eval:promptfoo:build` · `eval:real`
 
@@ -270,11 +270,11 @@
 
 **内部（9）**：`m5.1:control:verify` · `m5.1:e2e:verify` · `m5.1:measurement:verify` · `m5.1:observability:verify` · `m5.1:page:verify` · `m5.1:query:verify` · `m5.1:regression:verify` · `m5.1:spike:otlp` · `m5.1:test`
 
-### `m5.1.1`（43 条）
+### `m5.1.1`（42 条）
 
 **已登记门（1）**：`m5.1.1:gates`
 
-**内部（42）**：`m5.1.1:d01:smoke:live` · `m5.1.1:final:verify` · `m5.1.1:k16:verify` · `m5.1.1:k17:verify` · `m5.1.1:k19:verify` · `m5.1.1:k20:verify` · `m5.1.1:k25:verify` · `m5.1.1:k29:verify` · `m5.1.1:migration:verify` · `m5.1.1:phase4:closure:verify` · `m5.1.1:phase4:preflight` · `m5.1.1:phase4a:verify` · `m5.1.1:phase4b:db-v9` · `m5.1.1:phase4b:preflight` · `m5.1.1:phase4b:verify` · `m5.1.1:prod-copy:verify` · `m5.1.1:test` · `m5.1.1:wp10a:verify` · `m5.1.1:wp10b:verify` · `m5.1.1:wp10c:verify` · `m5.1.1:wp11:verify` · `m5.1.1:wp3:verify` · `m5.1.1:wp3.2:verify` · `m5.1.1:wp4:verify` · `m5.1.1:wp4.1:verify` · `m5.1.1:wp5:verify` · `m5.1.1:wp5.1:verify` · `m5.1.1:wp6:verify` · `m5.1.1:wp6.1:verify` · `m5.1.1:wp7:preflight` · `m5.1.1:wp7:verify` · `m5.1.1:wp8:verify` · `m5.1.1:wp8c1:restore` · `m5.1.1:wp8c1:verify` · `m5.1.1:wp8c2:verify` · `m5.1.1:wp8c3:verify` · `m5.1.1:wp9:verify` · `m5.1.1:wp9a:verify` · `m5.1.1:wp9b:selection:verify` · `m5.1.1:wp9b1:verify` · `m5.1.1:wp9b2:verify` · `m5.1.1:wp9c0:verify`
+**内部（41）**：`m5.1.1:final:verify` · `m5.1.1:k16:verify` · `m5.1.1:k17:verify` · `m5.1.1:k19:verify` · `m5.1.1:k20:verify` · `m5.1.1:k25:verify` · `m5.1.1:k29:verify` · `m5.1.1:migration:verify` · `m5.1.1:phase4:closure:verify` · `m5.1.1:phase4:preflight` · `m5.1.1:phase4a:verify` · `m5.1.1:phase4b:db-v9` · `m5.1.1:phase4b:preflight` · `m5.1.1:phase4b:verify` · `m5.1.1:prod-copy:verify` · `m5.1.1:test` · `m5.1.1:wp10a:verify` · `m5.1.1:wp10b:verify` · `m5.1.1:wp10c:verify` · `m5.1.1:wp11:verify` · `m5.1.1:wp3:verify` · `m5.1.1:wp3.2:verify` · `m5.1.1:wp4:verify` · `m5.1.1:wp4.1:verify` · `m5.1.1:wp5:verify` · `m5.1.1:wp5.1:verify` · `m5.1.1:wp6:verify` · `m5.1.1:wp6.1:verify` · `m5.1.1:wp7:preflight` · `m5.1.1:wp7:verify` · `m5.1.1:wp8:verify` · `m5.1.1:wp8c1:restore` · `m5.1.1:wp8c1:verify` · `m5.1.1:wp8c2:verify` · `m5.1.1:wp8c3:verify` · `m5.1.1:wp9:verify` · `m5.1.1:wp9a:verify` · `m5.1.1:wp9b:selection:verify` · `m5.1.1:wp9b1:verify` · `m5.1.1:wp9b2:verify` · `m5.1.1:wp9c0:verify`
 
 ### `m5.5`（6 条）
 
@@ -448,11 +448,9 @@
 
 **内部（3）**：`test` · `test:dry` · `test:guard`
 
-### `thinhost`（7 条）
+### `thinhost`（5 条）
 
 **已登记门（5）**：`thinhost:initdb:verify` · `thinhost:retirement:verify` · `thinhost:surface:verify` · `thinhost:uuid:parity` · `thinhost:wiring:verify`
-
-**内部（2）**：`thinhost:ddl:verify` · `thinhost:equivalence:verify`
 
 ### `typecheck`（1 条）
 
@@ -652,6 +650,7 @@
 - `scripts/postgresql/qualification-probe.ts`
 - `scripts/postgresql/row-digest.ts`
 - `scripts/postgresql/second-target-probe.ts`
+- `scripts/postgresql/test-harness.ts`
 - `scripts/postlv2_appearance_client.js`
 - `scripts/postlv2_cosyvoice.py`
 - `scripts/postlv2_expression_client.js`
@@ -723,8 +722,22 @@
 - `scripts/test-persist-read.ts`
 - `scripts/test-persist-write.ts`
 - `scripts/text-scan.ts`
-- `scripts/thinhost-ddl-decoupling-measure.ts`
-- `scripts/thinhost-ddl-decoupling-verify.ts`
+- `scripts/thinhost-base-ddl-verify.ts`
+- `scripts/thinhost-bootstrap-fingerprint.ts`
+- `scripts/thinhost-capture-base-ddl.ts`
+- `scripts/thinhost-codemod-c.ts`
+- `scripts/thinhost-codemod-dynamic.ts`
+- `scripts/thinhost-codemod-final.ts`
+- `scripts/thinhost-codemod-local-imports.ts`
+- `scripts/thinhost-codemod-sqlplugin.ts`
+- `scripts/thinhost-codemod-types.ts`
+- `scripts/thinhost-isolation-verify.ts`
+- `scripts/thinhost-lgmigration-verify.ts`
+- `scripts/thinhost-logger-verify.ts`
+- `scripts/thinhost-no-eliza-in-src-verify.ts`
+- `scripts/thinhost-reply-parser-freeze.ts`
+- `scripts/thinhost-script-cluster.ts`
+- `scripts/thinhost-vocabulary-verify.ts`
 - `scripts/utility-skills/assembly.ts`
 - `scripts/utility-skills/doc-runner.py`
 - `scripts/utility-skills/fixtures.ts`
@@ -765,7 +778,6 @@
 - `scripts/verify-m6-wp9a2-discrimination.ts`
 - `scripts/verify-m6-wp9b-long-dialogue.ts`
 - `scripts/verify-production-lease-platform.ts`
-- `scripts/verify-state.ts`
 - `scripts/wechat-discretion-verify.ts`
 - `scripts/wechat-group-verify.ts`
 - `scripts/wechat-main-verify.ts`

@@ -20,6 +20,7 @@
  *   S1  `src/**` 穷举出的宿主方法集 ⊆ 薄宿主实现集（无遗漏）
  *   S2  薄宿主没有多实现一堆没人调的方法（避免"实现了但没人验证"）
  *   S3  关键方法逐个可调用（非 undefined 的函数）
+ *   S4  保留的旧上下文入口必须具名拒绝，不能返回空 prompt
  */
 
 import { readdirSync, readFileSync, statSync } from 'node:fs'
@@ -156,6 +157,7 @@ for (const m of [...methods].sort()) {
 const ALLOWED_EXTRA = new Set([
   'registerPlugin', 'runPluginMigrations', 'closeDatabase', 'isDatabaseClosed', 'initialize', 'stop',
   'exec', 'exec2', 'ensureRow', 'ensureAgentRow',
+  'composeState', // 退役入口仅用于具名拒绝；行为由 S4 验证。
 ])
 const implemented = Object.getOwnPropertyNames(ThinHostRuntime.prototype).filter(
   (n) => n !== 'constructor' && typeof proto[n] === 'function'
@@ -177,6 +179,14 @@ check(
   notCallable.length === 0,
   notCallable.length === 0 ? `${CRITICAL.length} 个关键方法全部可调用` : `不可调用：${notCallable.join(', ')}`
 )
+
+let legacyRejected = false
+try {
+  await instance.composeState({})
+} catch (error) {
+  legacyRejected = error instanceof Error && 'code' in error && error.code === 'thin_host_no_legacy_providers'
+}
+check('S4-legacy-context-rejected', legacyRejected, '旧上下文入口必须抛 thin_host_no_legacy_providers，不能返回 prompt')
 
 const failed = checks.filter((c) => !c.ok)
 console.log(`\n=== thinhost 接口面穷举: ${checks.length - failed.length}/${checks.length} PASS ===`)
