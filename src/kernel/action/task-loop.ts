@@ -61,6 +61,13 @@ import {
 } from '../contracts/external-evidence.ts'
 import type { TaskAuthorization, TaskAuthorizationPort, TaskCloseReason } from './task-authorization.ts'
 import {
+  compareForecastStep,
+  forecastDependenciesSatisfied,
+  type ActionForecastPort,
+  type ActionForecastStateLine,
+} from './action-forecast.ts'
+import type { ActionForecast } from '../contracts/world-model.ts'
+import {
   TASK_STAGED_ARG_KEYS,
   taskStepReferenceIsExclusive,
   taskStepReferenceOf,
@@ -134,6 +141,25 @@ export interface TaskLoopOptions {
     /** token 估算器（缺省与上下文编译器同一套 `ceil(chars/2)`） */
     quantifier?: (text: string) => number
   }
+  /**
+   * **行动预测**端口（三域应用方案 §2）。
+   *
+   * ```text
+   * 不配（缺省）⇒ 这一层整段不跑：输入、执行顺序与预算**逐字段**与旧档相同
+   * 配了         ⇒ 每份计划在执行前要一次预测；执行后用**真实结果**核对；
+   *               核对不通过 ⇒ 停止沿用该结果的后续步骤并重新规划
+   * ```
+   *
+   * ⚠️ **模型调用计入同一份预算**：预测调用会**扣一次规划预算**
+   *    （§2："不得借新模型调用绕过既有 `maxPlans`"）——
+   *    ⇒ 开着它的时候，能重新规划的次数**真的变少**了。这是代价，不是细节。
+   * ⚠️ 预测**不扩权**：端口拿不到授权集合、参数与执行器（见 `ActionForecastInput`）。
+   */
+  forecast?: {
+    port: ActionForecastPort
+    /** 预测调用的硬期限（毫秒；有界；不许超过剩余任务时限） */
+    deadlineMs: number
+  }
 }
 
 export interface TaskStepRecord {
@@ -165,6 +191,23 @@ function closedSetReason(result: ActionResult): string | undefined {
 
 export type TaskStopReason = TaskCloseReason
 
+/**
+ * 一次**执行后核对**的读数（预测层开着时才有）。
+ *
+ * ⚠️ 它记的是**比较**，不是"谁对谁错"：模型自报的不确定性不参与判定，
+ *    判定完全由**程序**拿真实结果与闭集核对条件做。
+ */
+export interface TaskForecastComparison {
+  /** 计划里的第几步（0 基） */
+  readonly planStepIndex: number
+  readonly capability: string
+  readonly operation: string
+  readonly comparable: boolean
+  readonly verdict: 'match' | 'mismatch' | 'unknown'
+  /** 实际结果的引用（`ActionResult.actionId`；**不复制正文**） */
+  readonly actualSourceRef: string
+}
+
 export interface TaskRunOutcome {
   taskId: string
   /** 已经执行过的步骤（保序） */
@@ -178,6 +221,17 @@ export interface TaskRunOutcome {
   plannerFailureCode?: string
   /** 计划被程序丢弃时的**闭集**码（不含模型原文） */
   planRejectedCode?: string
+  /**
+   * 预测调用次数（**只在预测层配过时**出现；不配 ⇒ 这个键根本不存在）。
+   *
+   * ⚠️ 它**已经**扣在规划预算里（见 `TaskLoopOptions.forecast` 的说明），
+   *    所以 `plansUsed` 里也含它 —— 这一栏只是把两件事分开记账。
+   */
+  forecastCallsUsed?: number
+  /** 预测失败时的**闭集**码（不含模型原文） */
+  forecastFailureCode?: string
+  /** 执行后的核对读数（**只在预测层配过时**出现） */
+  comparisons?: readonly TaskForecastComparison[]
 }
 
 export interface RunTaskInput {
@@ -236,8 +290,62 @@ export async function runTask(
   let planRejectedCode: string | undefined
   /** 连续多少次"模型没按格式答"（有界重试；见下面的 `invalid_output` 分支） */
   let invalidOutputStreak = 0
+  /** 预测层开着时：已经用掉的预测调用次数（**已扣在规划预算里**） */
+  let forecastCalls = 0
+  /** 预测层开着时：预测失败的闭集码 */
+  let forecastFailureCode: string | undefined
+  /** 预测层开着时：执行后的核对读数 */
+  const comparisons: TaskForecastComparison[] = []
+  /**
+   * **被反驳**的步骤键（`能力.操作`）。
+   *
+   * ⚠️ 依赖闸读它：依赖了某个被反驳的步骤 ⇒ 那一步**不执行**（重新规划）。
+   *    "被反驳"与"没观测到"是**两件事**：后者（`unknown`）**不**进这个集合 ——
+   *    把"没观测到"当成"失败"会让一条正常链路凭空断掉。
+   * ⚠️ 它**跨迭代**保留：一次被反驳的核对，直到同一件事**被再次核对通过**才清除。
+   *    否则会出现这种假完成：第一次核对被反驳 → 重新规划 → 预算用完 → 没有第二次核对
+   *    → "写成功"被当成"写成了" ⇒ 任务报完成（**这正是本机制要消灭的误报**）。
+   */
+  const refutedSteps = new Set<number>()
+  /**
+   * **被反驳**的步骤键（跨迭代；键 = `能力.操作`）。
+   *
+   * ⚠️ 它与 `refutedSteps` 分开：前者是**本份计划内**的下标（依赖闸用），
+   *    后者是**任务级**的键（完成声明闸用）。键相同但含义不同 ⇒ 不合成一个集合。
+   */
+  const refutedKeys = new Set<string>()
 
   const authorization = input.authorization
+
+  /*
+   * WP2/WP3：**已经真的读到的内容**与**外部证据**的渲染行。
+   *
+   * ⚠️ 抽成两个局部函数是为了让**规划器**与**预测器**看到**同一份**渲染
+   *    （同一套选择器 + 同一套渲染器）—— 否则"预测依据的读回"与"规划依据的读回"
+   *    会是两套东西，而比较结论就失去了参照系。
+   * ⚠️ 键的**存在条件**逐字保留旧样（只有真的有内容时那个键才出现），
+   *    因此规划器输入在旧档下**逐字段不变**。
+   */
+  const renderedContentLines = (): string[] => {
+    if (options.replanContext === undefined || gatheredContent.length === 0) return []
+    return selectTurnContentContext({
+      items: gatheredContent,
+      budgetTokens: options.replanContext.contentTokens,
+      ...(options.replanContext.quantifier !== undefined
+        ? { quantifier: options.replanContext.quantifier }
+        : {}),
+    }).selected.map((entry) => renderTurnContentEntry(entry.item, entry.label))
+  }
+  const renderedEvidenceLines = (): string[] => {
+    if (options.replanContext === undefined || gatheredEvidence.length === 0) return []
+    return selectExternalEvidenceContext({
+      evidence: gatheredEvidence,
+      budgetTokens: options.replanContext.evidenceTokens ?? 0,
+      ...(options.replanContext.quantifier !== undefined
+        ? { quantifier: options.replanContext.quantifier }
+        : {}),
+    }).selected.map((item) => renderExternalEvidenceEntry(item))
+  }
 
   for (;;) {
     // ⓪ 时限
@@ -268,26 +376,10 @@ export async function runTask(
        *    `renderTurnContentEntry`）：与"注入 prompt 的那一份"同源 ⇒ 估算的就是注入的。
        */
       ...(options.replanContext !== undefined && gatheredContent.length > 0
-        ? {
-            content: selectTurnContentContext({
-              items: gatheredContent,
-              budgetTokens: options.replanContext.contentTokens,
-              ...(options.replanContext.quantifier !== undefined
-                ? { quantifier: options.replanContext.quantifier }
-                : {}),
-            }).selected.map((entry) => renderTurnContentEntry(entry.item, entry.label)),
-          }
+        ? { content: renderedContentLines() }
         : {}),
       ...(options.replanContext !== undefined && gatheredEvidence.length > 0
-        ? {
-            evidence: selectExternalEvidenceContext({
-              evidence: gatheredEvidence,
-              budgetTokens: options.replanContext.evidenceTokens ?? 0,
-              ...(options.replanContext.quantifier !== undefined
-                ? { quantifier: options.replanContext.quantifier }
-                : {}),
-            }).selected.map((item) => renderExternalEvidenceEntry(item)),
-          }
+        ? { evidence: renderedEvidenceLines() }
         : {}),
       ...(options.replanContext !== undefined
         ? { knownDirectories: options.replanContext.knownDirectories() }
@@ -358,6 +450,12 @@ export async function runTask(
     }
 
     if (plan.steps.length === 0) {
+      if (plan.done && refutedKeys.size > 0) {
+        options.authorizations.close(authorization.taskId, 'check_refuted')
+        planRejectedCode = 'task_check_refuted'
+        stopped = 'check_refuted'
+        break
+      }
       options.authorizations.close(authorization.taskId, 'done')
       stopped = 'done'
       break
@@ -400,9 +498,68 @@ export async function runTask(
       break
     }
 
+    /*
+     * ========================================================================
+     *  ⓪½ 行动预测（三域应用方案 §2）：**执行前**拿预测，**执行后**核对
+     * ========================================================================
+     * ```text
+     * 预算检查   没有行动预算 ⇒ 不再花一次模型调用去预测（纯浪费）
+     * 预算记账   预测调用**扣一次规划预算** ⇒ 不得借新模型调用绕过既有 maxPlans
+     * 预测失败   ⇒ 这一轮**没有**预测（任务行为回到旧档），如实记闭集码
+     * ```
+     * ⚠️ 预测**不授权**任何东西：它拿不到授权集合、参数与执行器。
+     * ⚠️ 预测**不延长**任务、不重试副作用、不探索：它只是一次**只读**的诊断调用。
+     */
+    refutedSteps.clear() // Indices belong to this plan only.
+    let forecast: ActionForecast | undefined
+    if (options.forecast !== undefined) {
+      const remainingActionsNow = authorization.budget.maxActions - authorization.actionsUsed
+      if (remainingActionsNow > 0 && options.authorizations.consumePlan(authorization.taskId)) {
+        forecastCalls += 1
+        const producedAt = now()
+        const planSignature = plan.steps.map((step) => `${step.capability}.${step.operation}`)
+        const stateLines: ActionForecastStateLine[] = steps.map((step) => ({
+          step: `${step.capability}.${step.operation}`,
+          status: step.status ?? step.droppedReason ?? 'dropped',
+          ...(step.failureCode !== undefined ? { failureCode: step.failureCode } : {}),
+        }))
+        const inputRevision = `task-forecast@1:${fnv1a64Hex(
+          JSON.stringify({ goal: plan.goal, steps: plan.steps, state: stateLines })
+        )}`
+        const readback = [...renderedContentLines(), ...renderedEvidenceLines()]
+        const deadlineMs = Math.max(
+          1,
+          Math.min(options.forecast.deadlineMs, Math.max(1, authorization.expiresAt - now()))
+        )
+        const outcome = await options.forecast.port.forecast({
+          goal: plan.goal,
+          candidateSteps: plan.steps.map((step) => ({
+            capability: step.capability,
+            operation: step.operation,
+            ...(step.purpose !== undefined ? { purpose: step.purpose } : {}),
+          })),
+          state: stateLines,
+          remainingActions: remainingActionsNow,
+          remainingModelCalls: Math.max(
+            0,
+            authorization.budget.maxPlans - authorization.plansUsed
+          ),
+          ...(readback.length > 0 ? { readback } : {}),
+          producedAt,
+          inputRevision,
+          deadlineMs,
+        })
+        if (outcome.ok) {
+          forecast = outcome.forecast
+        } else {
+          forecastFailureCode = outcome.parseFailureCode ?? outcome.failure
+        }
+      }
+    }
+
     // 任务编排：本批执行失败后不能沿用尚未观察结果的后续步骤，即使模型自报 done。
     let batchFailed = false
-    for (const step of plan.steps) {
+    for (const [planStepIndex, step] of plan.steps.entries()) {
       if (now() >= authorization.expiresAt) {
         options.authorizations.close(authorization.taskId, 'deadline')
         stopped = 'deadline'
@@ -424,6 +581,35 @@ export async function runTask(
           droppedReason: 'unregistered',
         })
         failureSummary.push(`${step.capability}.${step.operation}=unregistered`)
+        batchFailed = true
+        break
+      }
+
+      /*
+       * ------------------------------------------------------------------
+       * **依赖闸**（三域应用方案 §2："在执行前检查依赖关系"）
+       * ------------------------------------------------------------------
+       * 预测声明了这一步依赖哪几步；那些步的**核对结论是 `mismatch`**
+       * ⇒ 这一步**不执行**（它会沿用一个被反驳的结果）。
+       *
+       * ⚠️ 判据是"**被反驳**"，不是"**没核对过**"：
+       *    `unknown`（没观测到）**不**挡路 —— 把"没观测到"当成"失败"，
+       *    会让一条本来正常的链路凭空断掉（§5：未观测 / 超时 / 部分成功各自保留）。
+       */
+      const forecastStep = forecast?.steps.find((candidate, index) =>
+        (forecast.planStepIndices?.[index] ?? index) === planStepIndex &&
+        candidate.capability === step.capability && candidate.operation === step.operation
+      )
+      if (
+        forecastStep !== undefined &&
+        !forecastDependenciesSatisfied(forecastStep, refutedSteps)
+      ) {
+        steps.push({
+          capability: step.capability,
+          operation: step.operation,
+          droppedReason: 'forecast_dependency_unverified',
+        })
+        failureSummary.push(`${step.capability}.${step.operation}=forecast_dependency_unverified`)
         batchFailed = true
         break
       }
@@ -538,6 +724,46 @@ export async function runTask(
         }
       }
       results.push({ request, result, rule: 'task_plan_step' })
+      /*
+       * ------------------------------------------------------------------
+       * **执行后核对**（三域应用方案 §2："执行后只用真实结果更新判断"）
+       * ------------------------------------------------------------------
+       * 判定**完全由程序**做：闭集核对条件 vs. `ActionResult`。
+       * 模型自报的不确定性**不参与**判定（它不是校准过的概率）。
+       *
+       * ⚠️ `mismatch` ⇒ 这一步的核对**没通过** ⇒
+       *    ① 它进 `refutedSteps`（依赖它的后续步骤**不执行**）；
+       *    ② 本批**就此打住**（重新规划）—— 因为"世界不是预测的那样"时，
+       *       继续照着同一份计划往下走 = 沿用一个已经被证伪的判断。
+       * ⚠️ `unknown`（没观测到 / 不可判定）**不**算失败：照常继续，如实记读数。
+       */
+      if (forecastStep !== undefined) {
+        const refutationKey = fnv1a64Hex(JSON.stringify([
+          step.capability, step.operation, step.args, forecastStep.check,
+        ]))
+        const comparison = compareForecastStep(forecastStep, result, {
+          actualSourceRef: String(request.actionId),
+        })
+        comparisons.push({
+          planStepIndex,
+          capability: step.capability,
+          operation: step.operation,
+          comparable: comparison.comparable,
+          verdict: comparison.verdict,
+          actualSourceRef: comparison.actualSourceRef,
+        })
+        if (comparison.verdict === 'mismatch') {
+          refutedSteps.add(planStepIndex)
+          refutedKeys.add(refutationKey)
+          failureSummary.push(`${step.capability}.${step.operation}=forecast_check_refuted`)
+          batchFailed = true
+          break
+        }
+        if (comparison.verdict === 'match') {
+          // 同一件事**再**次核对通过 ⇒ 撤掉它先前的"被反驳"（不推翻历史读数，只改当前判断）
+          refutedKeys.delete(refutationKey)
+        }
+      }
       if (result.status !== 'success') {
         batchFailed = true
         break
@@ -546,6 +772,26 @@ export async function runTask(
 
     if (stopped !== 'done') break
     if (plan.done && !batchFailed) {
+      /*
+       * ⚠️ **完成声明闸**（三域应用方案 §2 的"误报完成数"）。
+       *
+       * ```text
+       * 规划器说"做完了" ∧ 程序知道有核对**被反驳** ⇒ **不能**报完成。
+       * ```
+       * 否则就会出现这条假完成链：
+       * ```text
+       * 第一次核对被反驳 → 重新规划 → 预算用完 → 没有第二次核对
+       *   → "写成功"（适配器自报）被当成"写成了" → 任务报 done
+       * ```
+       * ⇒ 停止原因**另立** `check_refuted`，与 `done` 分开（如实说"没做完"）。
+       * ⚠️ 被反驳的键**在再次核对通过时**才清除（见 `refutedKeys`）。
+       */
+      if (refutedKeys.size > 0) {
+        options.authorizations.close(authorization.taskId, 'check_refuted')
+        planRejectedCode = 'task_check_refuted'
+        stopped = 'check_refuted'
+        break
+      }
       options.authorizations.close(authorization.taskId, 'done')
       stopped = 'done'
       break
@@ -561,6 +807,13 @@ export async function runTask(
     stopped,
     ...(plannerFailureCode !== undefined ? { plannerFailureCode } : {}),
     ...(planRejectedCode !== undefined ? { planRejectedCode } : {}),
+    /*
+     * ⚠️ 预测相关的键**只在预测层配过时**出现 ⇒ 旧档下这个返回值**逐字段不变**
+     *    （"关闭时输入、执行顺序与预算逐字段保持原行为"是可被断言的）。
+     */
+    ...(options.forecast !== undefined ? { forecastCallsUsed: forecastCalls } : {}),
+    ...(forecastFailureCode !== undefined ? { forecastFailureCode } : {}),
+    ...(options.forecast !== undefined ? { comparisons } : {}),
   }
 }
 
@@ -660,6 +913,16 @@ export function describeTaskRun(outcome: TaskRunOutcome): string {
     `行动=${String(outcome.actionsUsed)} 停止=${outcome.stopped}` +
     `${outcome.plannerFailureCode !== undefined ? ` 规划失败=${outcome.plannerFailureCode}` : ''}` +
     `${outcome.planRejectedCode !== undefined ? ` 计划被拒=${outcome.planRejectedCode}` : ''}` +
+    // ⚠️ 预测那一栏**只在预测层开过时**出现（旧档逐字不变）。
+    `${outcome.forecastCallsUsed !== undefined && outcome.forecastCallsUsed > 0
+      ? ` 预测=${String(outcome.forecastCallsUsed)}`
+      : ''}` +
+    `${outcome.forecastFailureCode !== undefined ? ` 预测失败=${outcome.forecastFailureCode}` : ''}` +
+    `${outcome.comparisons !== undefined && outcome.comparisons.length > 0
+      ? ` 核对=${outcome.comparisons
+          .map((row) => `${row.capability}.${row.operation}:${row.verdict}`)
+          .join(' ')}`
+      : ''}` +
     `${steps === '' ? '' : ` · ${steps}`}`
   )
 }

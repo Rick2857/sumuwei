@@ -23,6 +23,7 @@
 
 import type { ReflectionHandle } from '../../contracts/reflection.ts'
 import type { ReflectionWindowEntry } from '../../contracts/reflection-input.ts'
+import type { ReflectionOutcomeComparison } from './outcome-comparison.ts'
 
 export interface ReflectionDraftCall {
   /** 字符 id（程序侧） */
@@ -38,6 +39,17 @@ export interface ReflectionDraftCall {
   readonly handles: readonly ReflectionHandle[]
   /** 已有反例的 handle（程序侧已判定"这一条与候选解释相反"） */
   readonly counterHandles: readonly ReflectionHandle[]
+  /**
+   * **辅助比较材料**（三域应用方案 §4；**缺省 ⇒ 没有**）。
+   *
+   * ⚠️ **它不是证据**：比较材料**不产生** handle、**不产生**独立根、**不触发**反思。
+   *    它只是"当时预测什么 / 实际发生什么 / 哪条假设被反驳"的**辅助解释**，
+   *    用来帮草案提出**具体**修正。
+   * ⚠️ 它的两个面都是**程序事实**（声明来自领域事件，结局来自领域事件），
+   *    **没有**模型生成的成分；模型**只能读**，不许引用它当依据。
+   * ⚠️ 它**有界**（份数与总码点都有上界，计入既有输入预算）。
+   */
+  readonly comparisons?: readonly ReflectionOutcomeComparison[]
   /** 触发原因码（程序给，不是模型猜） */
   readonly triggerReasonCodes: readonly string[]
   /** Current lineage reading; a shared input window does not imply a shared source conversation. */

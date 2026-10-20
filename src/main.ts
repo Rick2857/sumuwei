@@ -766,6 +766,7 @@ import {
   resolveLocalAbsolutePath,
 } from './infrastructure/action/adapters/local-filesystem.ts'
 import { createOpenAiTaskPlanner } from './infrastructure/model/openai-task-planner.ts'
+import { createOpenAiActionForecast } from './infrastructure/model/openai-action-forecast.ts'
 /*
  * WP1 / ADR-104：角色自行选择工具（决策端口 + 程序生成的工具目录）。
  */
@@ -2526,6 +2527,23 @@ class ChatSession {
                             TOOL_PLANNER_EVIDENCE_CAP_TOKENS
                           )
                         : 0,
+                  },
+                }
+              : {}),
+            /*
+             * 三域应用方案 §2：**行动预测**（缺省 **off**）。
+             *
+             * ⚠️ **必须真的被消费**（D3 的教训）：关着时这一整段**不存在**，
+             *    任务执行环的输入、执行顺序与预算**逐字段**与旧档相同。
+             * ⚠️ 预测调用**扣同一份规划预算**（`consumePlan`）——
+             *    所以开着它时，能重新规划的次数**真的变少**。这是代价，不是细节。
+             * ⚠️ 预测**不授权**任何东西：它只拿到闭集状态、具名失败码与既有预算内的读回事实。
+             */
+            ...(this.flags.actionForecastEnabled
+              ? {
+                  forecast: {
+                    port: createOpenAiActionForecast(),
+                    deadlineMs: this.flags.actionForecastTimeoutMs,
                   },
                 }
               : {}),
@@ -5864,6 +5882,11 @@ class ChatSession {
           reflectionEnabled: this.flags.reflectionEnabled, adaptiveEnabled: this.flags.adaptiveSelfEnabled,
           provider: createOpenAiReflectionDraftProvider(), fence: this.reflectionFence,
           signal: this.reflectionAbort.signal, recover,
+          /*
+           * 三域应用方案 §4：**比较材料**（缺省 off ⇒ 反思输入与 prompt 逐字节与今天相同）。
+           * ⚠️ 比较材料是**辅助解释**，不是证据：它不产生 handle、不产生根、不触发反思。
+           */
+          outcomeComparisonEnabled: this.flags.reflectionOutcomeComparisonEnabled,
         }))
         logger.info(`[m11] 反思慢路径追赶：${JSON.stringify(scheduling)}`)
       } catch (error) {

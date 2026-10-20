@@ -702,7 +702,13 @@
     "ci:offline": "node scripts/public-ci.mjs",
     "ci:source": "node scripts/public-ci.mjs --source-only",
     "db:init": "tsx scripts/public-db-init.ts",
-    "lv25:optional:verify": "tsx scripts/lv25-optional-verify.ts"
+    "lv25:optional:verify": "tsx scripts/lv25-optional-verify.ts",
+    "worldmodel:forecast:verify": "tsx scripts/world-model-action-forecast-verify.ts",
+    "worldmodel:reflection:verify": "tsx scripts/world-model-reflection-comparison-verify.ts",
+    "worldmodel:reflection:e2e": "tsx scripts/world-model-reflection-e2e-verify.ts",
+    "worldmodel:tools:ab": "tsx scripts/world-model-tools-ab.ts",
+    "worldmodel:reflection:ab": "tsx scripts/world-model-reflection-ab.ts",
+    "worldmodel:gates": "tsx scripts/world-model-gates.ts"
   },
   "dependencies": {
     "@huggingface/transformers": "4.3.0",

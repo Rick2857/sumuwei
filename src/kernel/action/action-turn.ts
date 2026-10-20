@@ -33,6 +33,7 @@ import type { ActionGateway, ActionInvocationContext, TargetResolution } from '.
 import type { ActionIntent, ActionIntentDetector } from './intent-detector.ts'
 import type { TaskAuthorizationPort } from './task-authorization.ts'
 import type { TaskPlan, TaskPlannerPort } from './task-plan.ts'
+import type { ActionForecastPort } from './action-forecast.ts'
 import type { PayloadStagingPort } from './payload-staging.ts'
 import { runTask, type TaskRunOutcome } from './task-loop.ts'
 import { looksLikeTask } from './task-intent.ts'
@@ -219,6 +220,16 @@ export interface ActionTurnPortOptions {
       /** WP3：外部证据的独立额度（缺省 0 ⇒ 规划器看不到搜索命中） */
       evidenceTokens?: number
       quantifier?: (text: string) => number
+    }
+    /**
+     * **行动预测**端口（三域应用方案 §2）。
+     *
+     * ⚠️ 缺省 ⇒ 这一层整段不跑（任务的输入、执行顺序与预算**逐字段**与旧档相同）。
+     * ⚠️ 它**不授权**任何东西：预测只拿到闭集状态、具名失败码与既有预算内的读回事实。
+     */
+    forecast?: {
+      port: ActionForecastPort
+      deadlineMs: number
     }
   }
   /**
@@ -651,6 +662,7 @@ async function maybeRunTask(
        */
       resolveTarget: task.resolveTarget,
       ...(task.replanContext !== undefined ? { replanContext: task.replanContext } : {}),
+      ...(task.forecast !== undefined ? { forecast: task.forecast } : {}),
       invocationFor: ({ authorization: active }) => ({
         initiatorEvidence: initiatorEvidenceOf(options, input),
         ...(active.maxRiskLevel !== undefined ? { riskBudgetOverride: active.maxRiskLevel } : {}),

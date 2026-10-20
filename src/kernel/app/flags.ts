@@ -330,6 +330,21 @@ export interface KernelFlags {
    */
   adaptiveSelfEnabled: boolean
   /**
+   * **三域应用方案 §4**：反思域的**比较材料**开关（代码缺省 **off**）。
+   *
+   * ```text
+   * off（缺省）⇒ 反思输入与 prompt **逐字节**与今天相同（比较材料 = 0 份）
+   * on         ⇒ 对**已获资格**的目标/承诺结局，附加"当时预测 / 实际发生"的辅助比较
+   * ```
+   *
+   * ⚠️ 比较材料**不是证据**：它**不产生** handle、**不产生**独立根、**不触发**反思；
+   *    门槛（≥3 根 / ≥2 会话 / 无未解决冲突）**只**看既有来源。
+   * ⚠️ 它**多花一次读**（读原始声明事件），但**不多花模型调用**
+   *    （反思本来就有且仅有一次模型调用，`D30`）。
+   * ⚠️ **必须被 `main.ts` 真的消费**（D3 的教训：只被读进 flags 而没有消费者 = 惰性开关）。
+   */
+  reflectionOutcomeComparisonEnabled: boolean
+  /**
    * **M11 / ADR-085 `D27` / `D34`**：行为策略块的独立额度。
    *
    * ⚠️ 与 `rollupTokens` 同一形状：**接线就位、缺省 0、激活另裁**（先例 ADR-048）。
@@ -415,6 +430,28 @@ export interface KernelFlags {
   taskMaxPlans: number
   /** 每任务总时限（毫秒；计划书 §2.2 候选值 10 分钟） */
   taskDeadlineMs: number
+  /**
+   * **行动预测**总开关（三域应用方案 §2；代码缺省 **off**）。
+   *
+   * ```text
+   * off（缺省）⇒ 任务执行环**不**请求预测：输入、执行顺序与预算**逐字段**与旧档相同
+   * on         ⇒ 每份计划在执行前要一次预测；执行后用**真实结果**核对；
+   *              核对不通过 ⇒ 停止沿用该结果的后续步骤并重新规划
+   * ```
+   *
+   * ⚠️ 它**会**多花模型调用：预测调用**扣同一份规划预算**
+   *    （"不得借新模型调用绕过既有 `maxPlans`"）⇒ 开着它时能重新规划的次数真的变少。
+   * ⚠️ 它**不授权**任何东西：预测只拿到闭集状态、具名失败码与既有预算内的读回事实。
+   * ⚠️ **必须被 `main.ts` 真的消费**（D3 的教训：只被读进 flags 而没有消费者 = 惰性开关）。
+   */
+  actionForecastEnabled: boolean
+  /**
+   * 预测调用的**硬期限**（毫秒，缺省 20000，有界 1000..60000）。
+   *
+   * ⚠️ 它**不会**超过任务剩余时限（执行环取两者较小值）。
+   * ⚠️ 非法/越界 ⇒ 回落缺省（失败关闭方向）。
+   */
+  actionForecastTimeoutMs: number
   /**
    * WP1 / ADR-104：**工具决策模式**（代码缺省 `rules`）。
    *
@@ -894,6 +931,12 @@ export function readKernelFlags(env: NodeJS.ProcessEnv = process.env): KernelFla
     // M11 / ADR-085 D19：反思与行为调整**两个独立开关**，代码缺省均 off
     reflectionEnabled: truthy(env.CHARACTER_REFLECTION_ENABLED, false),
     adaptiveSelfEnabled: truthy(env.CHARACTER_ADAPTIVE_SELF_ENABLED, false),
+    /*
+     * 三域应用方案 §4：反思域的**比较材料**缺省 **off**。
+     * ⚠️ 缺省 off 时反思的输入与 prompt **逐字节**与今天相同。
+     * ⚠️ 必须被 `main.ts` 真的消费（只被读进 flags 而没有消费者 = 惰性开关，D3 的教训）。
+     */
+    reflectionOutcomeComparisonEnabled: truthy(env.CHARACTER_REFLECTION_OUTCOME_COMPARISON_ENABLED, false),
     // M11 / ADR-085 D27+D34：行为策略的独立额度（缺省 0；上限 800 是 D27 的硬上限）
     adaptiveSelfTokens: boundedInt(
       env.CHARACTER_ADAPTIVE_SELF_TOKENS,
@@ -948,6 +991,19 @@ export function readKernelFlags(env: NodeJS.ProcessEnv = process.env): KernelFla
       1_000,
       60 * 60 * 1000,
       'CHARACTER_TASK_DEADLINE_MS'
+    ),
+    /*
+     * 三域应用方案 §2：**行动预测**缺省 **off**。
+     * ⚠️ 缺省 off 时任务执行环**一次预测都不请求**（旧档逐字不变）。
+     * ⚠️ 它必须被 `main.ts` 真的消费（只被读进 flags 而没有消费者 = 惰性开关，D3 的教训）。
+     */
+    actionForecastEnabled: truthy(env.CHARACTER_ACTION_FORECAST_ENABLED, false),
+    actionForecastTimeoutMs: boundedInt(
+      env.CHARACTER_ACTION_FORECAST_TIMEOUT_MS,
+      20_000,
+      1_000,
+      60_000,
+      'CHARACTER_ACTION_FORECAST_TIMEOUT_MS'
     ),
     /*
      * WP1 / ADR-104：工具决策模式，代码缺省 `rules`。

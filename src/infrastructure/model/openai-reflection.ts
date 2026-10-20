@@ -84,7 +84,7 @@ const FIELD_NOTES: Readonly<Record<string, string>> = {
 /**
  * **从契约生成**提示词（导出是为了让门能断言"提示词与契约同步"）。
  */
-export function buildReflectionInstruction(): string {
+export function buildReflectionInstruction(includeComparison = false): string {
   const fields = REFLECTION_DRAFT_FIELD_ALLOWLIST.map(
     (field) => `- ${field}：${FIELD_NOTES[field] ?? '（见契约）'}`
   ).join('\n')
@@ -106,6 +106,11 @@ export function buildReflectionInstruction(): string {
     '· **用户自己的话只能证明"他说过"**：它不能证明外部事实；',
     '· **她（助手）自己说过的话不是证据**：不能拿她的话当"用户报告"；',
     '· **程序结果不等于用户意思**：系统跑出来的成功/失败不是用户的评价；',
+    ...(includeComparison ? [
+      '· **辅助比较材料不是证据**：程序给的"当时预测 / 实际发生"对照只用来帮你指出具体偏差，',
+      '  **不许**把它写进 supportHandles / counterHandles，**也不许**把它当成一条独立经历；',
+      '  目标或承诺声明表示意图，不是对世界的预测；结局受阻不证明成功判据被反驳。',
+    ] : []),
     '· **有反例就如实写进 `counterHandles`**：不许把相反的证据藏起来；',
     '· **不确定就降低主张**：宁可只描述"这次是什么情况"，不要上升为她的性格。',
     '· suggestedSlot 是有充分依据时的稳定处置建议，不是每次都必须三选一；依据已遗忘、属于别的用户、只有一个经历被反复转述，或直接冲突未解决时，省略该字段，只说明当前限制。',
@@ -148,12 +153,37 @@ export function buildReflectionUserMessage(call: ReflectionDraftCall): string {
     call.counterHandles.length === 0
       ? '（程序没有发现反例）'
       : call.counterHandles.map((handle) => `- ${handle.id}`).join('\n')
+  /*
+   * ⚠️ **比较材料是单独一段**，与"合法依据"**物理分开**（三域应用方案 §4）。
+   *    它**不是证据**：不能被引用进 `supportHandles` / `counterHandles`。
+   *    段落标题逐字写明"不是证据" —— 提示词里的标签是**事实约束**，不是风格建议。
+   * ⚠️ 缺省（没有比较材料）⇒ 这一段**整个不出现** ⇒ prompt 基线逐字不变。
+   */
+  const comparisonSection =
+    call.comparisons === undefined || call.comparisons.length === 0
+      ? []
+      : [
+          '',
+          '**辅助比较材料（不是证据）**：下面是程序给出的"当时预测 / 实际发生"对照，',
+          '用来帮你指出**具体**的偏差。它**不能**被写进 supportHandles / counterHandles，',
+          '也不能单独构成一条依据 —— 只有上面窗口里的来源才是依据。',
+          ...call.comparisons.map(
+            (row) =>
+              `- [${row.comparisonId}] ${row.outcomeKind} · ${row.outcomeCode}\n` +
+              `  原定意图：${row.predictedText}\n` +
+              `  实际发生：${row.actualText}` +
+              (row.reviewCriterion === undefined
+                ? '\n  待复核的成功判据：（未提供）'
+                : `\n  待复核的成功判据：${row.reviewCriterion}`)
+          ),
+        ]
   return [
     '合法 handle 集合（`supportHandles` / `counterHandles` 只能从这里选）：',
     handles === '' ? '（空）' : handles,
     '',
     '程序发现的反例 handle：',
     counters,
+    ...comparisonSection,
     '',
     `触发原因码（程序给）：${call.triggerReasonCodes.join(', ') || '（无）'}`,
     ...(call.sourceConversationCount === undefined ? [] : [`来源会话数（程序结构读数，不代表内容印证）：${call.sourceConversationCount}`]),
@@ -216,7 +246,7 @@ export function createOpenAiReflectionDraftProvider(
             temperature: 0,
             response_format: { type: 'json_object' },
             messages: [
-              { role: 'system', content: buildReflectionInstruction() },
+              { role: 'system', content: buildReflectionInstruction((call.comparisons?.length ?? 0) > 0) },
               { role: 'user', content: buildReflectionUserMessage(call) },
             ],
           }),

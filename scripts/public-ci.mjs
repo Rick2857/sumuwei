@@ -24,6 +24,7 @@ writeFileSync('.env', marker, { flag: 'wx' })
 try {
   if (typeof nodeModule.registerHooks !== 'function') console.log('NOT RUN: lv25 import-graph probe needs registerHooks; use the pinned CI Node version for this check.')
   const commands = [['typecheck'], ['scripts:catalog:verify'],
+    ['worldmodel:forecast:verify'], ['worldmodel:reflection:verify'], ['worldmodel:gates', '--verify'],
     ...(typeof nodeModule.registerHooks === 'function' ? [['lv25:optional:verify']] : []), ['thinhost:wiring:verify'],
     ['thinhost:surface:verify'], ['thinhost:retirement:verify'], ['thinhost:uuid:parity'],
     ['exec', 'tsx', 'scripts/priority-tools-verify.ts'], ['deploy:verify'],

@@ -1,5 +1,7 @@
 # Public distribution boundaries
 
+The 2026-10-20 world-model-method update adds opt-in action forecasts and reflection outcome context along the existing public history. Both defaults stay off. The 26 story-specific files and the optional Lv2.5 behavior from 3f7c4fc are preserved. Only selected feature hunks are exported; private retirement patches, unrelated clarification changes, configuration, activation records, database/model evidence and private Git history are excluded. Source checks and one isolated PostgreSQL mechanism gate were rerun in this checkout; real-model/behavior/production results are not inferred from them. See WORLD-MODEL.md and the latest section of PUBLIC-VERIFICATION.md.
+
 The 2026-10-20 Lv2.5 update preserves the existing story implementation, content,
 commands and history as an opt-in feature. A separate feature entry is loaded
 only inside an enabled story branch or an explicit story command; the three

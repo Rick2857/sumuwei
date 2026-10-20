@@ -43,6 +43,14 @@ import {
 } from '../../kernel/policies/reflection-validator.ts'
 import { planAdaptiveSelfChange } from '../../kernel/app/reflection/adaptive-self.ts'
 import { buildReflectionInput } from '../../kernel/app/reflection/inputs.ts'
+import {
+  buildOutcomeComparisons,
+  comparisonSourceIdsOf,
+  comparisonsStillUsable,
+  reflectionInputFingerprintPayload,
+  type ReflectionComparisonSource,
+  type ReflectionOutcomeComparison,
+} from '../../kernel/app/reflection/outcome-comparison.ts'
 import { createFullDomainEventRegistry } from '../../kernel/contracts/domain-event.ts'
 import { assertValidatorAccepted } from '../../kernel/policies/validator.ts'
 import type { ReflectionDraftProvider } from '../../kernel/app/reflection/draft-port.ts'
@@ -105,6 +113,19 @@ export interface ReflectionRunnerInput {
     | 'unavailable'
   /** 本窗口是否存在**未解决的反例**（`D10` 的第三条件）。缺省 false。 */
   readonly unresolvedConflict?: boolean
+  /**
+   * **比较材料**的取数**工厂**（三域应用方案 §4；**缺省 ⇒ 没有比较材料**）。
+   *
+   * ⚠️ 为什么是**工厂**而不是实例（2026-10-20 隔离整链**实测**出来的真缺陷）：
+   *   二次来源复核发生在**事务内**。若端口实例绑的是**事务外**的句柄，
+   *   那次复核就会用**另一条连接**（PostgreSQL）或**同一条被占住的连接**（PGlite）
+   *   去查 ⇒ 单连接后端上**直接死锁**（实测：整链挂死，事件循环空转）。
+   *   ⇒ 端口必须能**按当前读面**重建：装配用外层句柄，复核用 `tx`。
+   *
+   * ⚠️ 比较材料**不产生** handle、**不产生**根、**不触发**反思。
+   * ⚠️ 缺省时整条链与今天**逐字相同**（`comparisons` 为空 ⇒ prompt 多出 0 字节）。
+   */
+  readonly comparisonSource?: (db: RawDb) => ReflectionComparisonSource
 }
 
 export interface ReflectionRunnerOutcome {
@@ -144,8 +165,40 @@ export async function runReflectionWindow(
     return { kind: 'rejected', eventsWritten: 0, reflectionId: null, detail: '来源当前不可用；捕获前停止出站' }
   }
 
+  /*
+   * ---------------------------------------------------------------------------
+   *  辅助比较材料（三域应用方案 §4）
+   * ---------------------------------------------------------------------------
+   * 装配条件（三条**都**成立才有）：
+   * ```text
+   * ① 既有触发存在（`built` 非 undefined —— 没有触发就不做事，`D15`）
+   * ② 来源可用（`captured.usable` —— 上面已经判过）
+   * ③ 配了取数端口（缺省 ⇒ 零比较材料，行为逐字不变）
+   * ```
+   * ⚠️ 比较材料**不是证据**：它不进 `handles`、不进 `roots`、不改变门槛判定。
+   * ⚠️ 它的**身份**进 `inputWindowFingerprint`（幂等身份的一部分）——
+   *    否则"窗口没变但比较变了"会被当成同一份输入跳过。
+   */
+  let comparisons: readonly ReflectionOutcomeComparison[] = []
+  if (input.comparisonSource !== undefined) {
+    comparisons = await buildOutcomeComparisons({
+      triggers: built.triggers,
+      source: input.comparisonSource(db),
+    })
+  }
+
   // Own output events can advance latestSequence after a crash; they are not new experiences.
-  const inputFingerprint = `m111-input@1:${createHash('sha256').update(JSON.stringify(built.window.map(row => [row.id, row.kind, row.revision, row.sourceClass]))).digest('hex')}`
+  /*
+   * ⚠️ 指纹载荷是**纯函数**（`reflectionInputFingerprintPayload`）——
+   *    "没有比较材料时逐字等于旧格式"这条性质因此**可被单测**，
+   *    而不是"藏在 runner 里、只能靠整链跑才看得见"。
+   */
+  const windowFingerprintRows: readonly (readonly [string, string, number, string])[] = built.window.map(
+    row => [row.id, row.kind, row.revision, row.sourceClass] as const
+  )
+  const inputFingerprint = `m111-input@1:${createHash('sha256')
+    .update(reflectionInputFingerprintPayload(windowFingerprintRows, comparisons))
+    .digest('hex')}`
   const maxTrigger = Math.max(...built.triggers.map(trigger => trigger.sequence))
   const providedIds = new Set(built.handles.map(handle => handle.id))
   const findSameInput = async (store: RawDb) => (await listReflectionRecords(store, input.characterId)).find(record => {
@@ -177,6 +230,7 @@ export async function runReflectionWindow(
     window: built.window,
     handles: built.handles,
     counterHandles: [],
+    ...(comparisons.length > 0 ? { comparisons } : {}),
     triggerReasonCodes: built.triggers.map((trigger) => trigger.kind),
     sourceConversationCount: captured.conversationCount,
     deadlineMs: budgetMs,
@@ -222,6 +276,32 @@ export async function runReflectionWindow(
   const changed = [currentSources, counterSources].some(snapshot => snapshot !== undefined &&
     Object.entries(snapshot.revisions).some(([id, revision]) => captured.revisions[id] !== revision))
   if (!currentSources.usable || counterSources?.usable === false || changed) return { kind: 'rejected', eventsWritten: 0, reflectionId: null, detail: '提交前来源失效或版本漂移；不保存过期草案' }
+  /*
+   * ⚠️ **比较材料的二次来源复核**（三域应用方案 §4："持久化比较必须纳入…二次来源复核"）。
+   *    模型调用**期间**来源可能已被遗忘/撤回 ⇒ 那份比较**整条作废**，
+   *    **不保存**基于它的草案。
+   * ⚠️ 这一步**不**把比较的来源变成根：它只判"还能不能用"。
+   */
+  if (comparisons.length > 0 && input.comparisonSource !== undefined) {
+    const comparisonIds = comparisonSourceIdsOf(comparisons)
+    // Auxiliary dependencies must already be among the independently selected
+    // support roots. This preserves later withdrawal/invalidation without
+    // turning the comparison into a new root or changing the frozen schema.
+    if (comparisonIds.some(id => !roots.includes(id))) {
+      return { kind: 'rejected', eventsWritten: 0, reflectionId: null,
+        detail: '比较依赖未被既有支持根覆盖；不保存无法持续复核的草案' }
+    }
+    /*
+     * ⚠️ **必须绑到 `tx`**（不是事务外那句柄）：复核发生在事务里，
+     *    用另一条连接查会与事务**互相等待**（单连接后端上直接死锁）。
+     */
+    const verdicts = comparisonIds.length === 0
+      ? []
+      : await input.comparisonSource(tx).usabilityOf(comparisonIds, { lock: true })
+    if (!comparisonsStillUsable(verdicts, comparisonIds)) {
+      return { kind: 'rejected', eventsWritten: 0, reflectionId: null, detail: '比较材料的来源在模型调用期间失效；不保存过期草案' }
+    }
+  }
   const registry = createFullDomainEventRegistry()
   const processedKeys = new Set<string>()
   const reviewFacts = new Map<string, ReflectionReviewFacts>()
@@ -284,8 +364,7 @@ export async function runReflectionWindow(
 
   const proposed = await emit(
     REFLECTION_PROPOSED,
-    {
-      reflectionId,
+    {      reflectionId,
       focusQuestion: parsed.draft.focusQuestion,
       explanation: parsed.draft.explanation,
       supportHandles: [...parsed.draft.supportHandles],
@@ -298,7 +377,8 @@ export async function runReflectionWindow(
       conversationCount,
       windowTruncated: built.windowTruncated,
       modelVersion: input.provider.version,
-      promptVersion: input.provider.promptVersion ?? 'reflection-prompt@1',
+      promptVersion: (input.provider.promptVersion ?? 'reflection-prompt@1') +
+        (comparisons.length > 0 ? '+outcome-comparison@1' : ''),
       inputWindowFingerprint: inputFingerprint,
     },
     sourceEventId

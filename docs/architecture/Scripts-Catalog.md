@@ -19,12 +19,12 @@
 | 类别 | 条目数 |
 |---|---:|
 | 已登记门 | 250 |
-| 汇总/链入口 | 18 |
+| 汇总/链入口 | 19 |
 | 文档入口 | 3 |
-| 内部 | 424 |
-| **合计** | **695** |
+| 内部 | 429 |
+| **合计** | **701** |
 
-`scripts/` 下**没有任何 pnpm 入口引用**的脚本文件：**306 个**（见文末）。
+`scripts/` 下**没有任何 pnpm 入口引用**的脚本文件：**307 个**（见文末）。
 
 ## 每条 lane 的入口命令
 
@@ -476,6 +476,13 @@
 
 **内部（1）**：`with-test-model`
 
+### `worldmodel`（6 条）
+
+**入口**：
+- `worldmodel:gates` — 汇总/链入口
+
+**内部（5）**：`worldmodel:forecast:verify` · `worldmodel:reflection:ab` · `worldmodel:reflection:e2e` · `worldmodel:reflection:verify` · `worldmodel:tools:ab`
+
 ## 没有任何 pnpm 入口引用的脚本文件
 
 判据：`scripts/` 下的脚本文件路径**不出现在任何** `package.json` 命令里（含子目录；跳过 `__pycache__`）。这些文件由别的脚本 import、由门调用、或是一次性排查件 —— **它们不是入口**。
@@ -786,4 +793,5 @@
 - `scripts/wechat-discretion-verify.ts`
 - `scripts/wechat-group-verify.ts`
 - `scripts/wechat-main-verify.ts`
+- `scripts/world-model/isolated-bed.ts`
 
