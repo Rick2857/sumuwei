@@ -216,13 +216,8 @@ import {
   relationshipOwnerOf,
   type RelationshipSchedulerOutcome,
 } from './infrastructure/runtime/relationship-scheduler.ts'
-/* S8 / ADR-094 `R-2` 选项 A：生产内容包来自 `src/content/**`（**不**从 `evals/**` 取） */
-import { JICHUANG_PACK } from './content/storyline/jichuang-interview-two/story-pack.ts'
-import { createStoryCognition } from './infrastructure/runtime/story-cognition.ts'
-import { runStoryWithdrawCommand } from './infrastructure/runtime/story-withdraw-command.ts'
-import { runStoryStartCommand } from './infrastructure/runtime/story-start-command.ts'
-/* S8 / `ADR-107` `R-1b`：私有决策调用的**适配器**（它不是故事边界依赖：路径不含 `storyline/`） */
-import { createOpenAiStoryChoicePort } from './infrastructure/model/openai-story-choice.ts'
+// Lv2.5 is opt-in. This type import does not load its runtime or content.
+import type { createStoryCognition } from './features/lv25/index.ts'
 import {
   affectTurnObservationOf,
   maybeRunAffectEvaluation,
@@ -4059,6 +4054,7 @@ class ChatSession {
      *    ⇒ "永远 0 行"已不成立；`L-S8-30` 是否销账由维护线裁定。
      */
     if (this.flags.storyCognitionEnabled && this.kernel && !this.dryRun) {
+      const { createStoryCognition, JICHUANG_PACK } = await import('./features/lv25/index.ts')
       const cognition = createStoryCognition({
         db: this.kernel.stores.db,
         characterId: this.kernel.characterId,
@@ -4534,6 +4530,7 @@ class ChatSession {
              */
             logger.info('[s8] 剧情选择解析：本轮没有可用的故事装配（`open()` 未建）⇒ 跳过')
           } else {
+            const { createOpenAiStoryChoicePort } = await import('./features/lv25/index.ts')
             const storyInput = {
               anchorConversationEventId: String(anchor),
               actorId: this.ids.userId,
@@ -8532,6 +8529,7 @@ async function main(): Promise<void> {
    * ⚠️ 失败关闭：来源不可解析 / 理由不在闭集 / **引用不存在** ⇒ 具名拒收且零写入。
    */
   if (argv.includes('--story-withdraw')) {
+    const { runStoryWithdrawCommand } = await import('./features/lv25/index.ts')
     const code = await runStoryWithdrawCommand({
       db: kernel.stores.db,
       characterId: kernel.characterId,
@@ -8553,6 +8551,7 @@ async function main(): Promise<void> {
    *    这条由 `assertStoryCommitBinding` 强制，不靠这里自觉。
    */
   if (argv.includes('--story-start')) {
+    const { runStoryStartCommand } = await import('./features/lv25/index.ts')
     const code = await runStoryStartCommand({
       db: kernel.stores.db,
       characterId: kernel.characterId,

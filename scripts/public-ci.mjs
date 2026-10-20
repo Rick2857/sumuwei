@@ -2,6 +2,7 @@
 import { existsSync, writeFileSync, readFileSync, unlinkSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
+import nodeModule from 'node:module'
 const root = fileURLToPath(new URL('../', import.meta.url))
 process.chdir(root)
 if (!process.argv.includes('--source-only')) {
@@ -21,7 +22,9 @@ Object.assign(env, { CI: 'true', NO_COLOR: '1', PROMPTFOO_DISABLE_TELEMETRY: '1'
 const marker = '# public-ci empty environment\n'
 writeFileSync('.env', marker, { flag: 'wx' })
 try {
-  const commands = [['typecheck'], ['scripts:catalog:verify'], ['thinhost:wiring:verify'],
+  if (typeof nodeModule.registerHooks !== 'function') console.log('NOT RUN: lv25 import-graph probe needs registerHooks; use the pinned CI Node version for this check.')
+  const commands = [['typecheck'], ['scripts:catalog:verify'],
+    ...(typeof nodeModule.registerHooks === 'function' ? [['lv25:optional:verify']] : []), ['thinhost:wiring:verify'],
     ['thinhost:surface:verify'], ['thinhost:retirement:verify'], ['thinhost:uuid:parity'],
     ['exec', 'tsx', 'scripts/priority-tools-verify.ts'], ['deploy:verify'],
     ['postlv2:entry-handshake:verify'], ['postlv2:entry-cancel:verify'], ['postlv2:entry-reconnect:verify'],

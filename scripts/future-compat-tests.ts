@@ -578,7 +578,8 @@ test('世界/故事实现只允许住在具名模块边界内（阶段锁 → �
      * 这是判据在起作用的例子：第一版实现真把账本 SQL 适配器拉进了 `main.ts`，
      * 就是这条负控把它挡下来的。
      */
-    'src/main.ts': ['src/content/storyline/jichuang-interview-two/story-pack.ts'],
+    // Opt-in entry owns the content dependency; main has no eager story dependency.
+    'src/features/lv25/index.ts': ['src/content/storyline/jichuang-interview-two/story-pack.ts'],
   }
 
   /**
@@ -732,7 +733,8 @@ test('世界/故事实现只允许住在具名模块边界内（阶段锁 → �
     [],
     '注释里的 import 说明不构成实际依赖'
   )
-  console.log(`  [FC-T04 量具] 实际登记依赖=${registeredDependencies} · 注入/恢复=5/5 · 越界反例=${rejected.length}`)
+  const registeredFiles = Object.keys(REGISTERED_STORY_IMPORTS).length
+  console.log(`  [FC-T04 量具] 实际登记依赖=${registeredDependencies} · 注入/恢复=${registeredFiles}/${registeredFiles} · 越界反例=${rejected.length}`)
 
   const offenders: string[] = []
 

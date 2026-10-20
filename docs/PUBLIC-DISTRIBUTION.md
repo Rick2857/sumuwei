@@ -1,5 +1,13 @@
 # Public distribution boundaries
 
+The 2026-10-20 Lv2.5 update preserves the existing story implementation, content,
+commands and history as an opt-in feature. A separate feature entry is loaded
+only inside an enabled story branch or an explicit story command; the three
+chat-integration switches remain false by default. No retirement/deletion patch
+from a private checkout is imported. This source-only update contains no
+deployment record, environment file, production database or runtime evidence.
+See [OPTIONAL-LV25.md](OPTIONAL-LV25.md).
+
 The 2026-10-20 source update continues the public server-edition line. It carries the dependency-removal work into the public source tree: the four ElizaOS packages are removed from `package.json` and the lockfile, `@electric-sql/pglite` becomes a direct dependency, and the thin Node host is the only runtime — the former "off" value now refuses to start instead of silently falling back. The local type, vocabulary, logger, UUID and reply-parser layers replace their upstream imports, and the de-dependency gates ship with their verification source. The dependency-removal plan document's boundary text is updated to match. See [DEPENDENCY-REMOVAL-PLAN.md](DEPENDENCY-REMOVAL-PLAN.md).
 
 ⚠️ This update publishes **source only**. It contains no production database, no environment file, no deployment record, no activation record and no runtime evidence. Whether any given environment runs this source, and with which configuration, is not stated by this distribution. The historical paragraph below describes the 2026-10-19 update and retains its publication-time scope.

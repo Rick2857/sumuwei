@@ -21,10 +21,10 @@
 | 已登记门 | 250 |
 | 汇总/链入口 | 18 |
 | 文档入口 | 3 |
-| 内部 | 423 |
-| **合计** | **694** |
+| 内部 | 424 |
+| **合计** | **695** |
 
-`scripts/` 下**没有任何 pnpm 入口引用**的脚本文件：**305 个**（见文末）。
+`scripts/` 下**没有任何 pnpm 入口引用**的脚本文件：**306 个**（见文末）。
 
 ## 每条 lane 的入口命令
 
@@ -180,6 +180,10 @@
 **已登记门（7）**：`lv2:core:verify` · `lv2:gates` · `lv2:inherited:gates` · `lv2:measurement:verify` · `lv2:privacy:budget:verify` · `lv2:regression:read` · `lv2:repair:verify`
 
 **内部（7）**：`lv2:baseline` · `lv2:corpus:freeze` · `lv2:diagnose:memory` · `lv2:restart:preflight` · `lv2:review:materials` · `lv2:short:live` · `lv2:trajectory`
+
+### `lv25`（1 条）
+
+**内部（1）**：`lv25:optional:verify`
 
 ### `m10`（32 条 · **有同名 lane**）
 
@@ -536,6 +540,7 @@
 - `scripts/lv2-harness.ts`
 - `scripts/lv2-m51-inherited.ts`
 - `scripts/lv2-regression-evidence.ts`
+- `scripts/lv25-import-probe.ts`
 - `scripts/m10-evidence.ts`
 - `scripts/m10-gauge-audit.ts`
 - `scripts/m10-harness.ts`

@@ -701,7 +701,8 @@
     "avatar:3d:test:live": "node experiments/omni-realtime/test-avatar.mjs --live",
     "ci:offline": "node scripts/public-ci.mjs",
     "ci:source": "node scripts/public-ci.mjs --source-only",
-    "db:init": "tsx scripts/public-db-init.ts"
+    "db:init": "tsx scripts/public-db-init.ts",
+    "lv25:optional:verify": "tsx scripts/lv25-optional-verify.ts"
   },
   "dependencies": {
     "@huggingface/transformers": "4.3.0",
