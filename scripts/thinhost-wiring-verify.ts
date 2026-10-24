@@ -26,6 +26,8 @@ import { thinHostEnabled, createThinHostRuntime, currentHostLabel } from '../src
 import { ThinHostRuntime } from '../src/infrastructure/runtime/thin-host.ts'
 import { stopRuntimeServices, isDatabaseClosed, closeDatabaseConnection } from '../src/infrastructure/persistence/runtime-shutdown.ts'
 import { setActiveHostKind } from '../src/infrastructure/runtime/thin-host-bridge.ts'
+import { readFileSync } from 'node:fs'
+import { parse } from 'dotenv'
 
 interface Check { id: string; ok: boolean; detail: string }
 const checks: Check[] = []
@@ -42,6 +44,9 @@ check(
 )
 
 // --- W2 `off` / 非法值 ⇒ 拒绝启动（D2：旧断言是"失败关闭回 off"）---
+check('W1-server-template-starts', thinHostEnabled(parse(readFileSync('.env.server.example'))) === true,
+  '发行模板必须选择仍受支持的宿主')
+
 {
   let offThrew = false
   let offMessage = ''

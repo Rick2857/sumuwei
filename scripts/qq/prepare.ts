@@ -1,4 +1,4 @@
-/** Prepare independent NapCat configuration; does not start QQ or open LG's database. */
+/** Prepare LLBot/PMHQ configuration; does not start QQ or open LG's database. */
 import { parse } from 'dotenv'
 import { randomBytes } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -12,33 +12,39 @@ if (existsSync(path)) {
   env = parse(readFileSync(path))
 } else {
   const option = (name: string): string => process.argv.find((arg) => arg.startsWith(`--${name}=`))?.split('=')[1] ?? ''
-  const yukiPath = resolve(process.env.USERPROFILE ?? '', 'Yuki-QQbot/.env')
-  const yuki = existsSync(yukiPath) ? parse(readFileSync(yukiPath)) : {}
   env = {
-    QQ_OWNER_ID: option('owner'), QQ_BOT_ID: option('bot'), QQ_ONEBOT_WS_URL: 'ws://127.0.0.1:6701/',
+    QQ_OWNER_ID: option('owner'), QQ_BOT_ID: option('bot'), QQ_ONEBOT_WS_URL: 'ws://127.0.0.1:13001/',
     QQ_ONEBOT_ACCESS_TOKEN: randomBytes(32).toString('base64url'),
-    QQ_NAPCAT_WEBUI_TOKEN: randomBytes(32).toString('base64url'),
-    QQ_NAPCAT_IMAGE: yuki.NAPCAT_IMAGE ?? 'mlikiowa/napcat-docker@sha256:1336a777f9a4f1f8cb89fef42f7548deacd3645919a067a50df5b66b5e77390e',
   }
-  if (env.QQ_BOT_ID === yuki.NAPCAT_ACCOUNT) throw new Error('Independent QQ bot must not reuse Yuki account')
-  readQqPrivateConfig(env)
-  writeFileSync(path, Object.entries(env).map(([key, value]) => `${key}=${value}`).join('\n') + '\n', { flag: 'wx' })
 }
+env.QQ_ONEBOT_WS_URL ||= 'ws://127.0.0.1:13001/'
+env.QQ_ONEBOT_ACCESS_TOKEN ||= randomBytes(32).toString('base64url')
 const settings = readQqPrivateConfig(env)
-const configDir = resolve(root, 'data/qq-private/config')
-mkdirSync(configDir, { recursive: true })
-mkdirSync(resolve(root, 'data/qq-private/qq'), { recursive: true })
+env.QQ_ONEBOT_PORT = new URL(settings.wsUrl).port || '80'
+env.LLBOT_IMAGE ||= 'linyuchen/llbot@sha256:9a6f187e6792e5d42001997ac3c40e19f6024db0db0d0efdbc9a87f0832a26c8'
+env.PMHQ_IMAGE ||= 'linyuchen/pmhq@sha256:7f875d1aa0a0e1baa9d37c4fe6394d6ddce2b50fa1811088629033d13506757f'
+env.LLBOT_WEBUI_PORT ||= '13080'
+env.LLBOT_WEBUI_TOKEN ||= randomBytes(32).toString('base64url')
+env.PMHQ_AUTH_TOKEN ||= ''
+delete env.QQ_NAPCAT_IMAGE
+delete env.QQ_NAPCAT_WEBUI_TOKEN
+const configDir = resolve(root, 'data/qq-llbot/data')
+mkdirSync(configDir, { recursive: true, mode: 0o700 })
+mkdirSync(resolve(root, 'data/qq-llbot/qq'), { recursive: true, mode: 0o700 })
 const config = {
-  network: {
-    httpServers: [], httpClients: [], httpSseServers: [], websocketClients: [],
-    websocketServers: [{
-      name: 'lg-private-ws', enable: true, host: '0.0.0.0', port: 3001,
-      messagePostFormat: 'array', reportSelfMessage: false, token: settings.token, debug: false, heartInterval: 30000,
-    }],
-  },
-  musicSignUrl: '', enableLocalFile2Url: false, parseMultMsg: false,
+  webui: { enable: true, host: '0.0.0.0', port: 3080 },
+  ob11: { enable: true, connect: [{ type: 'ws', enable: true, host: '0.0.0.0', port: 3001,
+    token: settings.token, messageFormat: 'array', reportSelfMessage: false,
+    reportOfflineMessage: false, debug: false, heartInterval: 5000 }] },
+  milky: { enable: false, reportSelfMessage: false,
+    http: { host: '127.0.0.1', port: 3010, prefix: '', accessToken: '' }, webhook: { urls: [], accessToken: '' } },
+  satori: { enable: false, host: '127.0.0.1', port: 5600, token: '' },
+  enableLocalFile2Url: false, log: false, logLevel: 'info', autoDeleteFile: false,
+  autoDeleteFileSecond: 60, musicSignUrl: '', msgCacheExpire: 120, ffmpeg: '/usr/bin/ffmpeg',
 }
-for (const name of ['onebot11.json', `onebot11_${settings.botId}.json`]) {
-  writeFileSync(resolve(configDir, name), JSON.stringify(config, null, 2) + '\n')
+for (const name of ['default_config.json', `config_${settings.botId}.json`]) {
+  writeFileSync(resolve(configDir, name), JSON.stringify(config, null, 2) + '\n', { mode: 0o600 })
 }
-console.log('QQ configuration prepared: independent data/qq-private; existing pinned NapCat image; no service started')
+writeFileSync(resolve(configDir, 'webui_token.txt'), env.LLBOT_WEBUI_TOKEN, { mode: 0o600 })
+writeFileSync(path, Object.entries(env).map(([key, value]) => `${key}=${JSON.stringify(value)}`).join('\n') + '\n', { mode: 0o600 })
+console.log('LLBot PMHQ prepared: data/qq-llbot; set PMHQ_AUTH_TOKEN in .env.qq before starting; no service started')

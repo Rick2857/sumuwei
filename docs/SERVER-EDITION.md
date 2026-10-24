@@ -35,9 +35,9 @@ pnpm migrate
 pnpm migrate:apply
 ```
 
-本次快照包含启动 DDL 解耦：所需六张插件表已存在时跳过插件建表，缺表仍走原初始化路径。此检查不能证明列结构正确，也不等于运行账号与迁移账号的权限分离已完整验收。保持单认知核心，数据库的多个客户端不等于可以同时启动多个角色核心。
+当前运行时拒绝启动期插件 DDL，所需六张兼容基础表必须事先准备；表名检查不能证明列结构正确，也不等于运行账号与迁移账号的权限分离已完整验收。保持单认知核心，数据库的多个客户端不等于可以同时启动多个角色核心。
 
-源码还包含可选的薄 Node 宿主：`CHARACTER_THIN_HOST=on` 通过既有工厂替换宿主实现，认知与权限仍由 Kernel / TurnGateway / ActionGateway 持有。代码缺省关闭，模板保留关闭；工厂保留 PostgreSQL 与历史 PGlite 兼容分支，但后续测试只使用隔离 PostgreSQL。薄宿主拒绝启动时插件 DDL，旧 `composeState` 链路不支持；需要已准备的插件表与 ContextCompiler，不能与 `CHARACTER_CONTEXT_COMPILER_V1=0` 同用。本公开副本的接线与接口检查不替代真实 PostgreSQL 等价性、生产切换或真人体验验收。
+薄 Node 宿主已成为唯一运行时，ElizaOS 运行时依赖已移除；认知与权限仍由 Kernel / TurnGateway / ActionGateway 持有。`CHARACTER_THIN_HOST` 不设即启用，模板明确为 `true`；旧 `false` / `off` / `0` 配置会拒绝启动，应删除该键或改为 `true`。工厂保留 PostgreSQL 与历史 PGlite 兼容分支，但后续测试只使用隔离 PostgreSQL。旧 `composeState` 链路不支持，需要已准备的插件表与 ContextCompiler，不能与 `CHARACTER_CONTEXT_COMPILER_V1=0` 同用。本公开副本的接线与接口检查不替代真实 PostgreSQL 等价性、生产切换或真人体验验收。QQ 后端安装与登录见 [LLBot / PMHQ 指南](QQ-DEPLOYMENT.md)。
 
 工具环境先检查计划：
 

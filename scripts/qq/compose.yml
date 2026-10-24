@@ -1,20 +1,36 @@
-name: lg-qq-private
+name: lg-qq-llbot
 services:
-  napcat:
-    image: ${QQ_NAPCAT_IMAGE:?Run pnpm qq:prepare first}
-    pull_policy: never
+  pmhq:
+    image: ${PMHQ_IMAGE:?Run pnpm qq:prepare first}
+    init: true
+    privileged: true
+    restart: unless-stopped
+    environment:
+      AUTO_LOGIN_QQ: ${QQ_BOT_ID:?Set the independent bot account}
+      PMHQ_AUTH_TOKEN: ${PMHQ_AUTH_TOKEN:?Set your LLBot Auth Token in .env.qq}
+      TZ: Asia/Shanghai
+    volumes:
+      - ../../data/qq-llbot/qq:/root/.config/QQ
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+  llbot:
+    image: ${LLBOT_IMAGE:?Run pnpm qq:prepare first}
     init: true
     restart: unless-stopped
     environment:
-      ACCOUNT: ${QQ_BOT_ID:?Set the independent bot account}
-      WEBUI_TOKEN: ${QQ_NAPCAT_WEBUI_TOKEN:?Missing WebUI token}
+      PROTOCOL_MODE: pmhq
+      PMHQ_HOST: pmhq
+      PMHQ_PORT: "13000"
+      WEBUI_PORT: "3080"
       TZ: Asia/Shanghai
     ports:
-      - "127.0.0.1:6101:6099"
-      - "127.0.0.1:6701:3001"
+      - "127.0.0.1:${LLBOT_WEBUI_PORT:-13080}:3080"
+      - "127.0.0.1:${QQ_ONEBOT_PORT:-13001}:3001"
     volumes:
-      - ../../data/qq-private/qq:/app/.config/QQ
-      - ../../data/qq-private/config:/app/napcat/config
+      - ../../data/qq-llbot/data:/app/llbot/data
+      - ../../data/qq-llbot/data/default_config.json:/app/llbot/default_config.json
     logging:
       options:
         max-size: "10m"

@@ -36,7 +36,7 @@ journalctl -u lg-qq.service --since "-70min" --no-pager 2>/dev/null | grep -icE 
 
 echo
 echo "=== ⑦ QQ 入口连通（容器与连接）==="
-docker ps --format '{{.Names}} {{.Status}}' | grep -E 'napcat|postgresql' || true
+docker ps --format '{{.Names}} {{.Status}}' | grep -E 'llbot|pmhq|postgresql' || true
 grep -c 'qq' /proc/$PID/cmdline >/dev/null 2>&1 && tr '\0' ' ' < /proc/$PID/cmdline | cut -c1-160 && echo
 
 echo

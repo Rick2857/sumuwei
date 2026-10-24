@@ -145,18 +145,20 @@ if ($LASTEXITCODE -ne 0) {
 if ($PreflightOnly) { exit 0 }
 & docker compose --env-file .env.qq -f scripts/qq/compose.yml up -d
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$lgQqWebuiPortLine = [System.IO.File]::ReadAllLines((Join-Path $lgQqRoot '.env.qq')) | Where-Object { $_.StartsWith('LLBOT_WEBUI_PORT=') } | Select-Object -First 1
+$lgQqWebuiPort = $lgQqWebuiPortLine.Substring('LLBOT_WEBUI_PORT='.Length).Trim('"')
+$lgQqWebuiUrl = "http://127.0.0.1:$lgQqWebuiPort/"
 $lgQqWebuiReady = $false
 for ($lgAttempt = 0; $lgAttempt -lt 60; $lgAttempt++) {
   try {
-    $lgQqResponse = Invoke-WebRequest -Uri 'http://127.0.0.1:6101/webui' -UseBasicParsing -TimeoutSec 2
+    $lgQqResponse = Invoke-WebRequest -Uri $lgQqWebuiUrl -UseBasicParsing -TimeoutSec 2
     if ($lgQqResponse.StatusCode -eq 200) { $lgQqWebuiReady = $true; break }
   } catch {}
   Start-Sleep -Seconds 2
 }
-if (!$lgQqWebuiReady) { throw 'Independent NapCat WebUI did not become ready' }
-$lgQqWebuiTokenLine = [System.IO.File]::ReadAllLines((Join-Path $lgQqRoot '.env.qq')) | Where-Object { $_.StartsWith('QQ_NAPCAT_WEBUI_TOKEN=') } | Select-Object -First 1
-$lgQqWebuiToken = $lgQqWebuiTokenLine.Substring('QQ_NAPCAT_WEBUI_TOKEN='.Length)
-Start-Process -FilePath "http://127.0.0.1:6101/webui?token=$lgQqWebuiToken"
+if (!$lgQqWebuiReady) { throw 'LLBot WebUI did not become ready' }
+Start-Process -FilePath $lgQqWebuiUrl
+Write-Host 'LLBot WebUI password: data/qq-llbot/data/webui_token.txt (keep private).'
 Write-Host 'Log in with the independent bot QQ account. Keep this terminal open for LG private chat.'
 & pnpm qq:chat
 exit $LASTEXITCODE

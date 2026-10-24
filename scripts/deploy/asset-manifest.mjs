@@ -217,7 +217,11 @@ const REBUILD_DIRS = [
   },
   {
     path: 'data/qq-private',
-    note: 'QQ 私有身份面（隐私）。不迁移；服务器上由新的 NapCat 侧凭据提供。',
+    note: '旧 QQ 私有身份面（隐私）。不迁移；保留历史分类。',
+  },
+  {
+    path: 'data/qq-llbot',
+    note: 'LLBot / PMHQ 的 QQ 登录态与本地令牌（隐私）。不迁移；服务器沿用自己的登录卷与凭据。',
   },
 ]
 

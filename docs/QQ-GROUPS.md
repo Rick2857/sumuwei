@@ -4,7 +4,7 @@
 
 ## 配置自己的入口
 
-先配置自己的 `.env`、模型端点、数据库和 NapCat；将 `.env.qq.example` 复制为 `.env.qq` 并填写独立的主人 QQ、机器人 QQ、OneBot token。机器人须已加入自己的白名单群。使用自己的备份和停机窗口运行 `pnpm migrate:apply`，当前 schema 为 v22；生产迁移需要操作者明确决定，源码发布不会替你执行。
+先配置自己的 `.env`、模型端点、数据库和 [LLBot / PMHQ](QQ-DEPLOYMENT.md)；将 `.env.qq.example` 复制为 `.env.qq` 并填写独立的主人 QQ、机器人 QQ、OneBot token。机器人须已加入自己的白名单群。使用自己的备份和停机窗口运行 `pnpm migrate:apply`，当前 schema 为 v22；生产迁移需要操作者明确决定，源码发布不会替你执行。
 
 `.env.qq` 的可选片段（群号是合成示例，须替换）：
 

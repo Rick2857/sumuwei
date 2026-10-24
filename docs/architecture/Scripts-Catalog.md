@@ -24,7 +24,7 @@
 | 内部 | 429 |
 | **合计** | **701** |
 
-`scripts/` 下**没有任何 pnpm 入口引用**的脚本文件：**307 个**（见文末）。
+`scripts/` 下**没有任何 pnpm 入口引用**的脚本文件：**308 个**（见文末）。
 
 ## 每条 lane 的入口命令
 
@@ -722,6 +722,7 @@
 - `scripts/productivity-skills/reading.ts`
 - `scripts/productivity-skills/sidecar-tools.ts`
 - `scripts/public-ci.ps1`
+- `scripts/qq/prepare-verify.ts`
 - `scripts/qq/start.cmd`
 - `scripts/qq/start.ps1`
 - `scripts/reminder-channels-frontend-verify.mjs`
