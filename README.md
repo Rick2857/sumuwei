@@ -17,13 +17,15 @@
 
 本仓库是经过脱敏的公开源码发行副本，采用 **Apache-2.0**。它包含当前实现、脚本、合成测试夹具和技术文档。个人标识及教育背景示例已替换为虚构值；角色设定保留。
 
-## 当前进展（2026-10-24 核对）
+## 当前进展（2026-10-25 核对；公开源码更新至 2026-10-24）
 
 当前 `main` 使用薄 Node 宿主作为唯一运行时；`CHARACTER_THIN_HOST` 不设即启用，旧的 `off` / `false` 值会拒绝启动。依赖卸载与待完成边界见[依赖说明](docs/DEPENDENCY-REMOVAL-PLAN.md)。Lv2.5 保留为默认关闭的可选功能；有界行动预测与反思结果上下文已有实现，发行缺省关闭。QQ 默认部署改为 LLBot / PMHQ，选择依据维护者的长期实际使用确认。公开副本仍需配置自己的 PostgreSQL、模型、账号与资源，发布不包含原环境数据或凭据。工具与部署边界见[三个能力说明](docs/PRIORITY-THREE.md)。
 
 | 范围 | 状态与边界 |
 |---|---|
 | 角色内核 | 持久记忆、来源归因、可重放投影、关系、情绪、信念、目标/承诺及受控工具链已有实现；功能开关和历史里程碑结果分别记录 |
+| 运行时 | 薄宿主是唯一实现；`CHARACTER_THIN_HOST` 未设置或设为 `on` / `1` / `true` 时启用，`off` / `0` / `false` 或其它值拒绝启动；ContextCompiler 必须启用 |
+| Lv2.5 世界线 | 源码、内容和显式命令保留；普通聊天默认不加载，通过独立可选入口启用，停用不删除历史账本 |
 | 材料驱动提醒 | 可从文字、近期原图及已授权工具结果提出多项提醒；程序核对日期、扣除提前分钟、去重并复用现有持久化调度，支持查看、改期和取消；需自行配置提醒出口与模型 |
 | 联网查证 | 当前主入口使用 DeepSeek 原生搜索及受控 HTTPS 来源读取，最多读取两页；服务器模板默认关闭，启用需官方 DeepSeek 端点及自己的可用凭据；不再以 Tavily Key 作为当前主入口前置 |
 | PostgreSQL | 新增显式后端选择、连接目标核对、单认知核心资格、迁移对账及在线备份恢复工具；支持数据库独立运行、多个管理/只读连接，多个认知写核心仍属后续阶段 |
@@ -41,6 +43,8 @@
 
 使用 Linux、Node.js 22.13+（本次 Linux 检查为 22.23.3）、pnpm 12.4.1 与独立 PostgreSQL 17 + pgvector；QQ 部署另需 Docker Compose。先在没有运行配置和数据的新 checkout 安装并执行有限源码检查：
 
+Lv2.5 加载图探针还要求 Node 提供 `node:module.registerHooks`；没有该 API 时，`ci:source` 将此项记为 NOT RUN。当前 workflow 固定 Windows 22.23.2、Linux 22.23.3，运行时版本下限不代表所有检查均可执行。
+
 ```sh
 git clone --branch main https://github.com/Rick2857/sumuwei.git
 cd sumuwei
@@ -51,7 +55,7 @@ cp .env.server.example .env
 
 填写自己的模型、数据库连接、`LG_PG_EXPECT_DATABASE` / `LG_PG_EXPECT_USER`。配置文件仅由服务账号读取；旧配置若含 `CHARACTER_THIN_HOST=false`，需删除该键或改为 `true`。准备数据库扩展与账号后，先用 `pnpm migrate` 检查目标和待执行项，确认自己的备份与维护窗口后再执行 `pnpm migrate:apply`。完成依赖和渠道配置后，CLI 用 `pnpm chat`，QQ 常驻入口用 `pnpm qq:chat`；只启动一个认知核心。
 
-完整流程、Python 独立运行环境和 systemd 模板见 [服务器版指南](docs/SERVER-EDITION.md)。桌面、鼠标和 VRM 在用户 PC；服务器不会自动取得用户桌面控制权。下方 PGlite 命令仅为历史运行兼容入口，服务器配置使用本节的 `.env.server.example`。
+完整流程、Python 独立运行环境和 systemd 模板见 [服务器版指南](docs/SERVER-EDITION.md)。桌面、鼠标和 VRM 在用户 PC；服务器不会自动取得用户桌面控制权。当前 `main` 的新部署使用本节的 PostgreSQL 配置。
 
 需要 QQ 时，先将下方账号占位符替换为自己的两个不同 QQ 号：
 
@@ -64,26 +68,33 @@ pnpm qq:status
 
 WebUI 默认 `http://127.0.0.1:13080/`，密码在 `data/qq-llbot/data/webui_token.txt`；服务器使用 SSH 转发访问。扫码并在手机确认后，身份检查还需配合在线状态和真实收发验证。两个后端服务自动重启并尝试自动登录；QQ 会话过期或风控后仍可能需要重新扫码。已有在线 LLBot 应沿用原配置/登录卷，禁止另起同账号实例。完整授权与旧部署切换见 [QQ 部署指南](docs/QQ-DEPLOYMENT.md)；不使用 QQ 时无需生成 `.env.qq`。
 
-## 兼容的本地最小使用
+## 本地运行与旧版兼容
 
-以下保留创建新 PGlite 库的历史运行兼容入口，不用于后续数据库测试验收；服务器长期运行与后续测试使用独立 PostgreSQL。原个人电脑版请使用 `desktop` 分支。
-
-```powershell
-pnpm install --frozen-lockfile
-Copy-Item .env.example .env
-pnpm db:init
-pnpm migrate:apply
-```
-
-编辑 `.env`，填写自己的模型 API Key、兼容的 base URL 和模型名。模板中的模型标识只是配置示例；请以自己账户可用的端点为准。默认数据库位于本 checkout 的 `data/pglite`，用上面的初始化命令创建空的新库；已有 `data/` 时 `db:init` 会拒绝覆盖。不要导入别人的运行库。
+在本机使用 `main`，同样先准备自己的 PostgreSQL、模型与显式迁移，再启动 CLI。模板中的模型标识只是配置示例；请以自己账户可用的端点为准。
 
 ```powershell
 pnpm chat
 ```
 
+PGlite 仍是未配置后端时的历史缺省，但不作为当前新安装或数据库验收路径。按当前源码，`db:init` 的旧空库初始化会走到薄宿主拒绝的插件建表分支，因此不再提供“复制 `.env.example` 后直接建 PGlite 新库”的安装步骤。需要原个人电脑版流程时使用 `desktop` 分支及该分支说明；不要把别人的运行库导入自己的实例。
+
 QQ 配置模板见 `.env.qq.example`。联网、桌面、本机文件、后台任务、语音和 Live2D 等能力分别有权限、开关及外部依赖要求；仅复制源码不会复现原开发环境的完整启用状态。
 
 通用提醒的用法、材料范围及限制见 [材料驱动提醒](docs/REMINDERS.md)。`.env.test.example` 的模型示例已更新为 `https://api.minimax.cn/v1` / `MiniMax-M3.1-Flash-Preview`，API Key 保持空白；真实测试须使用自己的账户与本机 `.env.test`。
+
+## 可选行动预测、反思比较与世界线
+
+行动预测和反思结果比较可分别启用，代码缺省均为 false：
+
+```dotenv
+CHARACTER_ACTION_FORECAST_ENABLED=true
+CHARACTER_ACTION_FORECAST_TIMEOUT_MS=20000
+CHARACTER_REFLECTION_OUTCOME_COMPARISON_ENABLED=true
+```
+
+行动预测还需要已有任务编排入口与模型配置，消耗原规划预算；执行继续经过 TaskPlan 校验和 ActionGateway，核对不符时阻止依赖步骤并重新规划。反思比较需要原反思、自适应开关和上下文预算，不增加证据根或降低采纳门槛。这两项没有实现完整的可执行规则学习或多假设搜索闭环；已有对照不能证明独立行为收益，反思模型对照采集曾因超时 FAIL。配置、成本及证据范围见[世界模型方法应用](docs/WORLD-MODEL.md)。
+
+Lv2.5 世界线是独立的可选功能，三个聊天集成开关默认关闭；显式故事命令可能写入账本。启用和停止见 [Lv2.5 可选功能](docs/OPTIONAL-LV25.md)。上述功能停用后保留既有事件与投影，不通过删除数据库回滚。
 
 ## 可选 3D 与原生语音
 
@@ -104,13 +115,15 @@ CHARACTER_DB_BACKEND=postgres
 POSTGRES_URL=postgresql://YOUR_USER:YOUR_PASSWORD@127.0.0.1:55432/YOUR_DATABASE
 LG_PG_EXPECT_DATABASE=YOUR_DATABASE
 LG_PG_EXPECT_USER=YOUR_USER
+CHARACTER_THIN_HOST=true
+CHARACTER_CONTEXT_COMPILER_V1=1
 ```
 
-连接串必须填自己的值并保留在本地。`db:init` 仅保留创建本 checkout 全新 PGlite 库的兼容功能，会拒绝外部数据库配置；它不会初始化、导入或覆盖 PostgreSQL，也不用于当前测试验收。已有 PGlite 数据需要按[迁移计划](docs/post-lv2/PostgreSQL-Migration-Execution-Plan-2026-10-12.md)和[Runbook](docs/post-lv2/PostgreSQL-Migration-Runbook.md)单独演练、备份及切换，不能只改连接串就宣称数据已迁移。
+连接串与身份期望必须填自己的值并保留在本地。`db:init` 不用于 PostgreSQL 初始化，也不用于当前测试验收；已有 PGlite 数据需要按[迁移计划](docs/post-lv2/PostgreSQL-Migration-Execution-Plan-2026-10-12.md)和[Runbook](docs/post-lv2/PostgreSQL-Migration-Runbook.md)单独演练、备份及切换，不能只改连接串就宣称数据已迁移。
 
 `scripts/postgresql/compose.yml` 是固定镜像、loopback 绑定的试验配置，不是通用生产部署器；使用前确认容器、卷、端口和凭据文件属于自己的隔离环境。试验角色与授权脚本在同目录。
 
-薄宿主拒绝启动期插件 DDL，数据库必须事先准备好所需六张兼容基础表；表名检查不验证完整列结构，也不证明运行/迁移账号分离已完整验收。薄宿主要求启用 ContextCompiler，不能与 `CHARACTER_CONTEXT_COMPILER_V1=0` 同用。当前单核心资格不等于多写核心并发已验收。当前宿主行为见[服务器指南](docs/SERVER-EDITION.md)；历史迁移维护与边界见[维护手册](docs/post-lv2/PostgreSQL-Migration-Maintenance-Manual.md)和[已知局限](docs/post-lv2/PostgreSQL-Migration-Known-Limitations.md)。
+当前 PostgreSQL 普通启动检查迁移状态与六张兼容基础表，不执行 schema DDL；缺表或存在待应用迁移时拒绝启动。显式 `pnpm migrate:apply` 使用 LG 自有迁移，包括 `0023` 的兼容表定义，不再依赖 ElizaOS 插件建表。启动表名检查不等于完整列结构核验，也不证明运行/迁移账号分离已完整验收。薄宿主要求启用 ContextCompiler，不能与 `CHARACTER_CONTEXT_COMPILER_V1=0` 同用；关闭薄宿主不会恢复旧宿主。当前单核心资格不等于多写核心并发已验收。当前宿主行为见[服务器指南](docs/SERVER-EDITION.md)；历史迁移维护与边界见[维护手册](docs/post-lv2/PostgreSQL-Migration-Maintenance-Manual.md)和[已知局限](docs/post-lv2/PostgreSQL-Migration-Known-Limitations.md)。
 
 原开发环境的[迁移验收报告](docs/post-lv2/PostgreSQL-Migration-Acceptance-Report.md)保留工程、数据与首用的分列结果；其生产配置、历史计数和未公开 artifacts 不属于本公开副本的实测证据。公开副本的最新检查单独记录在 [PUBLIC-VERIFICATION](docs/PUBLIC-VERIFICATION.md)。
 
@@ -130,9 +143,15 @@ LG_PG_EXPECT_USER=YOUR_USER
 pnpm typecheck
 pnpm ci:source
 pnpm postgresql:g01:verify
+pnpm lv25:optional:verify
+pnpm worldmodel:forecast:verify
+pnpm worldmodel:reflection:verify
+pnpm worldmodel:gates --verify
 ```
 
-`ci:source` 只用于没有真实配置与数据的新 checkout：类型、脚本清单、行动预测/反思比较、Lv2.5 加载边界（需支持 `registerHooks` 的 Node）、薄宿主接线/接口/退役/UUID、部署工具与入口协议检查，不打开数据库。QQ 配置迁移另用 `pnpm exec tsx scripts/qq/prepare-verify.ts`，协议重连用 `pnpm qq:reconnect:verify`，两者使用合成夹具。托管 workflow 使用有限源码链；本次本地 Linux 验证不代表托管运行已成功。旧 `ci:offline` 因仍依赖 PGlite，现以非零退出明确拒绝；迁移至隔离 PostgreSQL 前，完整数据库回归为 NOT RUN。
+`ci:source` 只用于没有运行配置与数据的新 checkout（已有 `.env`、`.env.test`、渠道配置或 `data/` 时拒绝）：运行类型、脚本清单、行动预测/反思比较/聚合证据自证、可用时的 Lv2.5 加载图、薄宿主接线/接口/退役/UUID、部署工具与入口协议检查，不打开数据库或调用真实模型。上列源码专项部分已包含在其中，可按需单跑。QQ 配置迁移另用 `pnpm exec tsx scripts/qq/prepare-verify.ts`，协议重连用 `pnpm qq:reconnect:verify`，两者使用合成夹具。托管 workflow 使用有限源码链；已有本地 Linux 读数不代表托管运行已成功。旧 `ci:offline` 因仍依赖 PGlite，现以非零退出明确拒绝；旧完整数据库回归待迁移，当前为 NOT RUN。
+
+数据库专项已有独立进展：公开验证记录中的 `worldmodel:reflection:e2e` 为 **11/11 PASS**，使用独立 PostgreSQL 容器、卷、随机端口和离线 provider，准备阶段显式迁移。它只证明该反思机制链，不代表完整回归、真实模型或生产验收通过；重跑需自行准备 Docker 和测试床指定镜像，缺少条件失败关闭。具体前置条件见 [WORLD-MODEL](docs/WORLD-MODEL.md)。
 
 历史 `m4.5:ci` 的聚合器退出码为零也不代表所有 live 门通过；后续重跑其数据库部分前须先迁移测试后端。缺少真实链证据时 G14 为 `not-run`，不能复制历史 PASS 文件补绿。当前发行的专项检查与历史全量读数分别记录在 [PUBLIC-VERIFICATION.md](docs/PUBLIC-VERIFICATION.md)。
 
@@ -142,10 +161,8 @@ pnpm postgresql:g01:verify
 
 ## 数据与许可
 
-仓库不包含原数据库、对话记录、凭证、模型权重、Live2D 模型、展示截图或声音样本。两张既有 PNG 是合成测试夹具，本次保持其公开版本原始字节。
+仓库不包含原数据库、对话记录、凭证、模型权重、Live2D 模型、展示截图或声音样本。两张既有 PNG 是合成测试夹具。
 
 历史技术文档中的里程碑结论与生产激活记录属于原开发环境；其中的旧提交、hash、未随仓库公开的证据路径不能用作本副本的验证结论。当前发行副本的读数会单独记录。
 
 源码与文档采用 [Apache License 2.0](LICENSE)，依赖及外部素材保留各自许可。欢迎报告可复现的问题；请先删除日志中的 Key、账号、私人路径和聊天内容。
-
-任务执行可选的行动预测、反思结果上下文与验证边界见 [世界模型方法应用](docs/WORLD-MODEL.md)，发行缺省关闭。
