@@ -20,8 +20,8 @@
 |---|---:|
 | 已登记门 | 250 |
 | 汇总/链入口 | 19 |
-| 文档入口 | 3 |
-| 内部 | 429 |
+| 文档入口 | 4 |
+| 内部 | 428 |
 | **合计** | **701** |
 
 `scripts/` 下**没有任何 pnpm 入口引用**的脚本文件：**308 个**（见文末）。
@@ -480,8 +480,9 @@
 
 **入口**：
 - `worldmodel:gates` — 汇总/链入口
+- `worldmodel:reflection:e2e` — 文档入口
 
-**内部（5）**：`worldmodel:forecast:verify` · `worldmodel:reflection:ab` · `worldmodel:reflection:e2e` · `worldmodel:reflection:verify` · `worldmodel:tools:ab`
+**内部（4）**：`worldmodel:forecast:verify` · `worldmodel:reflection:ab` · `worldmodel:reflection:verify` · `worldmodel:tools:ab`
 
 ## 没有任何 pnpm 入口引用的脚本文件
 
