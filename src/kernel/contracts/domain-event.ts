@@ -38,6 +38,7 @@ import {
  * 类型检查会过，但运行时可能拿到半初始化的模块。
  */
 import type { MemoryRecord } from './memory.ts'
+import { EBL_EVENT, EBL_EVENT_MAX_BYTES, validateEblEventPayload } from './epistemic-belief.ts'
 
 /**
  * M7：Relationship 的 payload 契约与结构校验（一个概念一处实现）。
@@ -750,6 +751,8 @@ export function createMemoryDomainEventRegistry(): DomainEventRegistry {
  */
 export function createFullDomainEventRegistry(): DomainEventRegistry {
   const registry = createDefaultDomainEventRegistry()
+  registry.register({ type: EBL_EVENT, validatePayload: validateEblEventPayload,
+    maxPayloadBytes: EBL_EVENT_MAX_BYTES, description: 'EBL：通过独立来源复核的假设、检验与使用记录' })
   const memory = createMemoryDomainEventRegistry()
   for (const type of memory.types()) {
     registry.register(memory.get(type)!)

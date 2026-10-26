@@ -64,9 +64,11 @@ import type { EntityRef } from '../src/kernel/contracts/index.ts'
 const report = createReporter()
 const evidenceDir = join(process.cwd(), 'artifacts', 'm4.1')
 
-console.log('='.repeat(72))
-console.log('M4.1 Mutation State Safety（D1 reproduction + 回归门）')
-console.log('='.repeat(72))
+/*
+ * ⚠️ 门头横幅**不在这里打**：`--list-cases` 的 stdout 必须是**干净的场景 id 列表**
+ *    （逐场景 harness 直接读 stdout，多一行横幅就会被当成一个"场景"）。
+ *    ⇒ 横幅挪到文件末尾、场景执行之前。
+ */
 
 interface StoreState {
   hash: string
@@ -226,81 +228,149 @@ async function expectNoMutation(label: string, text: string, withHints = true): 
 }
 
 // ===========================================================================
-// D1 的核心复现：库里只有一条 active，而用户说的是**另一个人/另一件事**
+// 场景清单（2026-10-21 · 逐场景子进程）
 // ===========================================================================
-report.section('D1 reproduction｜唯一候选 ≠ 相关候选')
+/**
+ * 每个场景 = 一条用例（或一组断言），**各自需要一个空白库**。
+ *
+ * ⚠️ 为什么要有这个表：PostgreSQL 后端下 `isolateDatabase()` **给不出空白库**
+ *    （它只把 URL 再指一次）⇒ 场景之间会互相污染（实测：`duplicate_content`）。
+ *    ⇒ 逐场景**子进程**是唯一的干净解法（进程边界 + 库边界，
+ *      产品那条"同进程只允许一个 PostgreSQL 目标"的不变量**一字未动**）。
+ *
+ * ⇒ 场景 id 的**唯一事实源在这里**；`--list-cases` 就是它对外的读面。
+ */
+const SCENARIOS: Array<{ id: string; run: () => Promise<void>; extraDatabases?: number }> = [
+  {
+    id: 'T-D1-001',
+    run: async () => {
+      await expectNoMutation('T-D1-001 忘掉我养过一只鹦鹉这件事', '忘掉我养过一只鹦鹉这件事', true)
+    },
+  },
+  {
+    id: 'T-D1-001b',
+    run: async () => {
+      await expectNoMutation('T-D1-001b 同一句·不传 hints', '忘掉我养过一只鹦鹉这件事', false)
+    },
+  },
+  {
+    id: 'T-D1-002',
+    run: async () => {
+      await expectNoMutation('T-D1-002 忘掉我用 VS Code 这件事', '忘掉我用 VS Code 这件事', true)
+    },
+  },
+  {
+    id: 'positive-forget',
+    run: async () => {
+      // 正控：目标真的存在时必须仍然可用（否则"没变化"是恒真的）
+      report.section('正控｜目标存在时 forget 必须仍然工作')
+      const s = await openScenario('positive-forget')
+      try {
+        await s.seedClaim('education.institution', '示例工程科技大学', 'person_fact')
+        const before = await s.state()
+        const outcome = await s.runTurn('忘掉我在示例工程科技大学上学这件事')
+        const after = await s.state()
+        report.check(
+          '正控：受支持的 forget **真的**产生了 retract',
+          after.retracted === before.retracted + 1 &&
+            after.retractedEvents === before.retractedEvents + 1 &&
+            outcome.ok === true,
+          `retracted ${before.retracted} → ${after.retracted}｜事件 ${before.retractedEvents} → ` +
+            `${after.retractedEvents}｜ok=${String(outcome.ok)}`
+        )
+        report.check('正控：该槽位不再有 active', after.active === 0, `active ${before.active} → ${after.active}`)
+      } finally {
+        await s.dispose()
+      }
+    },
+  },
+  {
+    id: 'multi-candidate',
+    run: async () => {
+      // 多条候选：唯一词面命中 → 只动那一条；模糊目标 → 不得 mutation
+      report.section('多候选｜唯一命中 vs 模糊')
+      const s = await openScenario('multi-candidate')
+      try {
+        await s.seedClaim('tooling.preference.editor', 'VS Code', 'preference')
+        await s.seedClaim('project.background.active', 'Rust', 'person_fact')
+        const before = await s.state()
+        report.check('夹具：两条 active', before.active === 2, `active=${before.active}`)
 
-await expectNoMutation('T-D1-001 忘掉我养过一只鹦鹉这件事', '忘掉我养过一只鹦鹉这件事', true)
-await expectNoMutation('T-D1-001b 同一句·不传 hints', '忘掉我养过一只鹦鹉这件事', false)
-await expectNoMutation('T-D1-002 忘掉我用 VS Code 这件事', '忘掉我用 VS Code 这件事', true)
+        const outcome = await s.runTurn('忘掉我用 VS Code')
+        const after = await s.state()
+        report.check(
+          'T-D1-004：唯一词面命中 → 真的只撤销那一条',
+          after.retracted === before.retracted + 1 && outcome.ok === true,
+          `retracted ${before.retracted} → ${after.retracted}｜ok=${String(outcome.ok)}`
+        )
+        const remaining = await s.h.store.list({ owner: s.h.owner, status: 'active', limit: 10 })
+        report.check(
+          'T-D1-004：另一条候选**没有**被波及',
+          remaining.length === 1 &&
+            remaining[0].content.kind === 'claim' &&
+            String(remaining[0].content.value) === 'Rust',
+          `剩余 active=${remaining.length}｜${remaining
+            .map((r) => (r.content.kind === 'claim' ? String(r.content.value) : ''))
+            .join(',')}`
+        )
+      } finally {
+        await s.dispose()
+      }
+    },
+  },
+  {
+    id: 'T-D1-005',
+    run: async () => {
+      await expectNoMutation('T-D1-005 忘掉我用的开发工具（模糊）', '忘掉我用的开发工具', true)
+    },
+  },
+  {
+    id: 'T-D1-005b',
+    run: async () => {
+      await expectNoMutation('T-D1-005b 忘掉我养过一只鹦鹉（多候补）', '忘掉我养过一只鹦鹉', true)
+    },
+  },
+]
 
-// ===========================================================================
-// 正控：目标真的存在时必须仍然可用（否则"没变化"是恒真的）
-// ===========================================================================
-report.section('正控｜目标存在时 forget 必须仍然工作')
-{
-  const s = await openScenario('positive-forget')
-  try {
-    await s.seedClaim('education.institution', '示例工程科技大学', 'person_fact')
-    const before = await s.state()
-    const outcome = await s.runTurn('忘掉我在示例工程科技大学上学这件事')
-    const after = await s.state()
-    report.check(
-      '正控：受支持的 forget **真的**产生了 retract',
-      after.retracted === before.retracted + 1 &&
-        after.retractedEvents === before.retractedEvents + 1 &&
-        outcome.ok === true,
-      `retracted ${before.retracted} → ${after.retracted}｜事件 ${before.retractedEvents} → ` +
-        `${after.retractedEvents}｜ok=${String(outcome.ok)}`
-    )
-    report.check('正控：该槽位不再有 active', after.active === 0, `active ${before.active} → ${after.active}`)
-  } finally {
-    await s.dispose()
+// ---------------------------------------------------------------------------
+// 入口：全跑 / 只跑一个场景 / 只列场景
+// ---------------------------------------------------------------------------
+const argv = process.argv.slice(2)
+if (argv.includes('--list-cases')) {
+  /*
+   * 每行：`id<TAB>额外独立库数`
+   * ⇒ 逐场景 harness 只读这一份，不用在别处复述场景清单。
+   */
+  for (const scenario of SCENARIOS) {
+    console.log(`${scenario.id}\t${String(scenario.extraDatabases ?? 0)}`)
   }
+  process.exit(0)
+}
+const caseIndex = argv.indexOf('--case')
+const onlyCase = caseIndex >= 0 ? argv[caseIndex + 1] : undefined
+const selected = onlyCase === undefined ? SCENARIOS : SCENARIOS.filter(s => s.id === onlyCase)
+if (selected.length === 0) {
+  console.error(`❌ 没有这个场景：${String(onlyCase)}`)
+  console.error(`   可用：${SCENARIOS.map(s => s.id).join(' / ')}`)
+  process.exit(2)
 }
 
-// ===========================================================================
-// 多条候选：唯一词面命中 → 只动那一条；模糊目标 → 不得 mutation
-// ===========================================================================
-report.section('多候选｜唯一命中 vs 模糊')
-{
-  const s = await openScenario('multi-candidate')
-  try {
-    await s.seedClaim('tooling.preference.editor', 'VS Code', 'preference')
-    await s.seedClaim('project.background.active', 'Rust', 'person_fact')
-    const before = await s.state()
-    report.check('夹具：两条 active', before.active === 2, `active=${before.active}`)
-
-    const outcome = await s.runTurn('忘掉我用 VS Code')
-    const after = await s.state()
-    report.check(
-      'T-D1-004：唯一词面命中 → 真的只撤销那一条',
-      after.retracted === before.retracted + 1 && outcome.ok === true,
-      `retracted ${before.retracted} → ${after.retracted}｜ok=${String(outcome.ok)}`
-    )
-    const remaining = await s.h.store.list({ owner: s.h.owner, status: 'active', limit: 10 })
-    report.check(
-      'T-D1-004：另一条候选**没有**被波及',
-      remaining.length === 1 &&
-        remaining[0].content.kind === 'claim' &&
-        String(remaining[0].content.value) === 'Rust',
-      `剩余 active=${remaining.length}｜${remaining
-        .map((r) => (r.content.kind === 'claim' ? String(r.content.value) : ''))
-        .join(',')}`
-    )
-  } finally {
-    await s.dispose()
-  }
+console.log('='.repeat(72))
+console.log('M4.1 Mutation State Safety（D1 reproduction + 回归门）')
+console.log('='.repeat(72))
+if (onlyCase === undefined) {
+  report.section('D1 reproduction｜唯一候选 ≠ 相关候选')
 }
-await expectNoMutation('T-D1-005 忘掉我用的开发工具（模糊）', '忘掉我用的开发工具', true)
-await expectNoMutation('T-D1-005b 忘掉我养过一只鹦鹉（多候补）', '忘掉我养过一只鹦鹉', true)
+for (const scenario of selected) {
+  await scenario.run()
+}
 
 // ===========================================================================
 // 证据
 // ===========================================================================
 mkdirSync(evidenceDir, { recursive: true })
 writeFileSync(
-  join(evidenceDir, 'mutation-safety.json'),
+  join(evidenceDir, onlyCase === undefined ? 'mutation-safety.json' : `mutation-safety.${onlyCase}.json`),
   `${JSON.stringify(
     {
       testId: 'M4.1 / WP-02 + WP-04',
@@ -308,6 +378,7 @@ writeFileSync(
       priority: 'P0',
       status: report.failed === 0 ? 'PASS' : 'FAIL',
       isolation: '每条用例一个干净的沙箱库（避免"空过的绿"）',
+      scenario: onlyCase ?? '(全部场景)',
       fixtures: 'education.institution / tooling.preference.editor / project.background.active',
       checks: { passed: report.passed, failed: report.failed, failures: report.failures },
     },
@@ -317,4 +388,4 @@ writeFileSync(
   'utf8'
 )
 
-report.finish('M4.1 Mutation State Safety')
+report.finish(onlyCase === undefined ? 'M4.1 Mutation State Safety' : `M4.1 Mutation State Safety · ${onlyCase}`)

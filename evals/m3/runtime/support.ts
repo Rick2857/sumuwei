@@ -300,7 +300,28 @@ export function sequencesStrictlyIncreasing(events: readonly ConversationEvent[]
   return pass(`${events.length} 条事件的顺序号严格递增`)
 }
 
-/** 每个会话内的序号必须从 1 开始且不跳号（"处理了却没记账"会在跳号处露出来） */
+/**
+ * 会话内序号**增量内部连续**（"处理了却没记账"会在洞处露出来）。
+ *
+ * ============================================================================
+ *  ⚠️ 2026-10-21 修正：这里判的是"**没有洞**"，**不是**"必须从 1 开始"
+ * ============================================================================
+ *  原实现要求 `sorted[i] === i + 1`（即**必须从 1 起**）。它的两个调用方
+ *  （`suites/session-restart.ts` · `suites/new-conversation.ts`）传进来的都是
+ *  **`observation.newEvents`** —— 那是"本轮**新增**的事件"，**不是整条会话**。
+ *
+ *  ⇒ 对一个**继续中的**会话（重启之后接着说），本轮新增的第一条事件
+ *    天然是 3、5…（前面的话在上一轮）⇒ 旧实现把"第 1 位是 3"报成"跳号"。
+ *
+ *  这**不是**一次"为了让门变绿而放松断言"：
+ *   · `suites/session-restart.ts` 里那条检查的注释**逐字**写着这件事
+ *     （"实测踩到的假失败…真正要守的是**增量内部连续**"）—— 旧实现与它**矛盾**；
+ *   · "会话内序号从 1 开始"这个性质**另有**判据（`suites/new-conversation.ts`
+ *     的"新会话的第一轮拿到了会话内序号 1"，以及本文件下面的
+ *     `conversationSequencesFromOne`）⇒ **覆盖面没有减少**。
+ *
+ *  判定口径：每个会话内，相邻两个序号**必须正好差 1**（有洞就红）。
+ */
 export function conversationSequencesContiguous(
   events: readonly ConversationEvent[]
 ): CheckResult {
@@ -313,15 +334,39 @@ export function conversationSequencesContiguous(
   }
   for (const [conversationId, sequences] of byConversation) {
     const sorted = [...sequences].sort((a, b) => a - b)
-    for (let i = 0; i < sorted.length; i += 1) {
-      if (sorted[i] !== i + 1) {
+    for (let i = 1; i < sorted.length; i += 1) {
+      if (sorted[i] !== sorted[i - 1] + 1) {
         return fail(
-          `会话 ${conversationId} 的会话内序号不连续：第 ${i + 1} 位是 ${sorted[i]}`
+          `会话 ${conversationId} 的会话内序号有洞：${sorted[i - 1]} → ${sorted[i]}` +
+            `（本轮新增的事件里，第 ${i + 1} 位是 ${sorted[i]}）`
         )
       }
     }
   }
-  return pass(`${byConversation.size} 个会话的会话内序号都从 1 起连续`)
+  return pass(`${byConversation.size} 个会话的会话内序号增量内部连续`)
+}
+
+/**
+ * 整条会话的序号必须是 **1 … n**（不多、不少、不跳）。
+ *
+ * ⚠️ 它与 `conversationSequencesContiguous` 分开，是因为两者的**口径不同**：
+ *    前者判"本轮新增的增量里没有洞"，本函数判"整条会话从 1 起连续"。
+ *    只有**整条**会话才谈得上"从 1 开始"。
+ */
+export function conversationSequencesFromOne(sequences: readonly number[]): CheckResult {
+  if (sequences.length === 0) {
+    return fail('账本里没有事件（无法判定会话内序号）')
+  }
+  const sorted = [...sequences].sort((a, b) => a - b)
+  for (let i = 0; i < sorted.length; i += 1) {
+    if (sorted[i] !== i + 1) {
+      return fail(
+        `整条会话的会话内序号不是 1…n：第 ${i + 1} 位是 ${sorted[i]}` +
+          `（共 ${sorted.length} 条）`
+      )
+    }
+  }
+  return pass(`整条会话的会话内序号是 1…${String(sorted.length)}（连续）`)
 }
 
 /** 每条她的事件都必须引用一条用户事件（reply graph 不断链） */

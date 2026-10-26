@@ -336,7 +336,7 @@ export const TURN_CONTENT_BLOCK_HEADER =
 
 /** 一份内容在数据块里的渲染（正文原样，**不做任何"清洗"** —— 清洗会让那段话看起来像系统说的） */
 export function renderTurnContentEntry(item: TurnContent, label: string): string {
-  const head = `[${label}] ${turnContentKindLabel(item.kind)}（来源：${sourceKindLabel(item.sourceKind)}）`
+  const head = `[${label}] ${item.capability === 'document.profile' ? 'PDF 结构统计（不含正文）' : turnContentKindLabel(item.kind)}（来源：${sourceKindLabel(item.sourceKind)}）`
   const factsLine = item.facts.length > 0 ? `\n  事实：${item.facts.join(' · ')}` : ''
   const scopeLine = `\n  范围：${String(item.scope.includedChars)}/${String(item.scope.totalChars)} 字符${
     item.scope.truncated ? '（**已截断，你看到的不是全文**）' : ''

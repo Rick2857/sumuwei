@@ -28,12 +28,13 @@ export function createOpenAiReminderResolver(options: OpenAiReminderTextOptions 
         ] }),
       })
       if (!response.ok) return { ok: false, failure: 'call_failed' }
-      const payload = await response.json() as { choices?: { message?: { content?: string } }[] }
+      const payload = await response.json() as { choices?: { finish_reason?: string; message?: { content?: string } }[] }
+      if (payload.choices?.[0]?.finish_reason === 'length') return { ok: false, failure: 'invalid_output', diagnostic: 'output_truncated' }
       let parsed: unknown
       try { parsed = JSON.parse((payload.choices?.[0]?.message?.content ?? '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')) }
-      catch { return { ok: false, failure: 'invalid_output' } }
+      catch { return { ok: false, failure: 'invalid_output', diagnostic: 'json_invalid' } }
       const draft = readReminderDraft(parsed)
-      return draft === undefined ? { ok: false, failure: 'invalid_output' } : { ok: true, draft }
+      return draft === undefined ? { ok: false, failure: 'invalid_output', diagnostic: 'schema_invalid' } : { ok: true, draft }
     } catch (error) {
       return { ok: false, failure: error instanceof Error && error.name === 'AbortError' ? 'timeout' : 'call_failed' }
     } finally { clearTimeout(timer) }

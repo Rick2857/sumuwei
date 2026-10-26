@@ -51,6 +51,9 @@ export const DISK_WIDE_CAPABILITY_IDS: readonly string[] = [
   LOCAL_FILE_WRITE,
   DOCUMENT_READ,
   IMAGE_OCR,
+  'document.extract',
+  'document.profile',
+  'document.pages',
 ]
 
 export function isDiskWideCapability(capabilityId: string): boolean {

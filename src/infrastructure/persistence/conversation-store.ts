@@ -629,6 +629,7 @@ export interface RecentEventsQuery {
   limit: number
   /** 只看序号 <= before 的事件（用于 Replay / 历史窗口） */
   beforeSequence?: number
+  imagesOnly?: boolean
 }
 
 /** 取最近事件，**返回按序号升序**（调用方不需要再排） */
@@ -636,7 +637,11 @@ export async function recentConversationEvents(
   db: RawDb,
   query: RecentEventsQuery
 ): Promise<ConversationEvent[]> {
+  if (query.imagesOnly && !query.conversationId) return []
   const limit = Math.max(1, Math.min(1000, Math.floor(query.limit)))
+  const imagePredicate = query.imagesOnly
+    ? sql`actor_type = 'user' and conversation_id = ${query.conversationId} and jsonb_typeof(metadata->'imageRefs') = 'array' and metadata->'imageRefs' <> '[]'::jsonb`
+    : sql`true`
   const rows = await exec(
     scopedReadDb(db),
     query.conversationId && currentReadScope()?.context.room.kind !== 'group'
@@ -644,12 +649,14 @@ export async function recentConversationEvents(
             where character_id = ${query.characterId}
               and conversation_id = ${query.conversationId}
               and (${conversationReadPredicate()})
+              and (${imagePredicate})
               ${query.beforeSequence === undefined ? sql`` : sql`and sequence <= ${query.beforeSequence}`}
             order by sequence desc
             limit ${limit}`
       : sql`select * from conversation_events
             where character_id = ${query.characterId}
               and (${conversationReadPredicate()})
+              and (${imagePredicate})
               ${query.beforeSequence === undefined ? sql`` : sql`and sequence <= ${query.beforeSequence}`}
             order by sequence desc
             limit ${limit}`,

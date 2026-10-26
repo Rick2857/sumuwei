@@ -536,7 +536,6 @@ export const SUMMARY_LATE_GATES: readonly GateSpec[] = [
   summaryGate('m11.1:gates', 'scripts/m11.1-gates.ts', ['artifacts/m11.1']),
   summaryGate('lv2:gates', 'scripts/lv2-gates.ts', ['artifacts/lv2']),
   summaryGate('lv2:inherited:gates', 'scripts/lv2-inherited-gates.ts', ['artifacts/lv2']),
-  summaryGate('postlv2:s8:gates', 'scripts/postlv2-s8-gates.ts', ['artifacts/post-lv2']),
 ]
 
 export const SUMMARY_GATES: readonly GateSpec[] = [
@@ -1068,6 +1067,21 @@ export const M10_SEMANTIC_GATES: readonly GateSpec[] = [
       '**零数据库**（理解层的输入全在内存里 ⇒ 真实库从不被触碰）；不占端口；不改写 git 工作树。' +
       '⚠️ 它**必须**带 `with-test-model` 包装器（缺 `DSH_TEST_MODEL_WRAPPER` 标记即**拒跑**、exit 2）' +
       '⇒ 不带包装器直接跑它会**如实失败**，这是**刻意的**：绝不回落 `.env` 的生产 key。',
+  },
+  {
+    id: 'worldmodel:tools:ab',
+    title: '三域应用方案 §6：工具与任务执行域的真实规划器复测 A/B（真模型 · 冻结协议 · 误报完成数）',
+    argv: tsx('scripts/world-model-tools-ab.ts'),
+    entry: 'scripts/world-model-tools-ab.ts',
+    resources: { parallel: 'serial', evidenceWrites: ['artifacts/post-lv2/local'] },
+    why:
+      '只写 artifacts/post-lv2/local/world-model-tools-ab/<runId>/ab.json；**真的出站**（真模型，每例一次预测）⇒ `serial`；' +
+      '**零数据库**（隔离床是内存账本 + 夹具适配器 ⇒ 真实库从不被触碰）；不改写 git 工作树。' +
+      '⚠️ **必须**带 `with-test-model` 包装器（缺 `DSH_TEST_MODEL_WRAPPER` 标记即**拒跑**、exit 2）——' +
+      '这一条绝不回落 `.env` 的生产 key。' +
+      '⚠️ 协议（语料 / 模型 / 输入 / 预算 / 主指标 / 失败计分）在跑之前**冻结**：' +
+      '`docs/world-model/World-Model-AB-Protocol-2026-10-20.md`；**留出集只跑一次**。' +
+      '⚠️ **固定件只测机制**：适配器是脚本固定的 ⇒ 读数回答"机制分叉"，不回答"真实工具会不会这样表现"。',
   },
   {
     id: 'm10:smoke:live',
@@ -2083,44 +2097,6 @@ export const PL2_GATES: readonly GateSpec[] = [
       '⚠️ 只覆盖**文件类**；shell/桌面、凭证外传、数据库修改、越权 QQ 发送、后台任务授权复查**未覆盖**（见证据 notCoveredClasses）。' +
       '⚠️ `.env` 为 postgres 后端时本门**具名 NOT RUN**。',
   },
-  /*
-   * ⚠️ **2026-10-05 追加 1 道**（`L-S8-30` 入口侧 / `ADR-107` `R-2a′`）：
-   * 上面那 10 道的分列读数（**8 PASS · 2 FAIL**，2026-10-04）是**当时的**读数，不回写；
-   * 本道是显式开局入口 `story:start` 的专属门，**独立成条**（自带 `why`）。
-   */
-  {
-    id: 'postlv2:s8:start:verify',
-    title:
-      'S8 显式开局入口（`L-S8-30` 入口侧：正控 / 幂等 / 单活跃 run 负控 / 形状负控 / 终局后恢复）',
-    argv: tsx('scripts/postlv2-s8-start-verify.ts'),
-    entry: 'scripts/postlv2-s8-start-verify.ts',
-    tags: ['post-lv2'],
-    resources: { parallel: 'serial' as const, evidenceWrites: ['artifacts/post-lv2'] },
-    why:
-      '隔离库（`isolateDatabase()` 一次性 %TEMP% 沙箱）+ **零模型 / 零出网**（开局是程序提交、绑定 `system`，与模型提案无关）。' +
-      '⚠️ **主张只挂在账本读数上**（S1–S5）；S6 是"装配在场"的文本锁，**明确不作为主张** —— ' +
-      '文本锁测不到"入口有没有被真的调用"，而那正是 `L-S8-30` 立案的形状（`ADR-107` §2.5(1) / `R-4c`）。' +
-      '⚠️ `notCovered` 逐条写进证据：`ingestChoice` 的生产调用者 · 每轮消费点（`R-3b`）· 端到端"入口缺席负控"（`R-4c` 三段式）**都未做**。',
-  },
-  /*
-   * ⚠️ **2026-10-05 追加**（`ADR-107` `R-1b`）：候选 `choiceId` 的产出面。
-   * 主张挂在**账本读数**与**私有端口调用计数**上；真实模型的解析质量**不在**本门内（见 `notCovered`）。
-   */
-  {
-    id: 'postlv2:s8:choice:verify',
-    title:
-      'S8 剧情选择解析（`R-1b`：正控 / 开关负控 / 无活跃 run 零调用 / 闭集外 / 形状负控 ×4 / 恢复 / 无候选）',
-    argv: tsx('scripts/postlv2-s8-choice-verify.ts'),
-    entry: 'scripts/postlv2-s8-choice-verify.ts',
-    tags: ['post-lv2'],
-    resources: { parallel: 'serial' as const, evidenceWrites: ['artifacts/post-lv2'] },
-    why:
-      '隔离库（`isolateDatabase()` 一次性 %TEMP% 沙箱）+ **零真实模型 / 零出网**：私有决策端口是**注入的替身**，' +
-      '"调用了几次"由计数器给 —— 那正是"没有活跃 run / 没有候选 ⇒ 一次都不发"这几条主张的来源。' +
-      '⚠️ **本门不主张真实模型的解析质量**：' +
-      '"她会不会把用户没做的选择解析出来"是 `L-S8-31`（模型误解读 ⇒ 冒充一次 `user_choice` ⇒ 按 `ADR-093` `D01` 可成为习惯根）。' +
-      '⚠️ `notCovered` 逐条写进证据：真实模型质量 · `main.ts` 生产接线 · flag 与缺省锁 · `m3.5:test` 基线未动，**都未做**。',
-  },
 ]
 
 /**
@@ -2221,29 +2197,6 @@ export const PL2_CONTROL_GATES: readonly GateSpec[] = ([
   ['postlv2:affected:verify', 'scripts/postlv2-affected-verify.ts', '受影响门选择覆盖与升级正负控', '纯规划函数和已登记离线门；不执行资产或真实链。'],
   ['postlv2:automatic-memory:recovery:verify', 'scripts/postlv2-automatic-memory-recovery-verify.ts', '自动记忆健康与受控恢复', '真实消费者、隔离库、假提取器；无外部 Python 或真实模型。'],
   [
-    'postlv2:s8:daily:verify',
-    'scripts/postlv2-s8-daily-verify.ts',
-    'ADR-115 日常故事：无关零写入、相关开局、自然选择、续接、确定性结局和真实上下文',
-    '隔离库 + 真实故事装配与 TurnGateway；决策端口用离线夹具，不主张模型语义正确率。',
-  ],
-  [
-    'postlv2:s8:daily:e2e',
-    'scripts/postlv2-s8-daily-e2e.ts',
-    'ADR-115 日常故事真实 main.ts：提交/水位读回 + 入口/消费缺席负控 + 恢复',
-    '正控与恢复使用真实 main.ts；负控只摘除临时副本的入口或消费调用，每档全新隔离库、跨进程续接。' +
-      '本机 HTTP 夹具；生产源码不改、真实库不打开，不主张真实模型质量。临时副本在 finally 删除，串行运行。',
-  ],
-  [
-    'postlv2:s8:entry-lock:verify',
-    'scripts/postlv2-s8-entry-lock-verify.ts',
-    'S8 入口锁（`ADR-107` `R-4c`）：正控 / **入口缺席负控** / 恢复 —— 把"入口有没有被真的调用"变成**行为**判据',
-    '隔离库 + **真装配**（`createStoryCognition`）+ 离线反射固定件 + 注入的选择端口 ⇒ **零真实模型 / 零出网**。' +
-      '⚠️ **主张只挂在账本与水位读数上**（`L1`/`L2`/`L3`）：入口**被调用**时账本出现 `CHOICE_COMMITTED` 且**三个消费者水位都推进**；' +
-      '**不**调用入口时它**留不下任何行**（而同一套装配紧接着就能产出 ⇒ 证明判据**对入口是否被调用敏感**，不是恒真）。' +
-      '⚠️ `main.ts` 的**文本锁**读数在证据里**列出来但不作为主张**（`R-4c` 的降级：文本锁测不到"入口有没有被真的调用"，' +
-      '而那正是 `L-S8-30` 立案的形状）。',
-  ],
-  [
     'postlv2:gate-selection:verify',
     'scripts/postlv2-gate-selection-verify.ts',
     '选档器自证（身份优先 · mtime 永不参与 · 并列判定不同即失败关闭）—— `TD-23` / `AUD-20261005-02`',
@@ -2271,6 +2224,36 @@ export const PL2_CONTROL_GATES: readonly GateSpec[] = ([
     '角色工具决策目录与契约（16 项能力四态目录）',
     '该脚本自述 `:27-28`「真实库 `data/pglite` **一次都不打开**：不需要数据库、不需要模型、不需要网络」；' +
       '提案全是字面夹具（`:582-644`）。⚠️ 它读 `.env`（`:296-297`）⇒ **"当前"那一半反映本机配置**（这正是它要报的读数）。',
+  ],
+  [
+    'worldmodel:forecast:verify',
+    'scripts/world-model-action-forecast-verify.ts',
+    '世界模型 §2：行动预测的独立契约与任务执行环接线（隔离链路 · 13 项）',
+    '真 `runTask` + 真 `ActionGateway` + **内存账本**（`scripts/world-model-action-forecast-verify.ts`）：' +
+      '规划器与预测器都是**脚本固定件**，且预测固定件**走与生产同一条 `parseActionForecast`**（不放宽）。' +
+      '零真实出站、零真实模型、**不打开任何数据库**（生产库与隔离库都不碰）。' +
+      '⚠️ 它测的是**机制**（失败关闭 / 依赖闸 / 预算记账），**不测收益**（§6："固定件只测机制"）。',
+  ],
+  [
+    'worldmodel:reflection:verify',
+    'scripts/world-model-reflection-comparison-verify.ts',
+    '反思比较材料：来源资格、指纹、遮蔽和关闭提示词基线（纯函数）',
+    '不打开数据库、不调用模型；PostgreSQL 整链由独立门验收。',
+  ],
+  [
+    'worldmodel:reflection:e2e',
+    'scripts/world-model-reflection-e2e-verify.ts',
+    '反思比较材料：隔离 PostgreSQL 整链与撤销负控',
+    '复用 scripts/postgresql/test-harness.ts，随机独立容器/卷/端口，先迁移并核对身份。' +
+      '真实 Gateway 编译策略 section；离线 provider，不测行为收益；结束清理；缺 Docker/镜像即失败，无 PGlite 回退。',
+  ],
+  [
+    'worldmodel:gates',
+    'scripts/world-model-gates.ts',
+    '三域应用方案**只读聚合门**（按域分列四态 · **不合成总分** · 证据与当前源码不符即 INVALID）',
+    '`SAFE_PURE`：**只读**已落盘证据 —— 不跑别的门、不开库、不调模型；只写 `artifacts/post-lv2/local/world-model-gates/`。' +
+      '⚠️ live 门（`worldmodel:tools:ab`）**不在**默认必选里（要 `--require-live`）；缺它 = `NOT RUN`（不是 PASS）。' +
+      '⚠️ 它**没有** `overall` 字段（方案 §6：三域分别报告，合成总分会让"工具域好转 + 反思域没测"读起来像全绿）。',
   ],
   [
     'postlv2:role-tool:path',
@@ -2339,7 +2322,7 @@ export const PL2_CONTROL_GATES: readonly GateSpec[] = ([
   argv: id === 'learning:contracts:verify' ? [...tsx(entry), '--offline'] : tsx(entry),
   tags: ['post-lv2', 'post-lv2-controls'],
   resources: { parallel: 'serial' as const, evidenceWrites: ['artifacts/post-lv2'],
-    ...(id === 'postlv2:s8:daily:e2e' ? { mutatesGitWorktree: true } : {}) },
+     },
   why:
     why +
     '（`AUD-20261005-03` 登记：这些门此前**不在任何 lane 里** ⇒ `pnpm fast` / `--lane affected` 带不出它们。）',
@@ -2707,7 +2690,23 @@ export const POSTGRESQL_GATES: readonly GateSpec[] = [
   },
 ]
 
+export const EBL_GATES: readonly GateSpec[] = [
+  { id: 'ebl:verify', title: 'EBL 生命周期与独立证据纯机制', argv: tsx('scripts/epistemic-belief-verify.ts'),
+    entry: 'scripts/epistemic-belief-verify.ts', tags: ['ebl'],
+    resources: { parallel: 'safe', evidenceWrites: ['artifacts/local/epistemic-belief-lifecycle'] },
+    why: '合成机制固定件；零模型/零数据库；每次写独立证据目录。' },
+  { id: 'ebl:postgres:verify', title: 'EBL 隔离 PostgreSQL 与真实文件读回', argv: tsx('scripts/epistemic-belief-pg-verify.ts'),
+    entry: 'scripts/epistemic-belief-pg-verify.ts', tags: ['ebl'],
+    resources: { parallel: 'serial', evidenceWrites: ['artifacts/local/epistemic-belief-lifecycle'] },
+    why: '独立容器/卷/随机端口；真实 Gateway + 文件系统，离线规划器；不打开生产库。' },
+  { id: 'ebl:human:verify', title: 'EBL 人际唯一出口与已批准局部退役', argv: tsx('scripts/epistemic-belief-human-verify.ts'),
+    entry: 'scripts/epistemic-belief-human-verify.ts', tags: ['ebl'],
+    resources: { parallel: 'serial', evidenceWrites: ['artifacts/local/epistemic-belief-lifecycle'] },
+    why: '独立 PostgreSQL，真实 TurnGateway/Memory/M9，离线回复；不激活生产。' },
+]
+
 export const ALL_GATES: readonly GateSpec[] = [
+  ...EBL_GATES,
   ...OFFLINE_GATES,
   ...POSTGRESQL_GATES,
   ...SUMMARY_GATES,
@@ -2729,6 +2728,8 @@ export const ALL_GATES: readonly GateSpec[] = [
 ]
 
 export const LANES: readonly Lane[] = [
+  { id: 'ebl', title: 'Epistemic Belief Lifecycle', gateIds: EBL_GATES.map(gate => gate.id),
+    note: '机制与隔离 PostgreSQL 两门；不代替语义、收益、人审或生产激活。' },
   {
     id: 'postgresql',
     title: 'PostgreSQL 迁移（真 PG 实例上的门）',
@@ -2864,19 +2865,9 @@ export const LANES: readonly Lane[] = [
   },
   {
     id: 'postlv2',
-    title: 'post-Lv2 的 S8 离线门（2026-10-04 登记）',
+    title: 'post-Lv2 当前离线门（Lv2.5 为可选功能）',
     gateIds: PL2_GATES.map((g) => g.id),
-    note:
-      'S8（storyline 认知）的隔离库门；**有意不并入 `offline` lane**。' +
-      '⚠️ 实测 **10 道 · 8 PASS · 2 FAIL**，两条都是**真读数**、且都不是"改动引起的"：' +
-      '① `postlv2:s8:measurement:verify` —— Q7 按设计红：金标语料**尚未人审** ⇒ 如实留 `AWAITING HUMAN REVIEW`（`L-S8-22`，不自签）；' +
-      '② `postlv2:db:verify` —— **MEASUREMENT INVALID**：它读到的两份快照不一致（一份 `snapshot_dir_missing`、一份 v10），' +
-      '而脚本里 `LATEST_SCHEMA_VERSION = 11` 是**硬编码**（已过期：真实库 2026-10-03 已在授权下到 **v13**）⇒ ' +
-      '它印出的"v11 从未被应用到真实库"是**错的**。见登记册 §0p `R-40`。' +
-      '⚠️ **不在 lane 里**：真模型档（`postlv2:s8:semantic:eval` / `semantic:recompute` / `s8:dev-probe` / `s7:live`）· ' +
-      '真库档（`postlv2:s8:activation-readback:db` **要开真实库**，属 INC-01 受控路径）· 需要窗口/设备的档（`postlv2:mic` / `postlv2:avatar`）。' +
-      '非 S8 的 post-Lv2 门（story/source/world/body/speech/tts/avatar/expression…）**多数**仍未登记，属另一条工作流；' +
-      '⏩ **2026-10-07**：其中 4 道已按"逐文件核过离线安全"登记进 `postlv2-controls`（`body` 在其中；`expression`/`speech`/`tts`/`avatar` 因外部 venv 或设备依赖**仍不登记**）。',
+    note: '世界线接线/激活门退出当前集合，退役门承接；历史 S8 读数保留。数据库快照门只读已有证据。',
   },
   {
     id: 'postlv2-controls',

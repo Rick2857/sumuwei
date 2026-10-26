@@ -1,0 +1,88 @@
+{
+  "version": "f0-execution-list@1",
+  "phase": "development",
+  "status": "SEALED_LIST_ONLY_NOT_RUN",
+  "protocol": "cognitive-evaluation@1",
+  "scope": "L 轨 F0（稳定控制）：当前明确沙箱读写/读回关系；测**额外负担**，不承担'发现新规律'的主张。",
+  "size": {
+    "worlds": 3,
+    "tasksPerWorld": 8,
+    "arms": 3,
+    "totalTasks": 72,
+    "note": "协议写的 144 = F0 72 + F1 72；本清单只封存 F0 的 72 个任务。"
+  },
+  "taskShape": {
+    "perWorld": [
+      {"phase": "early_contact", "count": 3, "note": "前三个任务**不**预赠正确规则；未学会也计入该世界结果。"},
+      {"phase": "new_binding", "count": 3, "note": "同一规律族换一个对象（新的路径/内容实例）。"},
+      {"phase": "scope_control", "count": 2, "note": "范围/稳定控制：确认规则没有被外推、也没有反复失效。"}
+    ],
+    "formatFamilies": "沿用文件选择器协议的四个已声明格式族（多行中文 / JSON / 引号与反斜线 / 空白与末尾换行）",
+    "instances": "每世界每个任务用**不同路径与不同内容实例**；实例由**带种子**的生成器在运行时派生 ⇒ 清单封存生成器摘要 + 种子，实例本身不入库。",
+    "oracle": "真值只在执行器侧；规划器、评分器与族映射表都看不到族内真值表。"
+  },
+  "arms": [
+    {
+      "id": "A",
+      "name": "LG 强基线",
+      "keeps": "同一 Kernel、工具、ContextCompiler、现有情节/长期记忆、规划、反思与真实执行反馈",
+      "treatment": "**不**消费本次被评估的自学世界规则来排序或否决；**不是**'无记忆模型'",
+      "infoParity": "三臂同信息、同权限、同预算"
+    },
+    {
+      "id": "B",
+      "name": "简单条件策略",
+      "keeps": "与 A 相同的资源与历史访问范围",
+      "treatment": "有明确用户目标时可静态核对 ⇒ 选**首个**通过既有参数/权限/目标检查的候选；不能核对则保持原顺序；**可恢复的只读失败可换另一条已授权读取路线一次**；拒绝/取消/替代**不重试**"
+    },
+    {
+      "id": "C",
+      "name": "世界模型＋EBL",
+      "keeps": "与 A 共同底座、同等权限与总预算",
+      "treatment": "**仅**当前适用且合格的规则可影响预测、候选选择与合法后继修订；资格与依赖复核**不放松**"
+    }
+  ],
+  "budget": {
+    "perTaskRealActions": 12,
+    "perTaskModelRequests": 6,
+    "perTaskPlans": 6,
+    "perTaskWallClockMs": 120000,
+    "planningTokens": 4000,
+    "finalBodyTokens": 4000,
+    "note": "训练行动**全部计费**；学习期间的额外成本只收一次，但每个臂各自承担自己所需的生成。"
+  },
+  "metrics": {
+    "primary": "达成相同目标所**增加**的真实行动/调用（每世界差值）",
+    "mustAlsoReport": [
+      "目标达成", "假完成", "越权/取消失效", "耗时", "token", "每世界差值", "未完成数", "缺失/不可测数及原因"
+    ],
+    "notAllowed": "不用'仅成功任务平均动作'当主结论；达成率更低时不能用少行动宣称节省。"
+  },
+  "decision": {
+    "rule": "F0 **不要求**证明学习优势；主读数是**额外负担**。",
+    "stopConditions": [
+      "出现目标达成或边界退化 ⇒ **先修复再扩展**",
+      "隐私/真值泄漏、装配不公平 ⇒ 判无效（不是收益）",
+      "完成原规模（72 个任务）即止；不补采、不扩围"
+    ],
+    "conclusionSlots": "按协议 §6 的四类结论分列：测量无效 / 机制未就绪 / 有效但未获益 / 开发信号。"
+  },
+  "sealing": {
+    "listSha256": "由生成命令写入（D4 批次产出）",
+    "boundSources": [
+      "docs/architecture/Cognitive-Capability-Experiment-Protocol-2026-10-23.md",
+      "docs/architecture/Cognitive-Capability-File-Selector-Protocol-2026-10-22.md",
+      "evals/world-model-pilot/f0-execution-list-v1.json"
+    ],
+    "rules": [
+      "清单在**任何真实模型请求之前**写定；改动即作废并重新封存",
+      "留出结果不得用于继续调参后仍自称独立验证",
+      "本清单**不是**运行；F0 运行器与三臂接线是下一批的事"
+    ]
+  },
+  "boundaries": [
+    "F0 用既有契约（读回规则）即可，**不需要** F1 的规则族扩展",
+    "F1 的 A–D 四项扩展仍 BLOCKED（见 L 轨契约缺口分析）",
+    "本清单**不**声称任何学习收益、行为收益或泛化能力"
+  ]
+}

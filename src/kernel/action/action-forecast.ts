@@ -42,6 +42,7 @@ import {
   type WorldModelUncertainty,
 } from '../contracts/world-model.ts'
 import type { ActionResult } from './action-result.ts'
+import { fnv1a64Hex } from './idempotency.ts'
 
 // ---------------------------------------------------------------------------
 // 端口
@@ -62,6 +63,19 @@ export interface ActionForecastInput {
   readonly goal: string
   /** 候选步骤（**只有** 能力 + 操作 + 一句话用途；**没有参数**） */
   readonly candidateSteps: readonly { readonly capability: string; readonly operation: string; readonly purpose?: string }[]
+  /**
+   * 候选步骤的**参数绑定摘要**（2026-10-21 新增 · 计划 P2 第 3 步）。
+   *
+   * ⚠️ 为什么需要它：「同能力**不同对象**」必须**错得开**。
+   *    只给"能力.操作"的话，预测端口分不清这次读的是**哪个文件** ⇒
+   *    它给出的预期就会**套到别的对象上**（那就是错绑）。
+   *    ⇒ 这里给的是**摘要**（哈希），**不是参数** ⇒ 「预测端口拿不到参数」那条纪律**不受影响**；
+   *      端口要绑定，就自己按同一口径重算摘要去匹配（它的读面允许读回事实）。
+   *
+   * ⚠️ 摘要由**程序**算（`parameterBindingDigestOf`）⇒ 双方口径一致。
+   */
+  /** 与 candidateSteps 按下标对齐；缺失的绑定不得借用其他步骤的对象。 */
+  readonly targetBindings?: readonly { readonly capability: string; readonly operation: string; readonly bindingDigest: string }[]
   /** 已经发生过的步骤（**闭集**：能力.操作 + 状态 + 具名失败码） */
   readonly state: readonly ActionForecastStateLine[]
   /** 本任务还能用几次行动（**真实读数**；预测不得据此扩权） */
@@ -87,6 +101,14 @@ export const ACTION_FORECAST_FAILURES = [
   'timeout',
   'call_failed',
   'invalid_output',
+  /**
+   * **没有适用的规则**（2026-10-21 新增 · 计划 P2 第 3 步）。
+   *
+   * ⚠️ 它**不是**故障：预测端口"看了一圈，没有当前合格的规则能约束这一步"
+   *    ⇒ 任务照旧走（行为逐字不变），只是这一轮**没有**核对。
+   *    ⇒ 把它混进 `call_failed` 会让"没规则"看起来像"模型坏了"。
+   */
+  'no_applicable_rule',
 ] as const
 export type ActionForecastFailure = (typeof ACTION_FORECAST_FAILURES)[number]
 
@@ -147,6 +169,21 @@ export interface ActionForecastPort {
 
 export function describeActionForecast(port: { id: string; endpointHost: string }): string {
   return `action forecast = ${port.id} @ ${port.endpointHost}`
+}
+
+/**
+ * 参数绑定摘要（**哈希**；不是参数本身）。
+ *
+ * ⚠️ 为什么是哈希而不是路径：
+ *    预测端口**不许**拿到参数（`action-forecast.ts` 的边界 ②）⇒
+ *    给它"路径的原文"就等于把参数交出去了。
+ *    ⇒ 给**摘要**：端口能用它把"这次预测绑定的是哪个对象"对齐，
+ *      又拿不到对象的原文。
+ *
+ * ⚠️ 口径必须**只有一处**（这里）⇒ 任务环与预测端口用同一个函数算。
+ */
+export function parameterBindingDigestOf (capability: string, operation: string, targetRef: string): string {
+  return `binding:${fnv1a64Hex(JSON.stringify([capability, operation, targetRef]))}`
 }
 
 // ---------------------------------------------------------------------------
@@ -376,6 +413,16 @@ export function evaluateForecastCheck(
       const count = result.externalEvidence?.length
       if (count === undefined) return 'unknown'
       return count >= check.count ? 'pass' : 'fail'
+    }
+    /*
+     * ⚠️ 效果指纹与预期相等（2026-10-21 新增 · 计划 P2 第 3 步）。
+     *
+     *    "没观测到指纹" ⇒ `unknown`（**不是**"不符"）：没读到东西不等于读得不一样。
+     */
+    case 'effect_fingerprint_matches': {
+      const fingerprint = result.effect?.fingerprint
+      if (fingerprint === undefined) return 'unknown'
+      return fingerprint === check.expectedFingerprint ? 'pass' : 'fail'
     }
     default:
       return 'unknown'

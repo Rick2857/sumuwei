@@ -31,7 +31,7 @@ import type { ActionResult } from './action-result.ts'
 import type { CapabilityRegistry, OperationDefinition } from './capability-registry.ts'
 import type { ActionGateway, ActionInvocationContext, TargetResolution } from './gateway.ts'
 import type { ActionIntent, ActionIntentDetector } from './intent-detector.ts'
-import type { TaskAuthorizationPort } from './task-authorization.ts'
+import { applyBoundedObservation, applySourceScopedPaths, type TaskAuthorizationPort } from './task-authorization.ts'
 import type { TaskPlan, TaskPlannerPort } from './task-plan.ts'
 import type { ActionForecastPort } from './action-forecast.ts'
 import type { PayloadStagingPort } from './payload-staging.ts'
@@ -109,6 +109,8 @@ export interface ResolvedActionIntent {
 
 export interface ActionTurnResult {
   kind: ActionTurnKind
+  /** Ephemeral reply context; never copy question text into diagnostics or ledger. */
+  clarificationQuestion?: string
   request?: ActionRequest
   result?: ActionResult
   /** 意图命中的规则名（诊断用；没有请求时为 undefined） */
@@ -131,6 +133,7 @@ export interface ActionTurnResult {
     actionsUsed: number
     plansUsed: number
     stopped: string
+    goal?: NonNullable<TaskRunOutcome['goal']> & { delivered?: boolean }
   }
 }
 
@@ -186,7 +189,39 @@ export interface ActionTurnPortOptions {
    */
   task?: {
     authorizations: TaskAuthorizationPort
+    epistemic?: import('./task-loop.ts').EblTaskObserver
     planner: TaskPlannerPort
+    /** Trusted scoped assembly; absent preserves the seeded planner and legacy forecast. */
+    configurePlanning?: (text: string, fallbackPlanner?: TaskPlannerPort) => Promise<{
+      planner: TaskPlannerPort
+      ruleSnapshot: NonNullable<Parameters<typeof runTask>[0]['ruleSnapshot']>
+      epistemic?: import('./task-loop.ts').EblTaskObserver
+      completion?: NonNullable<Parameters<typeof runTask>[0]['completion']>
+      /**
+       * **任务局部的有界观察范围**（ADR-151 R1 §3；**可选**）。
+       *
+       * ⚠️ 它只能由**装配层**从"原始请求 + 受信声明"生成 —— 计划字段与 `enabled`
+       *    布尔值都**不能**授予它。挂到本次任务授权上，任务环逐步校验。
+       * ⚠️ 它与**规则资格无关**（修补 ①）：没有合格读回规则时，范围**照样**挂上 ——
+       *    此时 `planner` 就是传进来的 `fallbackPlanner`（任务自己的规划器）。
+       */
+      boundedObservation?: { readonly targetPath: string; readonly conditionPath: string; readonly maxReads: number }
+  /**
+   * **F2 逐路径范围**（最小接点 R4 · 可选）：两个源只读、族标记限次只读、目标可写+读回、其它路径拒绝。
+   * ⚠️ 只有**新的 F2 任务入口**才提供；缺省 ⇒ 旧行为逐字不变。
+   */
+  sourceScopedPaths?: {
+    readonly readOnly: readonly string[]
+    readonly limitedReads: readonly { readonly path: string, readonly maxReads: number }[]
+    readonly writable: readonly string[]
+  }
+      /**
+       * **明确拒绝这个任务入口**（ADR-151 R1 修补 ①）：**一个动作都不执行**，
+       * 并且**不**退回普通/单动作路径（那会把不合法的两行请求截半执行）。
+       * ⚠️ 这个字段在场时 `planner` / `ruleSnapshot` **不会被使用**。
+       */
+      entryRejected?: string
+    } | undefined>
     staging: PayloadStagingPort
     /**
      * 本任务允许的能力集合（**装配层按开关算出** —— 模型不能扩大它）。
@@ -323,6 +358,10 @@ export function createActionTurnPort(options: ActionTurnPortOptions): ActionTurn
        * 一步都没做成时**落回**单动作路径 —— 于是被误判成任务的话照样能正常动作。
        */
       const taskOutcome = await maybeRunTask(options, input, { keywordEntry: true })
+      // ⚠️ **入口被明确拒绝** ⇒ 这一轮**零动作**，不许退回单动作路径（ADR-151 R1 修补 ①）。
+      if (taskOutcome?.stopped === 'entry_rejected') {
+        return { kind: 'not_applicable', rule: `entry_rejected:${taskOutcome.planRejectedCode ?? 'unknown'}` }
+      }
       if (taskOutcome !== undefined && taskOutcome.results.length > 0) {
         return shapeTaskOutcome(taskOutcome)
       }
@@ -458,6 +497,10 @@ async function handleRoleTurn(
       : undefined
   if (openAuthorization !== undefined) {
     const continued = await maybeRunTask(options, input, { keywordEntry: false })
+    if (continued?.stopped === 'entry_rejected') {
+      return { kind: 'not_applicable', rule: `entry_rejected:${continued.planRejectedCode ?? 'unknown'}`,
+        diagnostics: roleDiagnostics({ branch: 'continue', result: 'entry_rejected' }) }
+    }
     if (continued !== undefined && continued.results.length > 0) {
       return shapeTaskOutcome(continued, roleDiagnostics({ branch: 'continue' }))
     }
@@ -528,6 +571,7 @@ async function handleRoleTurn(
   if (action.kind === 'no_action') {
     return {
       kind: 'not_applicable',
+      ...(reading.proposal.branch === 'clarify' ? { clarificationQuestion: reading.proposal.question } : {}),
       diagnostics: roleDiagnostics({ branch: reading.proposal.branch, result: action.reason }),
     }
   }
@@ -537,6 +581,10 @@ async function handleRoleTurn(
    *    与旧档是**同一段代码** —— 于是"授权怎么签发"只有一个实现）。
    */
   const ran = await maybeRunTask(options, input, { keywordEntry: false, seedPlan: action.plan })
+  if (ran?.stopped === 'entry_rejected') {
+    return { kind: 'not_applicable', rule: `entry_rejected:${ran.planRejectedCode ?? 'unknown'}`,
+      diagnostics: roleDiagnostics({ branch: 'tools', result: 'entry_rejected' }) }
+  }
   if (ran === undefined) {
     return {
       kind: 'not_applicable',
@@ -595,6 +643,7 @@ function shapeTaskOutcome(
       actionsUsed: outcome.actionsUsed,
       plansUsed: outcome.plansUsed,
       stopped: outcome.stopped,
+      ...(outcome.goal ? {goal:{...outcome.goal,delivered:false}} : {}),
     },
     ...(diagnostics !== undefined ? { diagnostics } : {}),
   }
@@ -646,12 +695,50 @@ async function maybeRunTask(
     })
   }
 
+  const defaultPlanner = gate.seedPlan === undefined ? task.planner : seededPlanner(gate.seedPlan, task.planner)
+  const configured = await task.configurePlanning?.(input.text, defaultPlanner)
+  /*
+   * ⚠️ **明确拒绝 ⇒ 零动作**（ADR-151 R1 修补 ①）：
+   *    自称 F1 但形状/辅助路径不合法的请求，**不许**退回普通规划（那会截半执行），
+   *    也**不许**退回单动作路径（那是同一件错事的另一条路）。
+   *    ⇒ 这里直接收尾成一个"零结果、具名原因"的任务结局；调用方据此**不**走单动作。
+   */
+  if (configured?.entryRejected !== undefined) {
+    task.authorizations.close(authorization.taskId, 'entry_rejected')
+    return {
+      taskId: authorization.taskId,
+      steps: [],
+      results: [],
+      plansUsed: authorization.plansUsed,
+      actionsUsed: authorization.actionsUsed,
+      stopped: 'entry_rejected',
+      planRejectedCode: configured.entryRejected,
+    }
+  }
+  /*
+   * ⚠️ **有界观察范围只挂到"本次任务授权"上**（ADR-151 R1 §3）：
+   *    它不是新权限表、不是第二套执行器 —— 只是这一份授权多了一个"只读某个标记一次"的局部范围。
+   *    缺省不提供 ⇒ 旧行为逐字不变。
+   *    ⚠️ 同任务**重复挂载是幂等的**（修补 ②：计数不重置、范围不许换）。
+   */
+  if (configured?.boundedObservation !== undefined) {
+    applyBoundedObservation(authorization, configured.boundedObservation)
+  }
+  /*
+   * ⚠️ **F2 逐路径范围**（R4）：同样只挂到"本次任务授权"上；幂等且**不可扩**
+   *    （同范围保留已用计数；任何扩大 ⇒ 拒绝且不改原范围）。缺省不提供 ⇒ 旧行为逐字不变。
+   */
+  if (configured?.sourceScopedPaths !== undefined) {
+    applySourceScopedPaths(authorization, configured.sourceScopedPaths)
+  }
   const outcome = await runTask(
     {
       gateway: options.gateway,
       registry: options.registry,
       authorizations: task.authorizations,
-      planner: gate.seedPlan === undefined ? task.planner : seededPlanner(gate.seedPlan, task.planner),
+      planner: configured?.planner ?? (gate.seedPlan === undefined ? task.planner : seededPlanner(gate.seedPlan, task.planner)),
+      ...(configured?.ruleSnapshot === undefined ? {} : { ruleSnapshot: configured.ruleSnapshot }),
+      ...(configured?.completion ? {completion:configured.completion} : {}),
       staging: task.staging,
       /*
        * 目标解析**复用**装配层那一份（`options.gateway` 里的同一个函数）：
@@ -662,7 +749,9 @@ async function maybeRunTask(
        */
       resolveTarget: task.resolveTarget,
       ...(task.replanContext !== undefined ? { replanContext: task.replanContext } : {}),
-      ...(task.forecast !== undefined ? { forecast: task.forecast } : {}),
+      ...(configured === undefined && task.forecast !== undefined ? { forecast: task.forecast } : {}),
+      ...(configured?.epistemic !== undefined ? { epistemic: configured.epistemic }
+        : task.epistemic !== undefined ? { epistemic: task.epistemic } : {}),
       invocationFor: ({ authorization: active }) => ({
         initiatorEvidence: initiatorEvidenceOf(options, input),
         ...(active.maxRiskLevel !== undefined ? { riskBudgetOverride: active.maxRiskLevel } : {}),

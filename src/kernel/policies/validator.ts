@@ -36,6 +36,7 @@ import {
   type DomainProposal,
   type ProposedDomainEvent,
 } from '../contracts/index.ts'
+import { EBL_EVENT } from '../contracts/epistemic-belief.ts'
 
 /** 校验通过后的一个待写入领域事件（仍无 id / sequence / 幂等键已定） */
 export interface AcceptedDomainEvent {
@@ -265,6 +266,11 @@ export function createDomainPolicyValidator(
       for (let i = 0; i < proposal.targetEvents.length; i += 1) {
         const target = proposal.targetEvents[i]
         const idempotencyKey = keys[i]
+        if (target.type === EBL_EVENT) {
+          rejected.push({ type: target.type, code: 'domain_event_requires_specialized_validator',
+            message: 'EBL 必须在来源锁内经过生命周期 Validator；通用提案不能自行声明验证状态' })
+          continue
+        }
 
         const spec = deps.registry.get(target.type)
 

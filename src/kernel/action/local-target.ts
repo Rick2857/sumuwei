@@ -48,6 +48,8 @@ const OUT_OF_DOMAIN_REASONS: readonly LocalPathRejectReason[] = [
 
 export interface ResolveLocalTargetInput {
   targetType: string
+  /** Runtime assembly supplies the host grammar; the historical default stays Windows. */
+  platform?: 'win32' | 'posix'
   /** 请求方已经给出的目标（若有，**直接采信它的 canonicalId**，但仍过语法检查） */
   declared?: ActionTarget
   /** 从参数里取出的路径（逐字） */
@@ -83,7 +85,7 @@ export function resolveLocalTarget(input: ResolveLocalTargetInput): ResolveLocal
     }
   }
 
-  const verdict = inspectLocalPath(raw)
+  const verdict = inspectLocalPath(raw, { platform: input.platform })
   if (!verdict.ok) {
     const outOfDomain = OUT_OF_DOMAIN_REASONS.includes(verdict.reason)
     if (outOfDomain) {

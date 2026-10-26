@@ -34,7 +34,7 @@ import 'dotenv/config'
 
 import { cleanupSandbox, isolateDatabase, resetPluginSqlConnection } from '../src/dev/sandbox.ts'
 
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { countsOf, createM4Harness, createReporter, snapshotOf, M4_T0 } from './m4-harness.ts'
@@ -64,9 +64,11 @@ import type { EntityRef } from '../src/kernel/contracts/index.ts'
 const report = createReporter()
 const evidenceDir = join(process.cwd(), 'artifacts', 'm4.1')
 
-console.log('='.repeat(72))
-console.log('M4.1 自然语言集成覆盖（Layer C / G12）')
-console.log('='.repeat(72))
+/*
+ * ⚠️ 门头横幅**不在这里打**：`--list-cases` 的 stdout 必须是**干净的场景 id 列表**
+ *    （逐场景 harness 直接读 stdout，多一行横幅就会被当成一个"场景"）。
+ *    ⇒ 横幅挪到文件末尾、场景执行之前。
+ */
 
 interface Scenario {
   h: Awaited<ReturnType<typeof createM4Harness>>
@@ -86,8 +88,16 @@ interface Scenario {
  *   · 目标解析 = `createTargetMemoryResolver` + 词面判别器
  *   · 轮次端口 = `createExplicitMemoryTurnPort`（生产就是从这里进的）
  */
-async function openScenario(label: string): Promise<Scenario> {
-  const sandbox = isolateDatabase(`m41-nl-${label}`, { keep: true })
+async function openScenario(label: string, options: { url?: string } = {}): Promise<Scenario> {
+  const sandbox = isolateDatabase(`m41-nl-${label}`, {
+    keep: true,
+    /*
+     * ⚠️ 显式给出目标：**只有**"这个场景自己要在第二个独立库上跑"时才用
+     *    （L3-07）。其余场景一律走默认路径（`LG_TEST_PG_URL` 指向 harness
+     *    为**本场景**准备的那个空白库）⇒ 场景之间**不共享库**。
+     */
+    ...(options.url === undefined ? {} : { postgres: { url: options.url } }),
+  })
   await resetPluginSqlConnection()
   const h = await createM4Harness({ label: `m41-nl-${label}` })
   const { owner, user, db, store } = h
@@ -202,11 +212,12 @@ async function openScenario(label: string): Promise<Scenario> {
   }
 }
 
+
 // ===========================================================================
 // L3-01 受支持的 remember：必须真的写进去
 // ===========================================================================
-report.section('L3-01 受支持的 remember（记住，我不吃香菜）')
-{
+const scenarioL301 = async (): Promise<void> => {
+  report.section('L3-01 受支持的 remember（记住，我不吃香菜）')
   const s = await openScenario('supported-remember')
   try {
     const before = await countsOf(s.h.db, s.h.owner)
@@ -236,8 +247,8 @@ report.section('L3-01 受支持的 remember（记住，我不吃香菜）')
 // ===========================================================================
 // L3-02 不受支持的 remember：**无写入**，且事实是 not_written
 // ===========================================================================
-report.section('L3-02 不受支持的说法（记住，我平时主要用 VS Code）')
-{
+const scenarioL302 = async (): Promise<void> => {
+  report.section('L3-02 不受支持的说法（记住，我平时主要用 VS Code）')
   const s = await openScenario('unsupported-remember')
   try {
     const before = await countsOf(s.h.db, s.h.owner)
@@ -261,8 +272,8 @@ report.section('L3-02 不受支持的说法（记住，我平时主要用 VS Cod
 // ===========================================================================
 // L3-03 正确 forget：只撤那条
 // ===========================================================================
-report.section('L3-03 正确 forget（目标真的存在）')
-{
+const scenarioL303 = async (): Promise<void> => {
+  report.section('L3-03 正确 forget（目标真的存在）')
   const s = await openScenario('correct-forget')
   try {
     await s.seed('education.institution', '示例工程科技大学', 'person_fact')
@@ -283,8 +294,8 @@ report.section('L3-03 正确 forget（目标真的存在）')
 // ===========================================================================
 // L3-08 中文说法必须经**登记表**命中槽位（Layer D 抓到的缺口的离线复现）
 // ===========================================================================
-report.section('L3-08 中文说法经登记表命中（香菜 → food.preference.cilantro）')
-{
+const scenarioL308 = async (): Promise<void> => {
+  report.section('L3-08 中文说法经登记表命中（香菜 → food.preference.cilantro）')
   /*
    * 这一条补的是一个**真实发生过**的缺口，而且是 Layer D 抓到的：
    *
@@ -322,8 +333,8 @@ report.section('L3-08 中文说法经登记表命中（香菜 → food.preferenc
 // ===========================================================================
 // L3-04 无关 forget：**一个字都不能改**
 // ===========================================================================
-report.section('L3-04 无关 forget（D1 的原形）')
-{
+const scenarioL304 = async (): Promise<void> => {
+  report.section('L3-04 无关 forget（D1 的原形）')
   const s = await openScenario('unrelated-forget')
   try {
     await s.seed('education.institution', '示例工程科技大学', 'person_fact')
@@ -360,8 +371,8 @@ report.section('L3-04 无关 forget（D1 的原形）')
 // ===========================================================================
 // L3-05 模糊 forget（多候选）：不得挑一条
 // ===========================================================================
-report.section('L3-05 模糊 forget（两条候选都不明确）')
-{
+const scenarioL305 = async (): Promise<void> => {
+  report.section('L3-05 模糊 forget（两条候选都不明确）')
   const s = await openScenario('ambiguous-forget')
   try {
     await s.seed('tooling.preference.editor', 'VS Code', 'preference')
@@ -390,8 +401,8 @@ report.section('L3-05 模糊 forget（两条候选都不明确）')
 // ===========================================================================
 // L3-06 端到端：一句含糊的话之后，库与"执行结果"一致
 // ===========================================================================
-report.section('L3-06 执行结果与库状态一致（C23 的离线半边）')
-{
+const scenarioL306 = async (): Promise<void> => {
+  report.section('L3-06 执行结果与库状态一致（C23 的离线半边）')
   const s = await openScenario('consistency')
   try {
     await s.seed('education.institution', '示例工程科技大学', 'person_fact')
@@ -418,34 +429,86 @@ report.section('L3-06 执行结果与库状态一致（C23 的离线半边）')
 // ===========================================================================
 // L3-07 确定性：同一句话跑两次结论相同
 // ===========================================================================
-report.section('L3-07 确定性（同一句话两次结论相同）')
-{
-  /*
-   * ⚠️ 必须**顺序**跑两个库，不能同时开。
-   *
-   * 实测：第一版写成 `openScenario('a'); openScenario('b')` 同时持有两个场景，
-   * 而 `@elizaos/plugin-sql` 把 PGlite 客户端缓存在**进程级单例**里 ——
-   * 第二次 `resetPluginSqlConnection()` 会把第一个库的连接关掉。
-   * 于是 L3-07 直接崩掉（而前六条全绿，看起来像"最后一条的问题"）。
-   * 这正是 `src/dev/sandbox.ts` 里写的那件事：一个进程里只有第一个数据库生效。
-   */
-  const runOnce = async (label: string) => {
-    const s = await openScenario(label)
-    try {
-      await s.seed('education.institution', '示例工程科技大学', 'person_fact')
-      return await s.turn('忘掉我养过一只鹦鹉这件事')
-    } finally {
-      await s.dispose()
-    }
+/*
+ * ⚠️⚠️ **为什么拆成两个场景**（2026-10-21 实测改）
+ *
+ * 原来的写法是：**同一个进程**里顺序跑两个库，然后比较两次的结论。
+ *
+ * 在 PostgreSQL 后端下这**撞上产品不变量**：
+ *   「本进程已经打开过另一个 PostgreSQL 目标，不能再换一个」
+ *   ⇒ `second_postgres_target_in_process`（实测 2026-10-21）。
+ * 而这条不变量**不许放松**（计划 §3 P0.4：多空库场景用独立子进程）。
+ *
+ * ⇒ 拆成两个**场景**（= 两个进程 = 两个独立库）：
+ *   · `L3-07a`：在库 A 上跑一次，把结论写进 `artifacts/m4.1/determinism-a.json`；
+ *   · `L3-07b`：在库 B 上跑一次，读 A 的结论**对照**，然后把 A 的文件删掉。
+ *
+ * ⚠️ 删掉 A 的文件是刻意的：这样"只跑 L3-07b"时**不会**拿上一轮的旧文件当对照
+ *    （那会让一个**过期的绿**冒充确定性成立）—— 缺对照就如实报"对照组缺失"。
+ */
+const DETERMINISM_DIR = join(process.cwd(), 'artifacts', 'm4.1')
+interface DeterminismReading {
+  kind: string
+  reason?: string
+}
+function writeDeterminism (file: string, value: DeterminismReading): void {
+  mkdirSync(DETERMINISM_DIR, { recursive: true })
+  writeFileSync(join(DETERMINISM_DIR, file), `${JSON.stringify(value, null, 2)}\n`, 'utf8')
+}
+function readDeterminism (file: string): DeterminismReading | undefined {
+  const path = join(DETERMINISM_DIR, file)
+  if (!existsSync(path)) return undefined
+  try {
+    return JSON.parse(readFileSync(path, 'utf8')) as DeterminismReading
+  } catch {
+    return undefined
   }
+}
 
-  const a = await runOnce('determinism-a')
-  const b = await runOnce('determinism-b')
+const runDeterminismOnce = async (label: string): Promise<DeterminismReading> => {
+  const s = await openScenario(label)
+  try {
+    await s.seed('education.institution', '示例工程科技大学', 'person_fact')
+    const result = await s.turn('忘掉我养过一只鹦鹉这件事')
+    return { kind: result.kind, ...(result.reason === undefined ? {} : { reason: result.reason }) }
+  } finally {
+    await s.dispose()
+  }
+}
+
+const scenarioL307a = async (): Promise<void> => {
+  report.section('L3-07a 确定性（第一次：独立库 A）')
+  const reading = await runDeterminismOnce('determinism-a')
+  writeDeterminism('determinism-a.json', reading)
+  // 上一轮留下的 B 读数作废（否则下一次只跑 B 会拿到过期对照）
+  rmSync(join(DETERMINISM_DIR, 'determinism-b.json'), { force: true })
+  report.check(
+    'L3-07a：第一次的结论已记录（独立库 A）',
+    true,
+    `${reading.kind}/${String(reading.reason)}`
+  )
+}
+
+const scenarioL307b = async (): Promise<void> => {
+  report.section('L3-07b 确定性（第二次：独立库 B）+ 与 A 对照')
+  const reading = await runDeterminismOnce('determinism-b')
+  writeDeterminism('determinism-b.json', reading)
+  const a = readDeterminism('determinism-a.json')
+  if (a === undefined) {
+    report.check(
+      'L3-07：对照组（A）缺失 —— **无法判定**确定性（不是通过）',
+      false,
+      '先跑 L3-07a（逐场景 harness 会按清单顺序跑）'
+    )
+    return
+  }
   report.check(
     'L3-07：两个独立库上得到**同一个**结论',
-    a.kind === b.kind && a.reason === b.reason,
-    `${a.kind}/${String(a.reason)} vs ${b.kind}/${String(b.reason)}`
+    a.kind === reading.kind && a.reason === reading.reason,
+    `${a.kind}/${String(a.reason)} vs ${reading.kind}/${String(reading.reason)}`
   )
+  // 对照用过即焚 ⇒ 下一轮不会拿到过期对照
+  rmSync(join(DETERMINISM_DIR, 'determinism-a.json'), { force: true })
 }
 
 // ===========================================================================
@@ -456,8 +519,8 @@ report.section('L3-07 确定性（同一句话两次结论相同）')
  * `openScenario` 上面的服务构造已经按生产形状注入了冲突端口 —— 少接它，
  * 这三条会全部退回"又建一条"的旧行为（那正是修复前实测到的样子）。
  */
-report.section('L3-09 无标记的矛盾（记住，我吃辣）：旧条转 disputed，且**不新建**')
-{
+const scenarioL309 = async (): Promise<void> => {
+  report.section('L3-09 无标记的矛盾（记住，我吃辣）：旧条转 disputed，且**不新建**')
   const s = await openScenario('nomarker-conflict')
   try {
     await s.seed('food.avoid.general', '回避辣', 'preference')
@@ -488,8 +551,8 @@ report.section('L3-09 无标记的矛盾（记住，我吃辣）：旧条转 dis
   }
 }
 
-report.section('L3-10 有标记的更正（记住，我现在吃辣了）：新建 + 旧条 superseded')
-{
+const scenarioL310 = async (): Promise<void> => {
+  report.section('L3-10 有标记的更正（记住，我现在吃辣了）：新建 + 旧条 superseded')
   const s = await openScenario('marker-supersede')
   try {
     await s.seed('food.avoid.general', '回避辣', 'preference')
@@ -522,10 +585,10 @@ report.section('L3-10 有标记的更正（记住，我现在吃辣了）：新�
   }
 }
 
-report.section(
-  'L3-11 误触发负控（冻结集 correction_intent_negative_v1：12 条 = 6 类 × 2）⇒ 库零变化'
-)
-{
+const scenarioL311 = async (): Promise<void> => {
+  report.section(
+    'L3-11 误触发负控（冻结集 correction_intent_negative_v1：12 条 = 6 类 × 2）⇒ 库零变化'
+  )
   const s = await openScenario('false-trigger')
   try {
     await s.seed('food.avoid.general', '回避辣', 'preference')
@@ -577,9 +640,63 @@ report.section(
   }
 }
 
+// ===========================================================================
+// 场景清单（2026-10-21 · 逐场景子进程）
+// ===========================================================================
+/**
+ * 每个场景 = 一条用例，**各自需要一个空白库**。
+ *
+ * ⚠️ 为什么要有这个清单：PostgreSQL 后端下 `isolateDatabase()` **给不出空白库**
+ *    （它只把 URL 再指一次）⇒ 场景之间会互相污染（实测：`duplicate_content`）。
+ *    ⇒ 逐场景**子进程**是唯一的干净解法（进程边界 + 库边界；
+ *      产品那条"同进程只允许一个 PostgreSQL 目标"的不变量**一字未动**）。
+ *
+ * ⇒ 场景 id 的**唯一事实源在这里**；`--list-cases` 就是它对外的读面。
+ */
+const SCENARIOS: Array<{ id: string; run: () => Promise<void>; extraDatabases?: number }> = [
+  { id: 'L3-01', run: scenarioL301 },
+  { id: 'L3-02', run: scenarioL302 },
+  { id: 'L3-03', run: scenarioL303 },
+  { id: 'L3-08', run: scenarioL308 },
+  { id: 'L3-04', run: scenarioL304 },
+  { id: 'L3-05', run: scenarioL305 },
+  { id: 'L3-06', run: scenarioL306 },
+  { id: 'L3-07a', run: scenarioL307a },
+  { id: 'L3-07b', run: scenarioL307b },
+  { id: 'L3-09', run: scenarioL309 },
+  { id: 'L3-10', run: scenarioL310 },
+  { id: 'L3-11', run: scenarioL311 },
+]
+
+const argv = process.argv.slice(2)
+if (argv.includes('--list-cases')) {
+  /*
+   * 每行：`id<TAB>额外独立库数`
+   * ⇒ 逐场景 harness 只读这一份，不用在别处复述场景清单。
+   */
+  for (const scenario of SCENARIOS) {
+    console.log(`${scenario.id}\t${String(scenario.extraDatabases ?? 0)}`)
+  }
+  process.exit(0)
+}
+const caseIndex = argv.indexOf('--case')
+const onlyCase = caseIndex >= 0 ? argv[caseIndex + 1] : undefined
+if (onlyCase !== undefined && !SCENARIOS.some(s => s.id === onlyCase)) {
+  console.error(`❌ 没有这个场景：${onlyCase}`)
+  console.error(`   可用：${SCENARIOS.map(s => s.id).join(' / ')}`)
+  process.exit(2)
+}
+console.log('='.repeat(72))
+console.log('M4.1 自然语言集成覆盖（Layer C / G12）')
+console.log('='.repeat(72))
+for (const scenario of SCENARIOS) {
+  if (onlyCase !== undefined && scenario.id !== onlyCase) continue
+  await scenario.run()
+}
+
 mkdirSync(evidenceDir, { recursive: true })
 writeFileSync(
-  join(evidenceDir, 'nl-mutation.json'),
+  join(evidenceDir, onlyCase === undefined ? 'nl-mutation.json' : `nl-mutation.${onlyCase}.json`),
   `${JSON.stringify(
     {
       testId: 'M4.1 / Layer C / G12',
@@ -587,6 +704,7 @@ writeFileSync(
       priority: 'P0',
       status: report.failed === 0 ? 'PASS' : 'FAIL',
       discipline: '禁止传 memoryId；只从用户真实文本进入；生产同构装配',
+      scenario: onlyCase ?? '(全部场景)',
       checks: { passed: report.passed, failed: report.failed, failures: report.failures },
     },
     null,
@@ -595,4 +713,4 @@ writeFileSync(
   'utf8'
 )
 
-report.finish('M4.1 自然语言集成覆盖')
+report.finish(onlyCase === undefined ? 'M4.1 自然语言集成覆盖' : `M4.1 自然语言集成覆盖 · ${onlyCase}`)

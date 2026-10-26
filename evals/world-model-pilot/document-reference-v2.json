@@ -1,0 +1,359 @@
+{
+  "version": "document-reference@2",
+  "phase": "development",
+  "review": {
+    "method": "development_reference_fixture",
+    "scope": "selected units only; public release makes no human validation or production claim"
+  },
+  "normalization": "nfkc-line-hyphen-whitespace-markdown@1",
+  "documents": [
+    {
+      "id": "paper-en-2col",
+      "file": "paper-en-2col.pdf",
+      "sha256": "bdfaa68d8984f0dc02beaca527b76f207d99b666d31d1da728ee0728182df697",
+      "units": [
+        {
+          "id": "t-abstract",
+          "page": 1,
+          "region": "abstract",
+          "kind": "fragments",
+          "needles": [
+            "recurrent or convolutional neural networks",
+            "based solely on attention mechanisms"
+          ]
+        },
+        {
+          "id": "t-position",
+          "page": 6,
+          "region": "section 3.5",
+          "kind": "fragments",
+          "needles": [
+            "we use sine and cosine functions of different frequencies"
+          ]
+        },
+        {
+          "id": "t-position-purpose",
+          "page": 6,
+          "region": "section 3.5 last paragraph",
+          "kind": "fragments",
+          "needles": [
+            "extrapolate to sequence lengths longer than the ones encountered during training"
+          ]
+        },
+        {
+          "id": "t-supervised-row",
+          "page": 10,
+          "region": "Table 4, supervised Transformer row",
+          "kind": "row",
+          "columns": [
+            "Parser",
+            "Training",
+            "WSJ 23 F1"
+          ],
+          "needles": [
+            "Transformer (4 layers)",
+            "WSJ only",
+            "supervised",
+            "91.3"
+          ]
+        },
+        {
+          "id": "t-semi-row",
+          "page": 10,
+          "region": "Table 4, semi-supervised Transformer row",
+          "kind": "row",
+          "columns": [
+            "Parser",
+            "Training",
+            "WSJ 23 F1"
+          ],
+          "needles": [
+            "Transformer (4 layers)",
+            "semi-supervised",
+            "92.7"
+          ]
+        },
+        {
+          "id": "t-conclusion",
+          "page": 10,
+          "region": "section 7",
+          "kind": "fragments",
+          "needles": [
+            "replacing the recurrent layers most commonly used",
+            "multi-headed self-attention"
+          ]
+        }
+      ],
+      "renders": [
+        {
+          "file": "paper-en-2col-p1.png",
+          "sha256": "328b61336761e9b38c320c33b0225d79dfaff0243dd19f255fd0fe4fad15ce4b"
+        },
+        {
+          "file": "paper-en-2col-p6.png",
+          "sha256": "5c9fb84c40977bd6058c0c6d487e32e1d539c95bd9ac036cc4b776afacd0ecd5"
+        },
+        {
+          "file": "paper-en-2col-p10.png",
+          "sha256": "2ff1a9bdc913d4a3c7062b10f08f50de29692d85ccf56419e77145c91b38a3a5"
+        }
+      ]
+    },
+    {
+      "id": "paper-en-tables",
+      "file": "paper-en-tables.pdf",
+      "sha256": "5692a5514787a8c6727b4ff3b726a3385798bc68e12138d1d4af83947e2acf6e",
+      "units": [
+        {
+          "id": "b-vocabulary",
+          "page": 4,
+          "region": "left column input representation",
+          "kind": "fragments",
+          "needles": [
+            "WordPiece embeddings",
+            "30,000 token vocabulary"
+          ]
+        },
+        {
+          "id": "b-masking",
+          "page": 4,
+          "region": "right column masked LM",
+          "kind": "fragments",
+          "needles": [
+            "mask 15% of all WordPiece tokens"
+          ]
+        },
+        {
+          "id": "b-corpus",
+          "page": 5,
+          "region": "left column pre-training data",
+          "kind": "fragments",
+          "needles": [
+            "BooksCorpus (800M words)",
+            "English Wikipedia (2,500M words)"
+          ]
+        },
+        {
+          "id": "b-base-glue",
+          "page": 6,
+          "region": "Table 1 BERT BASE row",
+          "kind": "row",
+          "columns": [
+            "System",
+            "MNLI",
+            "QQP",
+            "QNLI",
+            "SST-2",
+            "CoLA",
+            "STS-B",
+            "MRPC",
+            "RTE",
+            "Average"
+          ],
+          "needles": [
+            "BERTBASE",
+            "84.6/83.4",
+            "71.2",
+            "90.5",
+            "93.5",
+            "52.1",
+            "85.8",
+            "88.9",
+            "66.4",
+            "79.6"
+          ]
+        },
+        {
+          "id": "b-large-glue",
+          "page": 6,
+          "region": "Table 1 BERT LARGE row",
+          "kind": "row",
+          "columns": [
+            "System",
+            "MNLI",
+            "QQP",
+            "QNLI",
+            "SST-2",
+            "CoLA",
+            "STS-B",
+            "MRPC",
+            "RTE",
+            "Average"
+          ],
+          "needles": [
+            "BERTLARGE",
+            "86.7/85.9",
+            "72.1",
+            "92.7",
+            "94.9",
+            "60.5",
+            "86.5",
+            "89.3",
+            "70.1",
+            "82.1"
+          ]
+        },
+        {
+          "id": "b-large-swag",
+          "page": 7,
+          "region": "Table 4 BERT LARGE row",
+          "kind": "row",
+          "columns": [
+            "System",
+            "Dev",
+            "Test"
+          ],
+          "needles": [
+            "BERTLARGE",
+            "86.6",
+            "86.3"
+          ]
+        },
+        {
+          "id": "b-training-steps",
+          "page": 14,
+          "region": "left column comparison bullet",
+          "kind": "fragments",
+          "needles": [
+            "BERT was trained for 1M steps",
+            "batch size of 128,000 words"
+          ]
+        }
+      ],
+      "renders": [
+        {
+          "file": "paper-en-tables-p4.png",
+          "sha256": "f1a2a423359686045aa63f78181ed6ff92b8751e3929ade08d82b9c33623dba6"
+        },
+        {
+          "file": "paper-en-tables-p5.png",
+          "sha256": "cc24883439a45eff008dc70f8612834b6f0ecd8628556b53d9715505a72efe15"
+        },
+        {
+          "file": "paper-en-tables-p6.png",
+          "sha256": "cc838f2d036c597dd82703a23c9b94a84c3395b3cc1ebeb1b2d3f3177904f828"
+        },
+        {
+          "file": "paper-en-tables-p7.png",
+          "sha256": "a7d9b0000122b3cedd602773e4b187aa214929396f32aaece94e9007803db9a1"
+        },
+        {
+          "file": "paper-en-tables-p14.png",
+          "sha256": "83441bcb1aeb802415309bd0a9e359ce200bd39b54a6516199d62080c2b609dd"
+        }
+      ]
+    },
+    {
+      "id": "wiki-zh-university",
+      "file": "wiki-zh-university.pdf",
+      "sha256": "85f79ee60c52b236fa8e9f4870a3ff8d7e97366bebd40e414131827fcc9af366",
+      "units": [
+        {
+          "id": "w-history",
+          "page": 1,
+          "region": "introductory paragraph",
+          "kind": "fragments",
+          "needles": [
+            "1958年学校迁址西安",
+            "1988年定为现名"
+          ]
+        },
+        {
+          "id": "w-lab-count",
+          "page": 1,
+          "region": "overview",
+          "kind": "fragments",
+          "needles": [
+            "现有4个国家级重点实验室",
+            "16个省部级重点实验室"
+          ]
+        },
+        {
+          "id": "w-identifier",
+          "page": 2,
+          "region": "infobox identifier row",
+          "kind": "row",
+          "columns": [
+            "学校标识码",
+            "值"
+          ],
+          "needles": [
+            "学校标识码",
+            "4161010701"
+          ]
+        },
+        {
+          "id": "w-doctoral",
+          "page": 2,
+          "region": "infobox doctoral students row",
+          "kind": "row",
+          "columns": [
+            "博士生人数",
+            "值"
+          ],
+          "needles": [
+            "博士生人數",
+            "2262人"
+          ]
+        },
+        {
+          "id": "w-lab-vision",
+          "page": 8,
+          "region": "education ministry laboratories list",
+          "kind": "fragments",
+          "needles": [
+            "智能感知与图像理解教育部重点实验室"
+          ]
+        },
+        {
+          "id": "w-lab-reliability",
+          "page": 8,
+          "region": "provincial laboratories list",
+          "kind": "fragments",
+          "needles": [
+            "微电路可靠性技术重点实验室"
+          ]
+        }
+      ],
+      "renders": [
+        {
+          "file": "wiki-zh-university-p1.png",
+          "sha256": "923c851a99f91749516a5dc678a4a6d458a04bc9ec61840e8c2db9a6a9b01bef"
+        },
+        {
+          "file": "wiki-zh-university-p2.png",
+          "sha256": "67a1e7b7167baba4eaee927a28211cfe29232750c8e8381a6401ceb8bae4e719"
+        },
+        {
+          "file": "wiki-zh-university-p8.png",
+          "sha256": "9c01f050a568acaf3b43779324a8c99078cc8836f459b3ab3ad5748c7cb42f94"
+        },
+        {
+          "file": "wiki-p2-card-detail.png",
+          "sha256": "5282ed2d3185a78039bf5d70bb1dd0f51cbff46f360e1730484f9f5046aef0bb"
+        }
+      ]
+    }
+  ],
+  "parentReferenceSha256": "93c1367973fbf9b966f5add349747f624a541cc91591b54016c1a084ea7b42f8",
+  "developmentCorrections": [
+    {
+      "unit": "w-identifier",
+      "from": "1161010701",
+      "to": "4161010701",
+      "reason": "rechecked against enlarged frozen page 2 source image"
+    },
+    {
+      "unit": "w-doctoral",
+      "from": "博士生人数",
+      "to": "博士生人數",
+      "reason": "preserve the traditional glyph visible in the frozen page, no automatic script conversion"
+    },
+    {
+      "unit": "t-supervised-row",
+      "from": "WSJ only, supervised",
+      "to": "WSJ only / supervised",
+      "reason": "split lexical anchors within the visually checked training cell; same-line row association remains mandatory"
+    }
+  ]
+}

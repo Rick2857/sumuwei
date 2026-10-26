@@ -21,7 +21,13 @@ import 'dotenv/config'
 
 // 必须在任何会碰数据库的 import 之前
 import { isolateDatabase } from '../src/dev/sandbox.ts'
-isolateDatabase('verify-phase-c')
+import { pgTestTargetFromEnv } from './gates/pg-target.ts'
+/*
+ * S-2（2026-10-20）：显式接受**一次性 PostgreSQL 测试库**。
+ * 不给 `LG_TEST_PG_URL` 时展开成 `{}` ⇒ 行为与改动前逐字相同（仍然失败关闭）。
+ * 底座由 `scripts/postgresql/test-harness.ts` 的 `runPreparedPgGate` 提供。
+ */
+isolateDatabase('verify-phase-c', { ...pgTestTargetFromEnv() })
 
 
 import { sql } from 'drizzle-orm'

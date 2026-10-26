@@ -81,8 +81,9 @@ import {
   BELIEF_MEMORY_RECONCILER_VERSION,
 } from '../../kernel/app/belief/job.ts'
 import { createBeliefJobPorts } from './belief-scheduler.ts'
-import { renderBeliefSection } from '../../kernel/contracts/belief-renderer.ts'
+import { isEblReplacedInference, renderBeliefSection } from '../../kernel/contracts/belief-renderer.ts'
 import type { BeliefSectionBuildResult } from '../../kernel/app/turn-gateway.ts'
+import { readEblHumanContext } from './epistemic-human-context.ts'
 
 // ---------------------------------------------------------------------------
 // 关键状态 → Context section
@@ -152,12 +153,14 @@ export async function recentContextLinesFrom(
     limit: number
     /** 只看这一条会话（不传 = 该角色的全部会话，M3 起的行为） */
     conversationId?: ConversationId
+    imagesOnly?: boolean
   }
 ): Promise<ConversationLine[]> {
   const db = getDb(runtime)
   const events = await recentConversationEvents(db, {
     characterId: options.characterId,
     limit: options.limit,
+    ...(options.imagesOnly ? { imagesOnly: true } : {}),
     ...(options.conversationId === undefined ? {} : { conversationId: options.conversationId }),
   })
   const names = new Map<string, string>()
@@ -661,17 +664,21 @@ export async function buildBeliefContextSection(
     quantifier?: (text: string) => number
     /** 覆盖 D17 缺省预算（400） */
     tokenBudget?: number
+    epistemicHuman?: { currentEventId?: string }
   },
 ): Promise<BeliefSectionBuildResult | undefined> {
   const db = getDb(runtime)
   const cid = asCharacterId(input.characterId)
+  const epistemic = input.epistemicHuman ? await readEblHumanContext(db, cid, input.activeUserId, input.epistemicHuman.currentEventId) : undefined
 
   // 未建档 ⇒ 没有信念生活史 ⇒ 安静（与"建档了但没有可用判断"区分开）
   const originRow = await getBeliefOrigin(db, cid)
   if (originRow === undefined || !originRow.state.originated) return undefined
 
-  const candidates = await listBeliefsByStatus(db, cid, ['active', 'disputed'])
-  if (candidates.length === 0) return undefined
+  const candidates = (await listBeliefsByStatus(db, cid, ['active', 'disputed']))
+    // User-approved retirement: disabling EBL must not silently revive the older inference outlet.
+    .filter(belief => !isEblReplacedInference(belief))
+  if (candidates.length === 0 && !epistemic?.presentation.candidate) return undefined
 
   // 资格回查（§5.2：批量 · 确切 ID · 失败关闭）——端口与调度器同源
   const ports = createBeliefJobPorts(db)
@@ -701,7 +708,7 @@ export async function buildBeliefContextSection(
     { invalidatedMemoryIds: input.invalidatedMemoryIds ?? [] },
   )
   const usable = candidates.filter((b) => overlaid.get(String(b.beliefId))?.usable === true)
-  if (usable.length === 0) return undefined
+  if (usable.length === 0 && !epistemic?.presentation.candidate) return undefined
 
   // 同根去重判据：本轮选中 Memory 的会话证据根（§9.3——正文已由记忆承载）
   const memoryStore = createNativeMemoryStore(db)
@@ -730,6 +737,7 @@ export async function buildBeliefContextSection(
     subject: { kind: 'user', id: input.activeUserId },
     quantifier: input.quantifier ?? ((text: string) => Math.ceil(text.length / 2)),
     ...(input.tokenBudget !== undefined ? { tokenBudget: input.tokenBudget } : {}),
+    ...(epistemic ? { epistemic: epistemic.presentation } : {}),
   })
   if (rendered === undefined) return undefined
 
@@ -738,7 +746,9 @@ export async function buildBeliefContextSection(
     sourceRefs: rendered.sourceRefs,
     usedBeliefIds: rendered.usedBeliefIds,
     droppedBeliefIds: rendered.droppedBeliefIds,
-    candidateCount: usable.length,
+    candidateCount: epistemic ? rendered.usedBeliefIds.length + rendered.droppedBeliefIds.length : usable.length,
+    ...(epistemic?.presentation.candidate && rendered.usedBeliefIds.includes(epistemic.presentation.candidate.claimId)
+      && epistemic.confirmIncluded ? { confirmIncluded: epistemic.confirmIncluded } : {}),
   }
 }
 

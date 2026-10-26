@@ -1,0 +1,75 @@
+{
+  "specVersion": "public-template-2026-10-26",
+  "title": "Generic Linux simulator template; not a production inventory",
+  "provenance": {
+    "note": "Synthetic public defaults. Validate against your own deployment; no production readings included."
+  },
+  "host": {
+    "os": {
+      "id": "ubuntu",
+      "version": "22.04"
+    },
+    "arch": "x86_64",
+    "node": {
+      "version": "22.23.3"
+    },
+    "python": {
+      "series": "3.12"
+    },
+    "pnpm": {
+      "version": "12.4.1"
+    },
+    "timezone": "Asia/Shanghai"
+  },
+  "services": {
+    "postgresql": {
+      "image": "pgvector/pgvector@sha256:ac08538c6f8b9904c33c8224c5e5706dbe760aca29db1d096972b4052c22a75d",
+      "hostPort": 55432,
+      "database": "sumuwei",
+      "appUser": "lg_migrate",
+      "schemaVersion": 23
+    },
+    "napcat": {
+      "image": "docker.m.daocloud.io/mlikiowa/napcat-docker@sha256:1336a777f9a4f1f8cb89fef42f7548deacd3645919a067a50df5b66b5e77390e",
+      "onebotWsPort": 6701,
+      "webuiPort": 6101
+    }
+  },
+  "env": {
+    "serverDisabledSwitches": {
+      "mustBeOff": [
+        "CHARACTER_BROWSER_ENABLED",
+        "CHARACTER_BROWSER_SIDECAR_AUTOSTART",
+        "CHARACTER_BROWSER_FULL_TOOLS",
+        "CHARACTER_DESKTOP_INSPECT_ENABLED",
+        "CHARACTER_DESKTOP_OPERATE_ENABLED",
+        "CHARACTER_LOCAL_FILE_READ_ENABLED",
+        "CHARACTER_LOCAL_FILE_WRITE_ENABLED",
+        "CHARACTER_PERSONAL_LIBRARY_ENABLED",
+        "CHARACTER_EXPRESSIVE_SPEECH"
+      ],
+      "mustBeAbsent": [
+        "CHARACTER_BROWSER_SIDECAR_DIR",
+        "CHARACTER_BROWSER_SIDECAR_TOKEN_FILE"
+      ]
+    },
+    "linuxPaths": {
+      "CHARACTER_MEMORY_AUTOMATIC_PYTHON": "<projectRoot>/data/runtime/automatic-memory/bin/python",
+      "PROJECT_LG_RAPIDOCR_PYTHON": "<projectRoot>/data/runtime/document-ocr/bin/python",
+      "PROJECT_LG_DOC_PYTHON": "<projectRoot>/data/runtime/utility-skills/bin/python",
+      "PROJECT_LG_OFFICE_PYTHON": "<projectRoot>/data/runtime/utility-skills/bin/python"
+    },
+    "npmrc": {
+      "mustNotBe": [
+        "proxy",
+        "https-proxy",
+        "strict-ssl=false"
+      ]
+    }
+  },
+  "assets": {
+    "embeddingModels": {
+      "path": "artifacts/m9.5/local/embedding-lab/models"
+    }
+  }
+}

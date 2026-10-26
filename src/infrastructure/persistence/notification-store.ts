@@ -343,6 +343,31 @@ export async function listPendingIntents(
   return asRows<IntentRow>(rows).map((row) => rowToIntent(row)!)
 }
 
+/** Bounded read view for the current reminder conversation; never writes chat history. */
+export async function recentReminderDeliveries(db: RawDb, input: {
+  characterId: CharacterId; ownerRef: string; conversationRef: string; channel: ChatChannel
+  now: number; withdrawnEventIds: readonly string[]
+}): Promise<{ occurrenceKey: string; state: string; text: string; at: number; stoppedByMessage: boolean }[]> {
+  const rows = await exec(db, sql`select o.occurrence_key, o.state, o.candidate_text, o.updated_at,
+      i.repeat_mode, exists (select 1 from conversation_events e
+        where e.character_id = o.character_id and e.conversation_id = i.conversation_ref
+          and e.type = 'user_message' and e.actor_type = 'user'
+          and e.created_at > o.updated_at and e.created_at <= ${input.now}) as replied
+    from notification_occurrences o
+    join notification_intents i on i.id = o.intent_id
+    where o.character_id = ${String(input.characterId)} and i.character_id = ${String(input.characterId)}
+      and i.owner_ref = ${input.ownerRef} and i.conversation_ref = ${input.conversationRef}
+      and i.delivery_channel = ${input.channel} and o.kind = 'reminder'
+      and o.state in ('api_accepted', 'failed_confirmed', 'delivery_unknown', 'dispatching')
+      and o.updated_at between ${input.now - 86_400_000} and ${input.now}
+      and not exists (select 1 from jsonb_array_elements_text(i.source_refs) ref(value)
+        where ref.value in (select jsonb_array_elements_text(${JSON.stringify(input.withdrawnEventIds)}::jsonb)))
+    order by o.updated_at desc, o.occurrence_key desc limit 10`, '读取同会话近期提醒投递')
+  return rows.reverse().map(row => ({ occurrenceKey: String(row.occurrence_key), state: String(row.state),
+    text: String(row.candidate_text ?? ''), at: Number(row.updated_at),
+    stoppedByMessage: row.repeat_mode === 'until_reply' && row.state === 'api_accepted' && row.replied === true }))
+}
+
 /** 到点（或已过期）的待办提醒 —— 含**已经过去**的那些（调用方决定 `grace` / `expired`） */
 export async function listDueIntents(
   db: RawDb,
@@ -392,12 +417,12 @@ export async function rescheduleIntent(
 }
 
 /** 内容补充使用版本比较；已经开始投递的提醒不能被悄悄改写。 */
-export async function updateReminderText(db: RawDb, target: NotificationIntentRecord, text: string, sourceRefs: readonly string[], now = Date.now(), channel: ChatChannel = target.deliveryChannel): Promise<boolean> {
+export async function updateReminderText(db: RawDb, target: NotificationIntentRecord, text: string, sourceRefs: readonly string[], now = Date.now(), channel: ChatChannel = target.deliveryChannel, repeatMode?: import('../../kernel/app/reminder/repeat-mode.ts').ReminderRepeatMode): Promise<boolean> {
   const refs = [...new Set([...target.sourceRefs, ...sourceRefs])]
   const candidate = buildNotificationCandidate(text)
   const rows = await exec(db, sql`update notification_intents
     set text = ${candidate.text}, text_fingerprint = ${candidate.fingerprint}, source_refs = ${JSON.stringify(refs)}::jsonb,
-        delivery_channel = ${channel}, plan_version = plan_version + 1, updated_at = ${now}
+        delivery_channel = ${channel}, repeat_mode = ${repeatMode ?? target.repeatMode ?? null}, plan_version = plan_version + 1, updated_at = ${now}
     where id = ${String(target.id)} and character_id = ${String(target.characterId)}
       and owner_ref = ${target.ownerRef} and conversation_ref = ${target.conversationRef}
       and kind = 'reminder' and status = 'pending' and plan_version = ${target.planVersion}
@@ -409,11 +434,11 @@ export async function updateReminderText(db: RawDb, target: NotificationIntentRe
 
 /** Batch edits keep the same owner/conversation/version fence as content updates. */
 export async function revisePendingReminder(db: RawDb, target: NotificationIntentRecord,
-  change: ({ dueAt: number } | { cancel: true }) & { sourceRefs?: readonly string[] }, now = Date.now()): Promise<boolean> {
+  change: ({ dueAt: number } | { cancel: true }) & { sourceRefs?: readonly string[]; repeatMode?: import('../../kernel/app/reminder/repeat-mode.ts').ReminderRepeatMode }, now = Date.now()): Promise<boolean> {
   if ('dueAt' in change && (!Number.isFinite(change.dueAt) || change.dueAt <= now)) return false
   const rows = await exec(db, sql`update notification_intents
     set scheduled_at = ${'dueAt' in change ? change.dueAt : target.scheduledAt},
-        status = ${'cancel' in change ? 'cancelled' : 'pending'}, plan_version = plan_version + 1, updated_at = ${now},
+        status = ${'cancel' in change ? 'cancelled' : 'pending'}, repeat_mode = ${change.repeatMode ?? target.repeatMode ?? null}, plan_version = plan_version + 1, updated_at = ${now},
         source_refs = ${JSON.stringify([...new Set([...target.sourceRefs, ...(change.sourceRefs ?? [])])])}::jsonb
     where id = ${String(target.id)} and character_id = ${String(target.characterId)}
       and owner_ref = ${target.ownerRef} and conversation_ref = ${target.conversationRef}
@@ -553,7 +578,7 @@ export async function getOccurrence(
 export async function latestOccurrenceForIntent(
   db: RawDb,
   intentId: NotificationIntentId
-): Promise<{ occurrence: NotificationOccurrenceRecord | undefined; count: number }> {
+): Promise<{ occurrence: NotificationOccurrenceRecord | undefined; count: number; lastDeliveredAt?: number }> {
   const rows = await exec(
     db,
     sql`select * from notification_occurrences where intent_id = ${String(intentId)}
@@ -567,12 +592,14 @@ export async function latestOccurrenceForIntent(
    */
   const counted = await exec(
     db,
-    sql`select count(*)::int as total from notification_occurrences where intent_id = ${String(intentId)}`,
+    sql`select count(*)::int as total, max(updated_at) filter (where state = 'api_accepted') as last_delivered_at
+        from notification_occurrences where intent_id = ${String(intentId)}`,
     '统计意图实例数'
   )
   return {
     occurrence: rowToOccurrence(firstRow<OccurrenceRow>(rows)),
     count: Number(firstRow<{ total: number }>(counted)?.total ?? 0),
+    ...(counted[0]?.last_delivered_at == null ? {} : { lastDeliveredAt: Number(counted[0].last_delivered_at) }),
   }
 }
 
@@ -824,18 +851,21 @@ export async function hasInFlightOccurrence(
  * ⚠️ 她自己的输出、系统事件、主动投递**都不算入站** ——
  *    把那些算进去，等于"她自己说了一句话就把自己的空闲度清零了"。
  * ⚠️ **没有按入口分列**：`entry` 不是 `conversation_events` 的列（它在运行时的元数据里）。
- *    本函数给的是**全局最近入站** —— 对"空闲度"来说这正是要的：
+ *    缺省给的是**全局最近入站** —— 对"空闲度"来说这正是要的：
  *    两条入口只要有任何一条活跃过，`max` 就是那一次（`D14` 的"跨入口活动"由此成立）。
+ *    提醒确认传 conversationRef，只接受该提醒所在会话的入站，不按消息内容匹配确认词。
  */
 export async function lastInboundAt(
   db: RawDb,
-  characterId: CharacterId
+  characterId: CharacterId,
+  conversationRef?: string
 ): Promise<Timestamp | undefined> {
   const rows = await exec(
     db,
     sql`select max(created_at) as at from conversation_events
         where character_id = ${String(characterId)}
-          and type = 'user_message' and actor_type = 'user'`,
+          and type = 'user_message' and actor_type = 'user'
+          and (${conversationRef === undefined ? sql`true` : sql`conversation_id = ${conversationRef}`})`,
     '查询最近一次入站时刻'
   )
   const row = firstRow<{ at: number | string | null }>(rows)

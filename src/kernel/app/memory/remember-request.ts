@@ -36,12 +36,14 @@
  *    这里只做一件最小的事：**纯问句不算"要求记住"**（先例 `L-M97-02` 的问句守卫精神）。
  */
 
+import { isExplicitForgetCommand } from './forget-request.ts'
+
 /** 要求她**记住 / 改动记忆**的词形（宽松召回；命中一个即算） */
 const REMEMBER_MARKERS: readonly RegExp[] = [
   /记(?:住|得|下|一下|着)/u, // 记住 / 记得 / 记下 / 记一下 / 记着
   /帮我记/u,
   /别忘|不要忘/u, // 提醒类
-  /忘记|忘掉|别再提|别提了/u, // 遗忘类
+  /别再提|别提了/u,
   /删(?:掉|除).{0,6}(?:记忆|这条|那条)/u, // 删除类
   /(?:改成|更正|纠正|纠正为|不是.{1,12}是)/u, // 更正类
   /(?:记忆|长期记住|永久记住)/u, // 直接谈"记忆"
@@ -65,5 +67,5 @@ export function asksToRemember(text: string): boolean {
   const trimmed = text.trim()
   if (trimmed === '') return false
   if (looksLikeQuestion(trimmed)) return false
-  return REMEMBER_MARKERS.some(pattern => pattern.test(trimmed))
+  return isExplicitForgetCommand(trimmed) || REMEMBER_MARKERS.some(pattern => pattern.test(trimmed))
 }

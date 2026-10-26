@@ -57,6 +57,19 @@ import { describeThresholds, thresholdsWithBaseline } from '../evals/m3/threshol
 import { expect, printSummary, type RunSummary } from './kernel-test-kit.ts'
 
 // ---------------------------------------------------------------------------
+// 场景清单（2026-10-21 · 逐场景子进程门）
+// ---------------------------------------------------------------------------
+/*
+ * ⚠️ 必须**在隔离之前**：逐场景 harness 直接读 stdout，
+ *    `isolateDatabase()` 的横幅（"[sandbox] 本次实验已隔离…"）会被当成一个"场景"。
+ *    ⇒ `--list-cases` 提前退出，stdout 里**只有**用例 id。
+ */
+if (process.argv.includes('--list-cases')) {
+  for (const entry of m3Cases()) console.log(`${entry.caseId}\t0`)
+  process.exit(0)
+}
+
+// ---------------------------------------------------------------------------
 // 隔离（必须在任何会碰数据库的模块之前）
 // ---------------------------------------------------------------------------
 isolateDatabase('eval-m3')
@@ -70,6 +83,13 @@ interface Options {
   filter?: string
   json?: string
   quiet: boolean
+  /**
+   * **精确**跑一条用例（2026-10-21 新增 · 逐场景子进程门用）。
+   *
+   * ⚠️ 与 `--filter` 的区别：`--filter` 是**子串**匹配 ⇒ 不能用来"只跑这一条"；
+   *    这里按用例 id **完全相等**选。
+   */
+  caseId?: string
   /**
    * 把报告以**单行 JSON** 打到 stdout。
    *
@@ -110,6 +130,13 @@ function parseArgs(argv: readonly string[]): Options {
       options.json = arg.slice('--json='.length)
     } else if (arg === '--stdout') {
       options.stdout = true
+    } else if (arg === '--case') {
+      const value = argv[index + 1]
+      if (!value) throw new Error('--case 需要一个用例 id')
+      options.caseId = value
+      index += 1
+    } else if (arg.startsWith('--case=')) {
+      options.caseId = arg.slice('--case='.length)
     } else if (arg === '--quiet' || arg === '-q') {
       options.quiet = true
     } else if (arg === '--help' || arg === '-h') {
@@ -177,6 +204,7 @@ const { report, observations } = await runM3({
   suites: M3_SUITES,
   live: false,
   ...(options.suiteIds.length > 0 ? { suiteIds: options.suiteIds } : {}),
+  ...(options.caseId !== undefined ? { caseIds: [options.caseId] } : {}),
   ...(options.filter ? { filter: options.filter } : {}),
   modelProfile: 'echo（deterministic，无模型调用）',
   thresholds,
@@ -263,7 +291,15 @@ if (options.stdout) {
 }
 
 // 硬零指标一旦不为 0：退出码 1（这是 Gate，不是"目标"）
-process.exit(report.hardZeroViolations.length === 0 ? 0 : 1)
+/*
+ * ⚠️ `--case` 模式（逐场景子进程门）**额外**把"这条用例自己的检查没过"也算失败。
+ *    全量模式保持原样（只有硬零指标决定退出码）—— 那是既有契约，不改。
+ */
+const exitCode =
+  report.hardZeroViolations.length === 0 && (options.caseId === undefined || summary.failed === 0)
+    ? 0
+    : 1
+process.exit(exitCode)
 
 // ---------------------------------------------------------------------------
 // 输出

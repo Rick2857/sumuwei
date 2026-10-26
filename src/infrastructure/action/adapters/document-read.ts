@@ -39,6 +39,7 @@ import {
   DOCUMENT_READ_OPERATION,
 } from '../../../kernel/action/utility-capabilities.ts'
 import type { DocumentTurnContent, TurnContent, TurnContentSourceKind } from '../../../kernel/contracts/turn-content.ts'
+import type { DocumentCoverageReference } from '../../../kernel/contracts/document-coverage.ts'
 import { resolveSandboxPath, type SandboxFilesystemOptions } from './sandbox-filesystem.ts'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -105,6 +106,13 @@ export interface DocumentReadOptions extends SandboxFilesystemOptions {
     resourceRef: string
     sourceKind: TurnContentSourceKind
   }>
+  /**
+   * 覆盖参照查询点（**缺省没有** ⇒ 不产生任何覆盖回执）。
+   *
+   * ⚠️ 只有**真人复核通过**的参照才可能生效；字节指纹不符 ⇒ 覆盖保持未知。
+   * ⚠️ 它**不改变**正文、截断或 `TurnContent` 形状：只多一条**无正文**的回执。
+   */
+  coverageReferenceFor?: (rawPath: string) => DocumentCoverageReference | undefined
 }
 
 /**
@@ -252,7 +260,7 @@ interface ConversionReading extends DocumentConversionReading {
   exitCode: number | null
 }
 
-async function runConverter(input: {
+export async function runConverter(input: {
   pythonPath: string
   runnerPath: string
   bytes: Buffer

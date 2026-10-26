@@ -35,6 +35,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
+import { createDocumentExtractionDefinitions } from '../src/kernel/contracts/document-reading.ts'
 import {
   DEFAULT_GRANTED_PERMISSIONS,
   createCapabilityRegistry,
@@ -63,6 +64,7 @@ import {
   WEATHER_QUERY_PERMISSION,
   createWeatherCapabilityDefinitions,
 } from '../src/kernel/action/weather-capability.ts'
+import { XIDIAN_PERMISSION, createXidianCapabilityDefinitions } from '../src/kernel/action/xidian-capability.ts'
 import {
   OFFICE_GENERATE_PERMISSION,
   createOfficeCapabilityDefinitions,
@@ -134,6 +136,7 @@ const SOURCE_FILES: readonly string[] = [
   'src/kernel/action/learning-capabilities.ts',
   'src/kernel/action/local-file-capabilities.ts',
   'src/kernel/action/weather-capability.ts',
+  'src/kernel/action/xidian-capability.ts',
   'src/kernel/action/office-capability.ts',
   'src/kernel/action/news-capability.ts',
   'src/kernel/action/browser-capability.ts',
@@ -190,8 +193,10 @@ function buildRegistry(): CapabilityRegistry {
     ...createLearningCapabilityDefinitions(),
     ...createExternalEvidenceCapabilityDefinitions(),
     ...createUtilityCapabilityDefinitions(),
+    ...createDocumentExtractionDefinitions(),
     ...createLocalFileCapabilityDefinitions(),
     ...createWeatherCapabilityDefinitions(),
+    ...createXidianCapabilityDefinitions(),
     ...createOfficeCapabilityDefinitions(),
     ...createNewsCapabilityDefinitions(),
     ...createBrowserCapabilityDefinitions(),
@@ -238,6 +243,7 @@ function grantedPermissionsOf(
   if (flags.localFileReadEnabled) granted.push(LOCAL_FILE_LIST_PERMISSION, LOCAL_FILE_READ_PERMISSION)
   if (flags.localFileWriteEnabled) granted.push(LOCAL_FILE_WRITE_PERMISSION)
   if (flags.weatherEnabled) granted.push(WEATHER_QUERY_PERMISSION)
+  if (flags.xidianTimetableEnabled) granted.push(XIDIAN_PERMISSION)
   if (flags.newsReadEnabled) granted.push(NEWS_READ_PERMISSION)
   if (flags.officeGenerateEnabled && flags.localFileWriteEnabled) granted.push(OFFICE_GENERATE_PERMISSION)
   if (flags.browserEnabled) granted.push(BROWSER_READ_PERMISSION, BROWSER_OPERATE_PERMISSION)
@@ -488,8 +494,10 @@ function main(): number {
     'createLearningCapabilityDefinitions',
     'createExternalEvidenceCapabilityDefinitions',
     'createUtilityCapabilityDefinitions',
+    'createDocumentExtractionDefinitions',
     'createLocalFileCapabilityDefinitions',
     'createWeatherCapabilityDefinitions',
+    'createXidianCapabilityDefinitions',
     'createOfficeCapabilityDefinitions',
     'createNewsCapabilityDefinitions',
     'createBrowserCapabilityDefinitions',

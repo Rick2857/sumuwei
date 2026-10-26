@@ -677,6 +677,11 @@ async function hydrateMany(db: RawDb, rows: readonly MemoryRow[]): Promise<Map<s
   return hydrated
 }
 
+async function hydrateOrdered(db: RawDb, rows: readonly MemoryRow[]): Promise<MemoryRecord[]> {
+  const records = await hydrateMany(db, rows)
+  return rows.map(row => records.get(String(row.id))!)
+}
+
 /** 批量读（返回顺序 = 入参顺序；不存在的 id 给 `null`，与 `get()` 同） */
 async function rawGetMany(db: RawDb, ids: readonly MemoryId[]): Promise<(MemoryRecord | null)[]> {
   if (ids.length === 0) return []
@@ -725,7 +730,7 @@ export function createNativeMemoryStore(db: RawDb): MemoryStorePort {
             order by recorded_at asc`,
         '按 canonical key 查当前记忆'
       )
-      return Promise.all(asRows<MemoryRow>(rows).map((row) => hydrate(readDb, row)))
+      return hydrateOrdered(readDb, asRows<MemoryRow>(rows))
     },
 
     async getActiveByFingerprint(owner, fingerprint) {
@@ -751,7 +756,7 @@ export function createNativeMemoryStore(db: RawDb): MemoryStorePort {
             order by recorded_at asc`,
         '按 canonical key 列出全部记忆（含历史）'
       )
-      return Promise.all(memoryRows(rows).map((row) => hydrate(readDb, row)))
+      return hydrateOrdered(readDb, memoryRows(rows))
     },
 
     async listBySubject(owner, subject) {
@@ -765,7 +770,7 @@ export function createNativeMemoryStore(db: RawDb): MemoryStorePort {
             order by r.recorded_at asc`,
         '按 subject 查记忆'
       )
-      return Promise.all(memoryRows(rows).map((row) => hydrate(readDb, row)))
+      return hydrateOrdered(readDb, memoryRows(rows))
     },
 
     async listBySource(ref) {
@@ -778,7 +783,7 @@ export function createNativeMemoryStore(db: RawDb): MemoryStorePort {
             order by r.recorded_at asc`,
         '按来源反查记忆'
       )
-      return Promise.all(memoryRows(rows).map((row) => hydrate(readDb, row)))
+      return hydrateOrdered(readDb, memoryRows(rows))
     },
 
     async list(scope) {
@@ -794,7 +799,7 @@ export function createNativeMemoryStore(db: RawDb): MemoryStorePort {
             limit ${limit}`,
         '列出记忆'
       )
-      return Promise.all(memoryRows(rows).map((row) => hydrate(readDb, row)))
+      return hydrateOrdered(readDb, memoryRows(rows))
     },
 
     async history(id) {
@@ -887,7 +892,7 @@ export async function listRecentExplicitWrites(
         limit ${limit}`,
     '按会话列出该用户最近的显式写入（B① 兜底读取口）'
   )
-  const records = await Promise.all(memoryRows(rows).map((row) => hydrate(db, row)))
+  const records = await hydrateOrdered(db, memoryRows(rows))
   return records.filter((record) =>
     record.subjects.some(
       (subject) =>

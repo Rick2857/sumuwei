@@ -27,7 +27,28 @@ interface Outcome {
   detail?: string
 }
 
-const filter = process.argv.slice(2).filter((a) => !a.startsWith('--'))
+/*
+ * ⚠️ `--list-cases` 必须在**横幅之前**：逐场景执行器直接读 stdout，
+ *    横幅会被当成一个"场景"。
+ *    每行格式：`id<TAB>额外独立库数`（与其它逐场景门同形）。
+ */
+if (process.argv.includes('--list-cases')) {
+  for (const scenario of SCENARIOS) console.log(`${scenario.id}\t0`)
+  process.exit(0)
+}
+
+/*
+ * ⚠️ `--case <id>`（**精确**匹配）与既有的**位置参数**选场景并存。
+ *
+ *  为什么需要 `--case`：逐场景执行器（`scripts/postgresql/scenario-gate.ts`）
+ *    用的是**统一约定** `--case <id>`；而本脚本原本只认位置参数。
+ *    位置参数继续可用（`tsx scripts/eval-scenarios.ts SC-004`），一字未改。
+ */
+const caseIndex = process.argv.indexOf('--case')
+const explicitCase = caseIndex >= 0 ? process.argv[caseIndex + 1] : undefined
+const filter = explicitCase !== undefined
+  ? [explicitCase]
+  : process.argv.slice(2).filter((a) => !a.startsWith('--'))
 const modelMode = (process.env.EVAL_MODEL_MODE as ModelMode) ?? 'echo'
 
 const title = [

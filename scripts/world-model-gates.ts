@@ -7,6 +7,8 @@ import { join, resolve } from 'node:path'
 const root = resolve(process.cwd())
 const local = join(root, 'artifacts/post-lv2/local')
 const specs = [
+  { gate: 'worldmodel:application:verify', domain: 'stage0', dir: 'world-model-application',
+    sources: ['evals/world-model-application/verify.ts'] },
   { gate: 'worldmodel:forecast:verify', domain: 'tool_task', dir: 'world-model-action-forecast',
     sources: ['scripts/world-model-action-forecast-verify.ts', 'src/kernel/action/action-forecast.ts', 'src/kernel/action/task-loop.ts'] },
   { gate: 'worldmodel:reflection:verify', domain: 'reflection', dir: 'world-model-reflection-comparison',

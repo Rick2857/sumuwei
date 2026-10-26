@@ -1,0 +1,54 @@
+name: lg-llbot-candidate
+
+# Server-side LLBot/PMHQ candidate (real server, 203.0.113.10 shape).
+# Isolated from production on purpose:
+#   - no LG core, no PostgreSQL, no NapCat profile volume, no production credentials
+#   - own QQ profile volume, own OneBot/WebUI ports, loopback-only bindings
+#   - restart: "no" so an idle candidate never silently re-enters the QQ session
+# Ports are deliberately different from the production NapCat ones (6701 / 6101)
+# so the candidate can never be reached by, or reach, the production path.
+services:
+  pmhq:
+    image: linyuchen/pmhq@sha256:7f875d1aa0a0e1baa9d37c4fe6394d6ddce2b50fa1811088629033d13506757f
+    platform: linux/amd64
+    # The server cannot reach Docker Hub (direct hub times out, every configured
+    # mirror either 500s on digest refs or refuses the image as not allowlisted),
+    # so the pinned image is side-loaded and must never be pulled here.
+    pull_policy: never
+    privileged: true # Upstream Docker setting for the QQ client.
+    init: true
+    restart: "no"
+    mem_limit: 1g
+    cpus: 2
+    environment:
+      AUTO_LOGIN_QQ: "${PMHQ_AUTO_LOGIN_QQ:-}"
+      PMHQ_AUTH_TOKEN: "${PMHQ_AUTH_TOKEN:-}"
+    volumes:
+      - qq-profile:/root/.config/QQ
+    ports:
+      # PMHQ health only. Loopback: the server exposes no public port at all.
+      - "127.0.0.1:13000:13000"
+
+  llbot:
+    image: linyuchen/llbot@sha256:9a6f187e6792e5d42001997ac3c40e19f6024db0db0d0efdbc9a87f0832a26c8
+    platform: linux/amd64
+    pull_policy: never
+    init: true
+    restart: "no"
+    mem_limit: 768m
+    cpus: 1
+    environment:
+      PROTOCOL_MODE: pmhq
+      PMHQ_HOST: pmhq
+      PMHQ_PORT: "13000"
+      WEBUI_PORT: "3080"
+    ports:
+      - "127.0.0.1:13080:3080" # WebUI, for the one-off QR scan only
+      - "127.0.0.1:13001:3001" # OneBot v11 forward WebSocket
+    volumes:
+      - ./data:/app/llbot/data
+      - ./data/default_config.json:/app/llbot/default_config.json
+
+volumes:
+  qq-profile:
+    name: lg-llbot-candidate-profile

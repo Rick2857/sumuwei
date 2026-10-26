@@ -445,6 +445,27 @@ export interface KernelFlags {
    * ⚠️ **必须被 `main.ts` 真的消费**（D3 的教训：只被读进 flags 而没有消费者 = 惰性开关）。
    */
   actionForecastEnabled: boolean
+  /** Explicit sandbox write/read simulation routing; default off. */
+  simulationPlannerEnabled: boolean
+  /**
+   * **写前置条件规则**的消费（ADR-151 步骤 D）：**独立开关，缺省 off**。
+   *
+   * ⚠️ 打开它**不会**凭空产生规则：没有**受信族前置条件声明** ⇒ 没有规则。
+   * ⚠️ 否决**只**在"条件**被违反**"时发生（观测值 == `mustNotEqual`）；
+   *    条件未知 / 条件成立 / 族不匹配 / 规则不合格 ⇒ **不否决**（回默认顺序）。
+   */
+  simulationPreconditionRulesEnabled: boolean
+  /** PDF extraction/recovery research domain; independent and default off. */
+  documentRecoveryEnabled: boolean
+  /** Coverage quality proposition (`pdf_text_coverage`); independent, default off, and inert without approved references. */
+  documentCoverageEnabled: boolean
+  /** Directory of registered coverage references; empty means no reference at all. */
+  documentCoverageReferenceDir: string
+  /** EBL tool lifecycle and human feedback shadow; independent, default off. */
+  epistemicBeliefEnabled: boolean
+  epistemicBeliefHumanShadow: boolean
+  /** Candidate formal outlet; takes over the matching legacy M9 slot when enabled. */
+  epistemicBeliefHumanEnabled: boolean
   /**
    * 预测调用的**硬期限**（毫秒，缺省 20000，有界 1000..60000）。
    *
@@ -493,6 +514,7 @@ export interface KernelFlags {
    *    （计划书 §4："不为运行浏览器把所有聊天的风险上限统一升为 R2/R3"）。
    */
   weatherEnabled: boolean
+  xidianTimetableEnabled: boolean
   officeGenerateEnabled: boolean
   newsReadEnabled: boolean
   browserEnabled: boolean
@@ -660,32 +682,9 @@ export interface KernelFlags {
    * ⚠️ 这个开关**必须被 `main.ts` 真的消费**（D3 的教训，WP6 门有静态锁）。
    */
   beliefEnabled: boolean
-  /**
-   * **S8 / ADR-094 `D01`**：故事认知总开关。代码缺省 **false**（激活属独立裁定，先例 ADR-048/065/067/071）。
-   *
-   * ⚠️ 它必须由 `main.ts` **真的消费**（装配故事账本端口 + 生产入口 + 消费回路），
-   *    否则就是一个 NOT-WIRED 的惰性开关 —— 那正是 `CHARACTER_MEMORY_BACKGROUND_ENABLED`
-   *    的教训（D3）。消费锁在 `pnpm m4:test` / `pnpm m4.5:test`。
-   * ⚠️ 它**不**决定"入不入模"：那是 `ContextBudget.adaptiveSelfTokens`（缺省 0），两件事分列。
-   */
+  /** Optional Lv2.5 integration; all three switches default off. */
   storyCognitionEnabled: boolean
-  /**
-   * **S8 / `ADR-107` `R-1b`**：**剧情选择解析**（私有决策调用）开关。代码缺省 **false**。
-   *
-   * ⚠️ **它与 `storyCognitionEnabled` 是两件事**，必须分开读：
-   * ```text
-   * `storyCognitionEnabled`      决定"装不装故事账本与入口"
-   * `storyChoiceDecisionEnabled` 决定"每轮**要不要多花一次模型调用**去解析用户的选择"
-   * ```
-   * ⇒ 只开总开关而关着本开关：`story:start` 照常能开局，但**不解析**用户的选择
-   *   （世界账本只有开局那一条）—— 那是刻意的省额度档。
-   *
-   * ⚠️ **没有活跃 run 时它一次调用都不发**（`ADR-107` `Q3` 的机器判据，
-   *    判据在 `choice-turn.ts` 的顺序里，不靠这里自觉）。
-   * ⚠️ 它**不**决定"入不入模"：那是 `ContextBudget.adaptiveSelfTokens`（缺省 0）。
-   */
   storyChoiceDecisionEnabled: boolean
-  /** ADR-115：启动待命、相关轮开局/续接；代码缺省关闭。 */
   storyDailyEnabled: boolean
   /**
    * **Lv4 / `ADR-102` 表达语音**：**逐句表达**（正文旁路 `<lg-speech>` 封套 → 语气指令 + 有限表情）开关。
@@ -707,7 +706,7 @@ export interface KernelFlags {
    *    + `src/main.ts` 的两处旁路（`CheckedSpeechStream` 与 `decodeExpressiveSpeech`）。
    */
   expressiveSpeechEnabled: boolean
-  /** 私有决策调用的硬期限（毫秒；有界，缺省 8000 —— 与 `toolDecisionTimeoutMs` 同型） */
+  /** Deadline for the optional story decision model. */
   storyChoiceDecisionTimeoutMs: number
   /**
    * M9.1 / ADR-072 D12：**重述复活发射**开关（缺省 **off**）。
@@ -998,6 +997,29 @@ export function readKernelFlags(env: NodeJS.ProcessEnv = process.env): KernelFla
      * ⚠️ 它必须被 `main.ts` 真的消费（只被读进 flags 而没有消费者 = 惰性开关，D3 的教训）。
      */
     actionForecastEnabled: truthy(env.CHARACTER_ACTION_FORECAST_ENABLED, false),
+    simulationPlannerEnabled: truthy(env.CHARACTER_SIMULATION_PLANNER_ENABLED, false),
+    /**
+     * **写前置条件规则**的消费（ADR-151 步骤 D）：**独立开关，缺省 off**。
+     *
+     * ⚠️ 打开它**不会**凭空产生规则：没有**受信族前置条件声明** ⇒ 没有规则 ⇒ 否决整段不发生。
+     * ⚠️ 它只允许"条件**被违反**时否决那次写"；条件未知 / 条件成立 / 族不匹配 ⇒ **不否决**。
+     * ⚠️ 它必须被 `main.ts` 真的消费（只被读进 flags 而没有消费者 = 惰性开关，D3 的教训）。
+     */
+    simulationPreconditionRulesEnabled: truthy(env.CHARACTER_SIMULATION_PRECONDITION_RULES_ENABLED, false),
+    documentRecoveryEnabled: truthy(env.CHARACTER_DOCUMENT_RECOVERY_ENABLED, false),
+    /**
+     * 覆盖质量命题（`pdf_text_coverage`）：**独立开关，缺省 off**。
+     *
+     * ⚠️ 打开它**不会**让覆盖成立：只有**真人复核通过**的参照才可能生效，
+     *    没有参照时覆盖恒为 `unknown`（不是"覆盖良好"）。
+     * ⚠️ 它与 `documentRecoveryEnabled` 分列：覆盖命题不参与选路，也不改旧"非空"语义。
+     */
+    documentCoverageEnabled: truthy(env.CHARACTER_DOCUMENT_COVERAGE_ENABLED, false),
+    /** 覆盖参照登记目录（缺省空 ⇒ 没有参照 ⇒ 覆盖恒未知）。 */
+    documentCoverageReferenceDir: (env.CHARACTER_DOCUMENT_COVERAGE_REFERENCE_DIR ?? '').trim(),
+    epistemicBeliefEnabled: truthy(env.CHARACTER_EPISTEMIC_BELIEF_ENABLED, false),
+    epistemicBeliefHumanShadow: truthy(env.CHARACTER_EPISTEMIC_BELIEF_HUMAN_SHADOW, false),
+    epistemicBeliefHumanEnabled: truthy(env.CHARACTER_EPISTEMIC_BELIEF_HUMAN_ENABLED, false),
     actionForecastTimeoutMs: boundedInt(
       env.CHARACTER_ACTION_FORECAST_TIMEOUT_MS,
       20_000,
@@ -1026,6 +1048,7 @@ export function readKernelFlags(env: NodeJS.ProcessEnv = process.env): KernelFla
     ),
     // 第二批四项业务能力，缺省全 off
     weatherEnabled: truthy(env.CHARACTER_WEATHER_ENABLED, false),
+    xidianTimetableEnabled: truthy(env.CHARACTER_XIDIAN_TIMETABLE_ENABLED, false),
     workflowSkillsEnabled: truthy(env.CHARACTER_WORKFLOW_SKILLS_ENABLED, false),
     personalLibraryEnabled: truthy(env.CHARACTER_PERSONAL_LIBRARY_ENABLED, false),
     arxivResearchEnabled: truthy(env.CHARACTER_ARXIV_RESEARCH_ENABLED, false),
@@ -1137,16 +1160,8 @@ export function readKernelFlags(env: NodeJS.ProcessEnv = process.env): KernelFla
     affectContextEnabled: truthy(env.CHARACTER_AFFECT_CONTEXT_ENABLED, false),
     // M9 / ADR-070：信念域调度缺省 **off** —— 激活属独立裁定（先例 ADR-048/065/067）
     beliefEnabled: truthy(env.CHARACTER_BELIEF_ENABLED, false),
-    /*
-     * S8 / ADR-093 D16 + ADR-094 D01：故事认知总开关，缺省 **false**。
-     * 消费者在 `main.ts` 的装配里（账本端口 + 生产入口 + 消费回路）；消费锁见 `m4:test`/`m4.5:test`。
-     */
+    // Public distribution keeps Lv2.5 opt-in; ordinary chat leaves it unloaded.
     storyCognitionEnabled: truthy(env.CHARACTER_STORY_COGNITION_ENABLED, false),
-    /*
-     * S8 / ADR-107 R-1b：剧情选择解析（每轮**多一次私有决策调用**），缺省 **false**。
-     * ⚠️ 与 `storyCognitionEnabled` 分列：只开总开关而关着本开关 ⇒ 能开局、**不解析选择**。
-     * ⚠️ 没有活跃 run 时一次都不发（判据在 `choice-turn.ts` 的顺序里）。
-     */
     storyChoiceDecisionEnabled: truthy(env.CHARACTER_STORY_CHOICE_DECISION_ENABLED, false),
     storyDailyEnabled: truthy(env.CHARACTER_STORY_DAILY_ENABLED, false),
     /*
@@ -1155,13 +1170,7 @@ export function readKernelFlags(env: NodeJS.ProcessEnv = process.env): KernelFla
      *    语义放宽（`1/true/yes/on` 都算开）见接口上的字段说明 —— 不是逐字等价。
      */
     expressiveSpeechEnabled: truthy(env.CHARACTER_EXPRESSIVE_SPEECH, false),
-    storyChoiceDecisionTimeoutMs: boundedInt(
-      env.CHARACTER_STORY_CHOICE_DECISION_TIMEOUT_MS,
-      8_000,
-      1_000,
-      25_000,
-      'CHARACTER_STORY_CHOICE_DECISION_TIMEOUT_MS',
-    ),
+    storyChoiceDecisionTimeoutMs: 8_000,
     // M9.1 / ADR-072 D12：重述复活发射缺省 **off** —— 激活属独立裁定（先例 ADR-048/065/067/071）
     memoryRestatementRevivalEnabled: truthy(env.CHARACTER_MEMORY_RESTATEMENT_ENABLED, false),
     withdrawnContextMaskingEnabled: truthy(
@@ -1515,6 +1524,7 @@ export function describeKernelFlags(flags: KernelFlags): string {
    */
   record(`tool-decision-mode(${flags.toolDecisionMode})`, flags.toolDecisionMode === 'role')
   record('weather', flags.weatherEnabled)
+  record('xidian-timetable', flags.xidianTimetableEnabled)
   record('workflow-skills', flags.workflowSkillsEnabled)
   record('personal-library', flags.personalLibraryEnabled)
   record('arxiv-research', flags.arxivResearchEnabled)

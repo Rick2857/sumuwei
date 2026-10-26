@@ -42,6 +42,8 @@
 
 import { KernelError } from '../contracts/ids.ts'
 import type { CapabilityRegistry } from './capability-registry.ts'
+import type { ActionForecast } from '../contracts/world-model.ts'
+import type { PlanRuleDependency } from '../contracts/cognitive-collaboration.ts'
 
 /** 计划里的一步（**只允许**这四个字段） */
 export interface TaskPlanStep {
@@ -74,11 +76,15 @@ export const TASK_ARG_KEYS: Readonly<Record<string, readonly string[]>> = {
   'local.file.read': ['path'],
   'local.file.write': ['path', 'content', 'scheme', 'expectedOriginalFingerprint'],
   'document.read': ['path'],
+  'document.extract': ['path', 'reader', 'expectedInputFingerprint'],
+  'document.profile': ['path'],
+  'document.pages': ['path', 'firstPage', 'lastPage', 'prefixChars', 'reader', 'expectedInputFingerprint'],
   'image.ocr': ['path', 'languages'],
   'math.calculate': ['expression'],
   'web.read': ['url'],
   'web.search': ['query', 'limit', 'locale'],
   'weather.query': ['city', 'country', 'days', 'timezone'],
+  'xidian.timetable': ['date', 'days'],
   'office.generate': ['path', 'format', 'spec', 'expectedOriginalFingerprint'],
   'news.read': ['feeds', 'since', 'until', 'limit'],
   'browser.read': [],
@@ -460,6 +466,14 @@ export interface TaskPlannerMessage {
 export interface TaskPlannerInput {
   /** 原始任务原话（**逐字**） */
   task: string
+  /**
+   * **本任务**的 trace id（ADR-151 步骤 D）。
+   *
+   * ⚠️ 它让消费方能只读**这一次任务**里的**受信观察**（例如本任务读到的条件值），
+   *    而**不是**"任意历史读数"或候选自述。
+   * ⚠️ 它**不**进模型提示（模型规划器不渲染它）。
+   */
+  traceId?: string
   /** 已经执行过的步骤摘要（**只有闭集事实**：能力.操作 + 状态码 + 计数） */
   executed: readonly string[]
   /** 那一步"没做成"的**闭集码**（不是原始错误文本） */
@@ -487,6 +501,15 @@ export interface TaskPlannerInput {
    */
   content?: readonly string[]
   /**
+   * **本任务已成功的受信读回执**（路径 + 内容指纹；F2 准备读 / 真值派生）。
+   *
+   * ⚠️ 只由执行环从**真实成功的读动作**填（`ActionResult.effect.fingerprint`，Gateway 产出）——
+   *    不是候选自述、不是模型给的标签、不是夹具预知。
+   * ⚠️ 缺省为空 ⇒ 规划器输入**逐字段**与旧档相同（F1 及既有调用点不受影响）。
+   * ⚠️ 它**不进**模型提示（`buildTaskPlannerMessages` 不渲染它）⇒ 不会成为第二套"读到的东西"。
+   */
+  trustedReads?: readonly { readonly path: string, readonly fingerprint: string }[]
+  /**
    * WP3：**已经拿到的外部证据**（搜索命中；有界，已过预算选择）。
    *
    * ==========================================================================
@@ -509,6 +532,18 @@ export interface TaskPlannerInput {
    *    模型不得自己拼 `user` / `Administrator`（那正是要修的故障）。
    */
   knownDirectories?: readonly string[]
+  /**
+   * 本任务允许读取的**有界条件标记**（ADR-151 R1 §3；**可选**）。
+   *
+   * ⚠️ 只有**新的两行入口**才有：程序从"原始请求 + 受信声明"生成，挂在本任务授权上。
+   * ⚠️ 规划器**只能**据此安排一次条件读；它**不能**自己扩大路径或次数。
+   */
+  observation?: {
+    readonly targetPath: string
+    readonly conditionPath: string
+    /** 本任务已经尝试过条件读（⇒ 不许再安排第二次读）。 */
+    readonly attempted: boolean
+  }
   signal?: AbortSignal
 }
 
@@ -516,6 +551,10 @@ export interface TaskPlannerOutcomeOk {
   ok: true
   plan: TaskPlan
   requestCount: number
+  /** Validated alternatives from an explicitly requested candidate-generation call. */
+  candidates?: readonly TaskPlan[]
+  /** Trusted simulation adapter metadata, never part of the model's TaskPlan JSON. */
+  simulation?: { dependency: PlanRuleDependency; forecast: ActionForecast }
 }
 export interface TaskPlannerOutcomeFail {
   ok: false

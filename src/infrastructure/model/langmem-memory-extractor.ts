@@ -4,6 +4,7 @@ import { registeredPredicates } from '../../kernel/contracts/index.ts'
 import { qualificationEstablishesUserFact, sourceQualificationOf } from '../../kernel/contracts/attribution.ts'
 import { isQuestionLike } from '../../kernel/app/memory/content-extractor.ts'
 import { detectByRule } from '../../kernel/app/memory/intent-detector.ts'
+import { EBL_PREFERENCE_PREDICATE } from '../../kernel/app/epistemic-belief-lifecycle/human-policy.ts'
 import { parseCandidatesJson, resolveCandidates, type MemoryExtractor, type MemoryExtractionInput, type MemoryExtractionResult } from '../../kernel/app/memory/extractor.ts'
 
 export const AUTOMATIC_MEMORY_PROCESSOR = 'automatic-memory-langmem'
@@ -63,7 +64,7 @@ export class LangMemMemoryExtractor implements MemoryExtractor {
   readonly name = AUTOMATIC_MEMORY_PROCESSOR
   readonly version = AUTOMATIC_MEMORY_VERSION
 
-  constructor(private readonly input: { python: string; signal?: AbortSignal }) {}
+  constructor(private readonly input: { python: string; signal?: AbortSignal; epistemicManagedStyle?: (eventId: string) => Promise<boolean> }) {}
 
   async process(input: MemoryExtractionInput): Promise<MemoryExtractionResult> {
     const views = input.views.filter((view) => view.actorType === 'user'
@@ -72,9 +73,11 @@ export class LangMemMemoryExtractor implements MemoryExtractor {
       && detectByRule(view.content) === undefined)
     if (views.length === 0) return { candidates: [], rejected: [], extracted: false }
     if (views.length !== 1 || views[0]!.content.length > 8000) throw new Error('automatic_memory_source_budget')
+    const managed = await this.input.epistemicManagedStyle?.(String(views[0]!.id))
+    const predicates = registeredPredicates().filter(spec => !(managed && spec.key === EBL_PREFERENCE_PREDICATE))
     const raw = await invokeWorker(this.input, JSON.stringify({
       events: views.map(({ sequence, content }) => ({ sequence, actor: 'USER', content })),
-      predicates: registeredPredicates().map(({ key, description, valueShape, allowed }) => ({ key, description, valueShape, allowed })),
+      predicates: predicates.map(({ key, description, valueShape, allowed }) => ({ key, description, valueShape, allowed })),
     }))
     const descriptors = parseCandidatesJson(raw)
     const envelope = JSON.parse(raw) as { candidates?: { evidenceQuotes?: { sequence: number; quote: string }[] }[] }
@@ -82,7 +85,7 @@ export class LangMemMemoryExtractor implements MemoryExtractor {
       || descriptors.length !== envelope.candidates.length || descriptors.length > 4) {
       throw new Error('automatic_memory_malformed_output')
     }
-    const keys = new Set(registeredPredicates().map(({ key }) => key))
+    const keys = new Set(predicates.map(({ key }) => key))
     const rejected: MemoryExtractionResult['rejected'] = []
     const grounded = descriptors.filter((candidate, index) => {
       const quotes = envelope.candidates![index]?.evidenceQuotes

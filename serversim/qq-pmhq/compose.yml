@@ -1,0 +1,47 @@
+name: lg-serversim-qq-pmhq
+
+# Independent candidate: no production profiles, credentials, database or LG core.
+services:
+  pmhq:
+    image: linyuchen/pmhq@sha256:7f875d1aa0a0e1baa9d37c4fe6394d6ddce2b50fa1811088629033d13506757f
+    platform: linux/amd64
+    privileged: true # Upstream Docker setting; candidate is stopped after this check.
+    init: true
+    restart: "no"
+    mem_limit: 1g
+    cpus: 2
+    environment:
+      AUTO_LOGIN_QQ: "${PMHQ_AUTO_LOGIN_QQ:-}"
+      PMHQ_AUTH_TOKEN: "${PMHQ_AUTH_TOKEN:-}"
+    volumes:
+      - qq-profile:/root/.config/QQ
+
+  llbot:
+    image: linyuchen/llbot@sha256:9a6f187e6792e5d42001997ac3c40e19f6024db0db0d0efdbc9a87f0832a26c8
+    platform: linux/amd64
+    init: true
+    restart: "no"
+    mem_limit: 768m
+    cpus: 1
+    environment:
+      PROTOCOL_MODE: pmhq
+      PMHQ_HOST: pmhq
+      PMHQ_PORT: "13000"
+      WEBUI_PORT: "3080"
+    ports:
+      - "127.0.0.1:13080:3080"
+      - "127.0.0.1:13001:3001"
+    volumes:
+      - ../../artifacts/serversim/local/qq-pmhq/data:/app/llbot/data
+      - ../../artifacts/serversim/local/qq-pmhq/data/default_config.json:/app/llbot/default_config.json
+
+  probe:
+    image: "${SERVERSIM_TEST_IMAGE:?Pin the current serversim image ID in runtime.env}"
+    profiles: [checks]
+    entrypoint: [node, /opt/project-lg/serversim/qq-pmhq/probe.mjs]
+    restart: "no"
+    # No .env, credentials, database or production data mounts.
+
+volumes:
+  qq-profile:
+    name: lg-serversim-qq-pmhq-profile

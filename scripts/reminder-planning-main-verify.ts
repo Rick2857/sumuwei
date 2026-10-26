@@ -62,9 +62,9 @@ try {
   const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII='
   await shell.submitWithForgedFields('image', '这是我的本周安排。', { images: [{ dataUrl: png }] })
   const result = await shell.submit('batch', '按这张安排中所有事件，分别提前5分钟通过QQ提醒我签到')
-  turns.push(result); assert.match(JSON.stringify(result), /新增2条/u); assert.equal(imageCalls, 1)
+  turns.push(result); assert.match(JSON.stringify(result), /英语课签到.*已设置[\s\S]*会议签到.*已设置/u); assert.equal(imageCalls, 1)
   const repeated = await shell.submit('duplicate', '按这张安排中所有事件，分别提前5分钟通过QQ提醒我签到')
-  turns.push(repeated); assert.match(JSON.stringify(repeated), /新增0条，已有2条/u)
+  turns.push(repeated); assert.match(JSON.stringify(repeated), /英语课签到.*已存在[\s\S]*会议签到.*已存在/u)
   turns.push(await shell.submit('move', '把第一条提醒改到12秒后'))
   turns.push(await shell.submit('cancel', '取消第二条提醒'))
   turns.push(await shell.submit('list', '查看提醒'))

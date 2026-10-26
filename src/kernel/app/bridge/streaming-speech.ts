@@ -6,7 +6,7 @@ import {
 import {
   runReplyGuardChain, type ReplyGuardChainInput, type ReplyGuardChainOutcome,
 } from '../reply-guard-chain.ts'
-import { truthfulReminderReply, reminderReplyConfirmsChannel } from '../reminder-turn.ts'
+import { truthfulReminderReply, reminderPlanReplyMatches, reminderReplyConfirmsChannel } from '../reminder-turn.ts'
 
 export interface CheckedSpeechSegment {
   replyId: string
@@ -115,7 +115,8 @@ export class CheckedSpeechStream {
     if (reminder !== undefined && reminder.kind !== 'none') {
       const combined = this.segments.map(segment => segment.text).join('')
       const required = 'text' in reminder ? reminder.text.replace(/^记得/u, '').replace(/[。！!？?]$/u, '') : reminder.message
-      if (!combined.includes(required) || ('text' in reminder && !reminderReplyConfirmsChannel(reminder, combined))) this.check(truthfulReminderReply(reminder), 'natural')
+      if (reminder.kind === 'planned' ? !reminderPlanReplyMatches(reminder, combined)
+        : !combined.includes(required) || ('text' in reminder && !reminderReplyConfirmsChannel(reminder, combined))) this.check(truthfulReminderReply(reminder), 'natural')
     }
     return this.snapshot()
   }
@@ -159,6 +160,8 @@ export class CheckedSpeechStream {
     if (this.pending === '') this.pendingCue = candidate.cue
     else if (this.pendingCue !== candidate.cue) this.pendingCue = 'natural'
     this.pending += candidate.text
+    // A batch may partly fail; validate the whole confirmation before speaking any of it.
+    if (this.options.facts.reminderResult?.kind === 'planned') return
     const pieces = splitSpeechText(this.pending)
     this.pending = ''
     for (const piece of pieces) {
@@ -168,7 +171,8 @@ export class CheckedSpeechStream {
   }
 
   private check(text: string, cue: ExpressionCue): void {
-    const outcome = runReplyGuardChain({ ...this.options.facts, replyText: text, partialReply: true })
+    const outcome = runReplyGuardChain({ ...this.options.facts, replyText: text,
+      partialReply: this.options.facts.reminderResult?.kind !== 'planned' })
     this.outcomes.push(outcome)
     const checked = withoutAppendices(outcome.replyText, [outcome.evidenceAppendix, outcome.turnContent.appendix])
     this.rewritten ||= checked !== text

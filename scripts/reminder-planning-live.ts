@@ -50,11 +50,12 @@ const resolver = createOpenAiReminderResolver({ fetchImpl: async (url, options) 
 } })
 const readings: unknown[] = []
 try {
-  for (const kind of ['text', 'image'] as const) {
+  for (const kind of ['text', 'image', 'image-followup'] as const) {
     const pending: PendingReminder[] = []
-    const input: ReminderResolutionInput & { now: number; enabled: boolean } = { current: { id: `request-${kind}`, text: '按这份安排中的所有事件，分别提前5分钟通过QQ提醒我。', createdAt: now },
-      recent: kind === 'text' ? [{ id: 'document', text, createdAt: now - 1000 }] : [],
-      materials: kind === 'image' ? [{ id: 'image-fixture', text: '这是我未来三天的安排', dataUrl, createdAt: now - 1000 }] : [],
+    const input: ReminderResolutionInput & { now: number; enabled: boolean } = { current: { id: `request-${kind}`, text: kind === 'image-followup' ? '[用户发送了图片]\n[附带 1 张图片]' : '按这份安排中的所有事件，分别提前5分钟通过QQ提醒我。', createdAt: now },
+      recent: kind === 'text' ? [{ id: 'document', text, createdAt: now - 1000 }] : kind === 'image-followup'
+        ? [{ id: 'original-request', text: '稍后发未来三天的安排，每个事件前5分钟QQ提醒我签到，我必须回复，直到我回复才停止。', createdAt: now - 1000, actor: 'user' }] : [],
+      materials: kind !== 'text' ? [{ id: 'image-fixture', text: '这是我未来三天的安排', dataUrl, createdAt: now - 1000 }] : [],
       pending, now, enabled: true, entry: 'qq_private', availableChannels: ['qq_private'] }
     const ports = {
       resolve: resolver,
@@ -66,8 +67,9 @@ try {
     assert.equal(result.kind, 'planned', JSON.stringify(result))
     assert.deepEqual(pending.map(row => row.dueAt).sort(), [...expected].sort(), `${kind}事件时间及提前量`)
     assert.equal(pending.length, 3)
+    if (kind === 'image-followup') assert.ok(pending.every(row => row.repeatMode === 'until_reply' && row.sourceRefs.includes('original-request')))
     console.log(`PASS real-model ${kind}: 3 dated reminders with exact five-minute offsets`)
-    const repeated = await runReminderTurn({ ...input, current: { ...input.current, id: `repeated-${kind}` } }, ports)
+    const repeated = await runReminderTurn({ ...input, current: { ...input.current, id: `repeated-${kind}`, ...(kind === 'image-followup' ? { text: '确认没问题' } : {}) } }, ports)
     readings.push({ kind: `${kind}-repeat`, result: repeated, count: pending.length })
     assert.equal(pending.length, 3, `${kind}重复请求不得受提醒措辞变化影响而重复建单`)
     assert.equal(repeated.kind, 'planned', JSON.stringify(repeated))

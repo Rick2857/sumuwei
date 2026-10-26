@@ -28,11 +28,14 @@ import { dirname, join, resolve, sep } from 'node:path'
 
 import { actionFailure, ActionFailureError } from '../../../kernel/action/errors.ts'
 import type { AdapterExecuteInput, AdapterOutcome, CapabilityAdapter } from '../../../kernel/action/executor-port.ts'
+import type { ActionEvidence } from '../../../kernel/action/action-request.ts'
 import type { PayloadStagingPort } from '../../../kernel/action/payload-staging.ts'
 import { stringArg } from '../../../kernel/action/executor-port.ts'
 import { SANDBOX_FILE_READ, SANDBOX_FILE_WRITE } from '../../../kernel/action/capability-registry.ts'
 import type { SandboxEntry } from '../../../kernel/action/target-resolver.ts'
 import { fnv1a64Hex } from '../../../kernel/action/idempotency.ts'
+import { encodeSandboxConditionReceipt } from '../../../kernel/contracts/write-precondition.ts'
+import { TURN_CONTENT_LIMITS, type LocalTextTurnContent } from '../../../kernel/contracts/turn-content.ts'
 
 export const DEFAULT_MAX_READ_BYTES = 256 * 1024
 export const DEFAULT_MAX_WRITE_BYTES = 64 * 1024
@@ -46,6 +49,16 @@ export interface SandboxFilesystemOptions {
   maxWriteBytes?: number
   maxEntries?: number
   /**
+   * 受信的**条件标记路径**（可选；ADR-151 步骤 C）。
+   *
+   * ⚠️ **缺省 `undefined` ⇒ 行为逐字不变**（既有门不受影响）。
+   * ⚠️ 读这些路径时，把**条件值**记进证据回执（`sandbox-condition@1:<值>`），
+   *    让"写前置条件"的证据**只**来自账本里可核的真实读动作。
+   * ⚠️ 值必须是**机器码**（`[A-Za-z0-9_.-]{1,64}`）；不满足 ⇒ **不出回执**
+   *    ⇒ 条件**未知** ⇒ 归因不了（不猜）。
+   */
+  conditionPaths?: readonly string[]
+  /**
    * 私有暂存端口（**可选**：装了它，写入就同时接受执行环改写后的 `payloadRef`）。
    *
    * ⚠️ 缺省 `undefined` ⇒ 只认字面 `content`（旧行为逐字不变）。
@@ -53,6 +66,15 @@ export interface SandboxFilesystemOptions {
    *    —— 两处各建一个暂存，写的时候取不到）。
    */
   staging?: PayloadStagingPort
+  /**
+   * **把读到的正文交给"当轮内容"管线**（可选；F2 受信准备读需要它）。
+   *
+   * ⚠️ 缺省 `false` ⇒ **不产出 `turnContent`**，既有行为/提示逐字不变。
+   * ⚠️ 打开后：读成功会把正文包成 `local-text` 当轮内容（受 `TURN_CONTENT_LIMITS` 与
+   *    装配层 `replanContext.contentTokens` 双重约束）⇒ 它**只**在装配层给了内容额度时
+   *    才进规划上下文（缺额度 ⇒ 一份都不注入）。正文**永不进账本**。
+   */
+  exposeReadContent?: boolean
 }
 
 /**
@@ -140,6 +162,7 @@ export function contentFingerprint(text: string): string {
 
 export function createSandboxReadAdapter(options: SandboxFilesystemOptions): CapabilityAdapter {
   const maxRead = options.maxReadBytes ?? DEFAULT_MAX_READ_BYTES
+  const conditionPaths = options.conditionPaths === undefined ? undefined : new Set(options.conditionPaths)
   return {
     capabilityId: SANDBOX_FILE_READ,
     async execute(input: AdapterExecuteInput): Promise<AdapterOutcome> {
@@ -157,16 +180,58 @@ export function createSandboxReadAdapter(options: SandboxFilesystemOptions): Cap
       }
       // 读不到就让 fs 的错误抛出去（ENOENT → target_not_found，见 errors.ts 的归一）
       const content = await readFile(absolute, 'utf8')
+      const path = pathOf(input)
+      /*
+       * 当轮内容的**范围事实**（只有 `exposeReadContent` 打开时才用得上；
+       * 走的是与 `local.file.read` 同一套 `TurnContent` 形状与上限）。
+       */
+      const totalChars = content.length
+      const shaped = content.slice(0, TURN_CONTENT_LIMITS.maxTextChars)
+      const lineCount = content === '' ? 0 : content.split(/\r\n|\n|\r/).length
+      /*
+       * ⚠️ **条件标记回执**（ADR-151 步骤 C）：只有**受信声明过**的路径才记值。
+       *    缺省没声明 ⇒ 这里**一个字都不写**（既有行为逐字不变）。
+       */
+      const condition = conditionPaths?.has(path) === true
+        ? encodeSandboxConditionReceipt(content.trim())
+        : undefined
+      const evidence: ActionEvidence[] = [{ kind: 'filesystem', detail: `读自沙箱内 ${path}`, ref: path }]
+      if (condition !== undefined) evidence.push({ kind: 'filesystem', detail: `读取条件标记 ${path}`, ref: condition })
+      /*
+       * F2 受信准备读：**读到的正文进当轮内容管线**（只有在装配层给了内容额度时才被注入）。
+       * ⚠️ 缺省关闭 ⇒ 不产出 `turnContent`（既有行为逐字不变）。
+       */
+      const turnContent = options.exposeReadContent === true
+        ? [{
+          contentId: `${String(input.actionId)}:sandbox-text`,
+          kind: 'local-text' as const,
+          capability: SANDBOX_FILE_READ,
+          operation: 'read',
+          sourceKind: 'local-disk' as const,
+          resourceRef: path,
+          sourceFingerprint: contentFingerprint(content),
+          resultFingerprint: contentFingerprint(shaped),
+          scope: { totalChars, includedChars: shaped.length, truncated: shaped.length < totalChars },
+          facts: [
+            `沙箱文件：${path}`,
+            `字节数：${String(Buffer.byteLength(content, 'utf8'))} · 字符数：${String(totalChars)} · 行数：${String(lineCount)}`,
+            `截断：${shaped.length < totalChars ? `是（只读到前 ${String(shaped.length)} 字符）` : '否'}`,
+          ],
+          text: shaped,
+          mediaType: 'text/plain',
+          lineCount,
+          sourceBytes: Buffer.byteLength(content, 'utf8'),
+        } satisfies LocalTextTurnContent]
+        : undefined
       return {
         effect: {
           kind: 'content_read',
-          detail: `读取 ${pathOf(input)}（${Buffer.byteLength(content, 'utf8')} 字节）`,
+          detail: `读取 ${path}（${Buffer.byteLength(content, 'utf8')} 字节）`,
           fingerprint: contentFingerprint(content),
           bytes: Buffer.byteLength(content, 'utf8'),
         },
-        evidence: [
-          { kind: 'filesystem', detail: `读自沙箱内 ${pathOf(input)}`, ref: pathOf(input) },
-        ],
+        evidence,
+        ...(turnContent === undefined ? {} : { turnContent }),
       }
     },
   }
@@ -196,10 +261,26 @@ export function createSandboxReadAdapter(options: SandboxFilesystemOptions): Cap
 export function createSandboxWriteAdapter(options: SandboxFilesystemOptions): CapabilityAdapter {
   const maxWrite = options.maxWriteBytes ?? DEFAULT_MAX_WRITE_BYTES
   const rootAbs = resolve(options.root)
+  const conditionPaths = options.conditionPaths === undefined ? undefined : new Set(options.conditionPaths)
   return {
     capabilityId: SANDBOX_FILE_WRITE,
     async execute(input: AdapterExecuteInput): Promise<AdapterOutcome> {
       const relative = pathOf(input)
+      /*
+       * ⚠️ **条件标记由受信侧拥有，代理写不到**（ADR-151 步骤 D · P1 的堵死侧）。
+       *
+       * ⚠️ 为什么必须在**这里**堵：标记的值是"写前置条件"的证据来源。
+       *    代理若能写它，就能自己写出 `locked` 来**伪造**"条件被违反"
+       *    （C2 的读面只在**事后**发现"代理写过标记 ⇒ 该族观测作废"，
+       *     那是**发现**，不是**防止**）。
+       * ⚠️ 缺省没声明 ⇒ **一个字都不改**（既有行为逐字不变）。
+       */
+      if (conditionPaths?.has(relative) === true) {
+        throw new ActionFailureError(actionFailure(
+          'permission_denied',
+          `条件标记 ${relative} 由受信侧拥有，代理不能写它`
+        ))
+      }
       /*
        * 优先级刻意是"暂存引用优先"：执行环给出 `payloadRef` 时，`content` 已经**不在** args 里
        * （被改写了），因此两条不会同时出现；万一同时出现，引用是更具体、更可能是本意的那一个。

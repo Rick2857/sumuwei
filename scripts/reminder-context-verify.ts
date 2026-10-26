@@ -29,6 +29,7 @@ const call = (text: string, enabled = true) => runReminderTurn({ current: { id: 
 const created = await call(source.text)
 assert.equal(created.kind, 'scheduled')
 assert.ok('dueAt' in created && created.dueAt === now + 360_000)
+draft = { ok: true, draft: { kind: 'confirm', targetIntentId: 'reminder', text: '记得拔插头。' } }
 const confirmed = await call('默认吧')
 assert.equal(confirmed.kind, 'existing'); assert.equal(writes.length, 1)
 draft = { ok: true, draft: { kind: 'update', targetIntentId: 'reminder', text: '记得拔插头。' } }
@@ -47,12 +48,13 @@ const timeout = await call(source.text)
 assert.equal(timeout.kind, 'failed'); assert.equal(writes.length, 2)
 assert.match(runReplyGuardChain({ replyText: '记下了，到点发消息', reminderResult: timeout }).replyText, /超时/u)
 assert.match(runReplyGuardChain({ replyText: '这条没记，提醒什么？', reminderResult: created }).replyText, /已设置.*拔插头/u)
+draft = { ok: true, draft: { kind: 'none' } }
 const ordinary = await call('今天天气真好')
 assert.equal(ordinary.kind, 'none'); assert.equal(writes.length, 2)
 for (const bad of [{ kind: 'create', timeSourceId: source.id, text: '拔插头', dueAt: now }, { kind: 'update', targetIntentId: 'reminder', text: '' }, { kind: 'create', timeSourceId: source.id, text: '字'.repeat(MAX_NOTIFICATION_TEXT_CODEPOINTS + 1) }]) assert.equal(readReminderDraft(bad), undefined)
 assert.ok(readReminderDraft({ kind: 'none' }))
 const resolver = createOpenAiReminderResolver({ env: { OPENAI_API_KEY: 'fixture' }, fetchImpl: async () => new Response(JSON.stringify({ choices: [{ message: { content: '{"kind":"create","text":"拔插头","timeSourceId":"source","dueAt":123}' } }] })) })
-assert.deepEqual(await resolver({ current: source, recent: [], pending: [] }), { ok: false, failure: 'invalid_output' })
+assert.deepEqual(await resolver({ current: source, recent: [], pending: [] }), { ok: false, failure: 'invalid_output', diagnostic: 'schema_invalid' })
 
 const owner = entityRef('character', 'character')
 const speaker = entityRef('user', 'owner')

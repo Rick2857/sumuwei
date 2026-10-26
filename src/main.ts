@@ -422,11 +422,12 @@ import { runCareOpportunity } from './kernel/app/proactive-care.ts'
 import { buildProactiveSourceCandidates } from './infrastructure/runtime/proactive-sources.ts'
 import { createOpenAiProactiveCarePort } from './infrastructure/model/openai-proactive-care.ts'
 import { createOpenAiReminderResolver } from './infrastructure/model/openai-reminder-text.ts'
-import { runReminderTurn, reminderCandidate, type ReminderSource } from './kernel/app/reminder-turn.ts'
+import { runReminderTurn, type ReminderSource } from './kernel/app/reminder-turn.ts'
 import type { ChatChannel } from './kernel/contracts/chat-channel.ts'
 import { createLocalReminderCapabilities, LOCAL_REMINDER_SEND, LOCAL_REMINDER_PERMISSION } from './kernel/action/local-reminder-capability.ts'
 import { createLocalReminderDeliveryAdapter } from './infrastructure/action/adapters/local-reminder-delivery.ts'
 import { bindLocalReminderConnection, createReminderScheduling, reportReminderForChannel } from './infrastructure/runtime/reminder-scheduling.ts'
+import { readReminderDeliveryContext } from './infrastructure/runtime/reminder-delivery-context.ts'
 import { reminderDedupeKey } from './kernel/contracts/notification-intake.ts'
 import { createIntent, updateReminderText, revisePendingReminder } from './infrastructure/persistence/notification-store.ts'
 import { randomUUID } from 'node:crypto'
@@ -602,7 +603,7 @@ async function startStandaloneReminders(input: {
         /* ★ S3 ③ 缺口 B（D05「任何回复即销账」）：把真读数喂进去。
            ⚠️ `lastInboundAt` 返回 `Timestamp | undefined`（从没有过入站）⇒ 取 0，
               于是 `settledByReply = lastInboundAt > 上次投递时刻` 为 false —— 正确的"没回过"。 */
-        lastInboundAt: async () => (await lastInboundAt(db, input.kernel.characterId)) ?? 0,
+        lastInboundAt: async intent => (await lastInboundAt(db, input.kernel.characterId, intent?.conversationRef)) ?? 0,
         /* ★ S3 ③：暂停优先于重复（D05）。读数与关心机会预检**同源**（readControl 的落库状态，不是内存变量） */
         paused: async () => (await readControl(db, input.kernel.characterId))?.paused === true,
         /* ★ 续发间隔：从 flags 来（缺省 60_000 ⇒ 与裁定逐字相同；设了 env 才能让行为级门秒级跑） */
@@ -678,6 +679,14 @@ import { createUtilityIntentDetector } from './kernel/action/utility-intent.ts'
 import { createWeatherIntentDetector } from './kernel/action/weather-news-intent.ts'
 import { createMathCalculateAdapter } from './infrastructure/action/adapters/math-calculate.ts'
 import { createDocumentReadAdapter } from './infrastructure/action/adapters/document-read.ts'
+import { createDocumentExtractionAdapter } from './infrastructure/action/adapters/document-extraction.ts'
+import { createDocumentProfileAdapter } from './infrastructure/action/adapters/document-profile.ts'
+import { DOCUMENT_PROFILE } from './kernel/contracts/document-profile.ts'
+import { DOCUMENT_PAGES } from './kernel/contracts/document-pages.ts'
+import { createDocumentPagesAdapter } from './infrastructure/action/adapters/document-pages.ts'
+import { DOCUMENT_EXTRACT, createDocumentExtractionDefinitions } from './kernel/contracts/document-reading.ts'
+import { createDocumentRecoveryPlanning } from './infrastructure/runtime/document-recovery-planning.ts'
+import { createDocumentCoverageReferencePort } from './infrastructure/runtime/document-coverage-reference.ts'
 import { createWebReadAdapter } from './infrastructure/action/adapters/web-read.ts'
 import { createImageOcrAdapter } from './infrastructure/action/adapters/image-ocr.ts'
 import { configuredOcrBackend } from './infrastructure/action/adapters/rapid-ocr-assets.ts'
@@ -766,7 +775,11 @@ import {
   resolveLocalAbsolutePath,
 } from './infrastructure/action/adapters/local-filesystem.ts'
 import { createOpenAiTaskPlanner } from './infrastructure/model/openai-task-planner.ts'
+import { createSimulationPlanning } from './infrastructure/runtime/simulation-planning.ts'
 import { createOpenAiActionForecast } from './infrastructure/model/openai-action-forecast.ts'
+import { createEblTaskObserver, observeEblFeedback } from './infrastructure/runtime/epistemic-belief-runtime.ts'
+import { eblOwnsPreferenceSource, handleEblPreferenceTurn } from './infrastructure/runtime/epistemic-preference.ts'
+import { eblManagedRecall } from './infrastructure/runtime/epistemic-human-context.ts'
 /*
  * WP1 / ADR-104：角色自行选择工具（决策端口 + 程序生成的工具目录）。
  */
@@ -787,6 +800,8 @@ import {
   createWeatherCapabilityDefinitions,
 } from './kernel/action/weather-capability.ts'
 import { createWeatherAdapter } from './infrastructure/action/adapters/weather.ts'
+import { XIDIAN_TIMETABLE, XIDIAN_PERMISSION, createXidianCapabilityDefinitions, mayReadXidianTimetable } from './kernel/action/xidian-capability.ts'
+import { createXidianTimetableAdapter } from './infrastructure/action/adapters/xidian-timetable.ts'
 import {
   OFFICE_GENERATE,
   OFFICE_GENERATE_PERMISSION,
@@ -960,12 +975,16 @@ const TASK_CAPABILITY_IDS: readonly string[] = [
   LOCAL_FILE_READ,
   LOCAL_FILE_WRITE,
   DOCUMENT_READ,
+  DOCUMENT_EXTRACT,
+  DOCUMENT_PROFILE,
+  DOCUMENT_PAGES,
   IMAGE_OCR,
   MATH_CALCULATE,
   WEB_READ,
   WEB_SEARCH,
   WEATHER_QUERY,
   OFFICE_GENERATE,
+  XIDIAN_TIMETABLE,
   NEWS_READ,
   BROWSER_READ,
   BROWSER_OPERATE,
@@ -1393,13 +1412,12 @@ function attachEventLog(runtime: AgentRuntime): void {
  *
  * ```text
  * 一个核心 + 两个受信会话（D01）
- *   ⇒ 后台消费者（语义慢路径 / 反思 / 约定 / 故事）只能有**一套**在飞闸
+ *   ⇒ 后台消费者（语义慢路径 / 反思 / 约定 / 自动记忆）只能有**一套**在飞闸
  *   ⇒ 第二路会话不能自己跑一份（否则同一份认知被算两遍，水位互相打架）
  * ```
  *
  * 因此第二路会话（`publicLifecycle: 'shared'`）把四件事**借给** owner：
- * 四个 drain（它自己只提供 `traceId`，追加到哪条 trace 由 id 查库决定）
- * 与一个故事装配实例。
+ * 四个 drain（它自己只提供 `traceId`，追加到哪条 trace 由 id 查库决定）。
  *
  * ⚠️ **`closeShared()` 不在这个接口上给借用者用**：借用者调 `close()` 是
  *    **什么都不做**（`D07`：断开不是停机）。只有核心管理者能关库。
@@ -1449,6 +1467,8 @@ class ChatSession {
   /** M2.5：Character Kernel 与功能开关（未启用时为 undefined） */
   private readonly kernel: KernelHandle | undefined
   private readonly flags: ReturnType<typeof readKernelFlags>
+  /** Registered coverage references (only human-approved ones are returned); absent ⇒ coverage stays unknown. */
+  private readonly coverageReferences: ReturnType<typeof createDocumentCoverageReferencePort> | undefined
   /**
    * Lv4.5 / `P3`：**有限插话**的开关读数（只读）。
    *
@@ -1743,6 +1763,14 @@ class ChatSession {
     this.dryRun = options.dryRun ?? false
     this.kernel = options.kernel
     this.flags = options.flags ?? readKernelFlags()
+    /*
+     * ⚠️ **覆盖参照登记器**（P2.1 第四批）：只有开关打开**且**配置了目录时才构造。
+     *    登记器本身只返回**真人复核通过**的参照 ⇒ 没有复核过的参照进不了证据链。
+     *    缺省（开关 off / 没目录）⇒ 覆盖恒 `unknown`。
+     */
+    this.coverageReferences = this.flags.documentCoverageEnabled && this.flags.documentCoverageReferenceDir.length > 0
+      ? createDocumentCoverageReferencePort({ directory: this.flags.documentCoverageReferenceDir })
+      : undefined
     if (options.scopedIdentity?.scope.context.principal.kind === 'user' || options.scopedIdentity?.scope.context.room.kind === 'group') {
       // Ordinary chat never inherits the host's files, desktop, sender or admin authority.
       this.flags = { ...this.flags, actionEnabled: false, taskAutonomyEnabled: false,
@@ -2156,7 +2184,7 @@ class ChatSession {
         ? {}
         : {
             memoryWriter: this.buildMemoryWriter(),
-            memoryExplicitEnabled: this.flags.memoryPostTurnModelEnabled || this.flags.memoryExplicitEnabled,
+            memoryExplicitEnabled: this.flags.epistemicBeliefHumanEnabled || this.flags.memoryPostTurnModelEnabled || this.flags.memoryExplicitEnabled,
             /*
              * M4.5：动作的接线点（ADR-030）。
              *
@@ -2249,7 +2277,7 @@ class ChatSession {
           }
         : {}),
     })
-    const service = createMemoryRecallService({ port: retrievalPort })
+    const service = createMemoryRecallService({ port: this.flags.epistemicBeliefHumanEnabled ? eblManagedRecall(retrievalPort) : retrievalPort })
     return createRecallTurnPort({
       ...(this.flags.memorySemanticOnlyEnabled ? { semanticOnly: true } : {}),
       service,
@@ -2383,6 +2411,7 @@ class ChatSession {
       ...createExternalEvidenceCapabilityDefinitions(),
       /* 实用能力加装：四项能力**恒登记**（关闭时用户显式要求 ⇒ 可审计的 permission_denied） */
       ...createUtilityCapabilityDefinitions(),
+      ...createDocumentExtractionDefinitions(),
       /*
        * 第二批（2026-10-04）：本机文件域 + 四项业务能力，同样**恒登记**。
        * ⚠️ 恒登记 = 关闭时用户显式要求得到一条**可审计的 `permission_denied`**
@@ -2391,6 +2420,7 @@ class ChatSession {
        */
       ...createLocalFileCapabilityDefinitions(),
       ...createWeatherCapabilityDefinitions(),
+      ...createXidianCapabilityDefinitions(),
       ...createOfficeCapabilityDefinitions(),
       ...createNewsCapabilityDefinitions(),
       ...createBrowserCapabilityDefinitions(),
@@ -2467,6 +2497,37 @@ class ChatSession {
               },
             }),
             planner: createOpenAiTaskPlanner({ registry }),
+            ...(this.flags.simulationPlannerEnabled && this.flags.epistemicBeliefEnabled && this.kernel && !this.dryRun
+              ? { configurePlanning: createSimulationPlanning({ db: this.kernel.stores.db,
+                  characterId: this.kernel.characterId, activeUserId: this.ids.userId, registry,
+                  facts: { encoding: 'utf8' }, modelVersion: 'simulation-task-planner@1',
+                  candidatePlanner: createOpenAiTaskPlanner({ registry, candidateCount: 3 }),
+                  /*
+                   * ⚠️ **写前置条件规则**的消费（ADR-151 步骤 D）：
+                   *    开关**独立**、缺省 false；**受信族前置条件声明**目前是**空的**
+                   *    ⇒ 没有族规则 ⇒ 否决整段不发生（生产行为逐字不变）。
+                   *    声明属**激活裁定**的一部分（不随代码偷偷上线）。
+                   */
+                  precondition: {
+                    enabled: this.flags.simulationPreconditionRulesEnabled,
+                    knownDirectories: (): readonly string[] => knownDirectoryLines,
+                    declarations: [],
+                  },
+                }) } : {}),
+            ...(this.flags.documentRecoveryEnabled && this.flags.epistemicBeliefEnabled && this.flags.documentReadEnabled && this.kernel && !this.dryRun
+              ? { configurePlanning: createDocumentRecoveryPlanning({ db: this.kernel.stores.db,
+                  characterId: this.kernel.characterId, activeUserId: this.ids.userId, modelVersion: 'document-route@1', profile: true,
+                  ...(this.coverageReferences ? { coverage: this.coverageReferences } : {}),
+                  ...(this.flags.simulationPlannerEnabled ? { fallback: createSimulationPlanning({ db: this.kernel.stores.db,
+                    characterId: this.kernel.characterId, activeUserId: this.ids.userId, registry, facts: { encoding: 'utf8' },
+                    modelVersion: 'simulation-task-planner@1', candidatePlanner: createOpenAiTaskPlanner({ registry, candidateCount: 3 }),
+                    precondition: {
+                      enabled: this.flags.simulationPreconditionRulesEnabled,
+                      knownDirectories: (): readonly string[] => knownDirectoryLines,
+                      declarations: [],
+                    },
+                  }) } : {}),
+                }) } : {}),
             /* ⚠️ **同一个实例**（见上面那条生产缺陷的注释）：不是第二个暂存 */
             staging: this.payloadStaging,
             /*
@@ -2547,6 +2608,16 @@ class ChatSession {
                   },
                 }
               : {}),
+            ...(this.flags.epistemicBeliefEnabled && this.kernel && !this.dryRun
+              ? { epistemic: createEblTaskObserver(this.kernel.stores.db, this.ids.userId, {
+                  /*
+                   * ⚠️ **族只来自受信已知目录事实**（ADR-151 步骤 B/C）。
+                   *    ⚠️ **受信族前置条件声明**目前是**空的** ⇒ 形成链**不触发**
+                   *       （生产行为逐字不变；声明属**激活裁定**的一部分）。
+                   */
+                  knownDirectories: (): readonly string[] => knownDirectoryLines,
+                  preconditions: [],
+                }) } : {}),
             onTaskOutcome: (outcome) => {
               logger.info(`[task] 任务执行读数：${describeTaskRun(outcome)}`)
             },
@@ -2707,6 +2778,10 @@ class ChatSession {
         return flags.localFileWriteEnabled
       case DOCUMENT_READ:
         return flags.documentReadEnabled && ready()
+      case DOCUMENT_EXTRACT:
+      case DOCUMENT_PROFILE:
+      case DOCUMENT_PAGES:
+        return flags.documentRecoveryEnabled && flags.documentReadEnabled && flags.epistemicBeliefEnabled && ready()
       case IMAGE_OCR:
         return flags.imageOcrEnabled && ready()
       case MATH_CALCULATE:
@@ -2717,6 +2792,8 @@ class ChatSession {
         return flags.webSearchEnabled && flags.webSearchMode !== undefined
       case WEATHER_QUERY:
         return flags.weatherEnabled
+      case XIDIAN_TIMETABLE:
+        return flags.xidianTimetableEnabled && mayReadXidianTimetable(this.turnScope)
       case OFFICE_GENERATE:
         // 两条权限都要（矩阵逐字）：生成 + 本机落盘
         return flags.officeGenerateEnabled && flags.localFileWriteEnabled && ready()
@@ -3064,7 +3141,15 @@ class ChatSession {
     const kernel = this.kernel
     const ledger = createActionLedgerStore(kernel.stores.db)
     const sandboxRoot = this.flags.actionSandboxRoot
-    const sandboxOptions = { root: sandboxRoot }
+    /*
+     * ⚠️ **受信条件标记路径**（ADR-151 步骤 D · P1）：
+     *    读适配器据此把**条件值**记进受信回执；写适配器据此**拒绝**代理写标记
+     *    （标记由受信侧拥有 —— 否则代理能伪造"条件被违反"的证据）。
+     *    ⚠️ **受信族前置条件声明目前是空的** ⇒ 这张表为空 ⇒ 两个行为都**逐字不变**；
+     *    声明属**激活裁定**的一部分（不随代码偷偷上线）。
+     */
+    const preconditionMarkerPaths: readonly string[] = []
+    const sandboxOptions = { root: sandboxRoot, conditionPaths: preconditionMarkerPaths }
 
     /*
      * ==========================================================================
@@ -3153,6 +3238,13 @@ class ChatSession {
         })
       : undefined
     const webReadAdapter = this.flags.webReadEnabled ? createWebReadAdapter() : undefined
+    const documentExtractionAdapter = this.flags.documentRecoveryEnabled && this.flags.documentReadEnabled && this.flags.epistemicBeliefEnabled
+      ? createDocumentExtractionAdapter({ ...sandboxOptions, ...(localFileResolver ? { resolveTarget: localFileResolver } : {}),
+        ...(this.coverageReferences ? { coverageReferenceFor: (rawPath: string) => this.coverageReferences!.find(rawPath) } : {}) }) : undefined
+    const documentProfileAdapter = documentExtractionAdapter
+      ? createDocumentProfileAdapter({ ...sandboxOptions, ...(localFileResolver ? { resolveTarget: localFileResolver } : {}) }) : undefined
+    const documentPagesAdapter = documentExtractionAdapter
+      ? createDocumentPagesAdapter({ ...sandboxOptions, ...(localFileResolver ? { resolveTarget: localFileResolver } : {}) }) : undefined
     const ocrAdapter = this.flags.imageOcrEnabled
       ? createImageOcrAdapter({
           backend: configuredOcrBackend(),
@@ -3196,6 +3288,8 @@ class ChatSession {
     ]
 
     const weatherAdapter = this.flags.weatherEnabled ? createWeatherAdapter() : undefined
+    const xidianAdapter = this.flags.xidianTimetableEnabled && mayReadXidianTimetable(this.turnScope)
+      ? createXidianTimetableAdapter() : undefined
     const newsAdapter = this.flags.newsReadEnabled ? createNewsReadAdapter() : undefined
     /*
      * ⚠️ 办公生成的两条权限都要（矩阵逐字）：`office:generate` + `local-file:write`。
@@ -3275,6 +3369,7 @@ class ChatSession {
       ...browserPermissions,
       ...desktopPermissions,
       ...(weatherAdapter !== undefined ? [WEATHER_QUERY_PERMISSION] : []),
+      ...(xidianAdapter !== undefined ? [XIDIAN_PERMISSION] : []),
       ...(newsAdapter !== undefined ? [NEWS_READ_PERMISSION] : []),
       /*
        * post-Lv2 / ADR-110 `D05`：QQ 主动联系的权限**条件授予**。
@@ -3327,12 +3422,16 @@ class ChatSession {
           ...(webSearchAdapter !== undefined ? [webSearchAdapter] : []),
           ...(mathAdapter !== undefined ? [mathAdapter] : []),
           ...(documentAdapter !== undefined ? [documentAdapter] : []),
+          ...(documentExtractionAdapter !== undefined ? [documentExtractionAdapter] : []),
+          ...(documentProfileAdapter !== undefined ? [documentProfileAdapter] : []),
+          ...(documentPagesAdapter !== undefined ? [documentPagesAdapter] : []),
           ...(webReadAdapter !== undefined ? [webReadAdapter] : []),
           ...(ocrAdapter !== undefined ? [ocrAdapter] : []),
           ...(localFileReadAdapter !== undefined ? [localFileReadAdapter] : []),
           ...(localFileReadFileAdapter !== undefined ? [localFileReadFileAdapter] : []),
           ...(localFileWriteAdapter !== undefined ? [localFileWriteAdapter] : []),
           ...(weatherAdapter !== undefined ? [weatherAdapter] : []),
+          ...(xidianAdapter !== undefined ? [xidianAdapter] : []),
           ...(officeAdapter !== undefined ? [officeAdapter] : []),
           ...(newsAdapter !== undefined ? [newsAdapter] : []),
           ...browserAdapters,
@@ -3495,6 +3594,7 @@ class ChatSession {
         if (isDiskWideCapability(request.capability)) {
           return resolveLocalTarget({
             targetType: 'local_file',
+            platform: process.platform === 'win32' ? 'win32' : 'posix',
             ...(request.target !== undefined ? { declared: request.target } : {}),
             ...(typeof request.arguments.path === 'string'
               ? { rawPath: request.arguments.path }
@@ -3506,6 +3606,13 @@ class ChatSession {
          * 与 `math.calculate` 同一条理由：目标是**代码常量**，
          * 因此 `confidence: 'exact'` 是如实的，不是"因为只有一个候选就说是它"。
          */
+        if (request.capability === XIDIAN_TIMETABLE) {
+          return {
+            target: { type: 'external_service', canonicalId: 'xidian:owner-undergraduate-timetable',
+              displayName: '原主人西电本科课表同步快照', confidence: 'exact' },
+            scopeViolation: !mayReadXidianTimetable(this.turnScope),
+          }
+        }
         if (request.capability === WEATHER_QUERY) {
           const city = typeof request.arguments.city === 'string' ? request.arguments.city : ''
           return {
@@ -3537,7 +3644,7 @@ class ChatSession {
            * ⚠️ 办公生成写的是**一个具体的本机文件** ⇒ 目标必须按本机文件域解析，
            *    不能给它一个"程序固定"的假目标（那样 target 确定性与真实产物就会分叉）。
            */
-          return resolveLocalTarget({ targetType: 'local_file', rawPath: path })
+          return resolveLocalTarget({ targetType: 'local_file', rawPath: path, platform: process.platform === 'win32' ? 'win32' : 'posix' })
         }
         if (isBrowserCapability(request.capability)) {
           return {
@@ -3619,6 +3726,18 @@ class ChatSession {
    *   · commitEvents  ← `applyAcceptedEvents`（写领域事件的唯一入口）
    */
   private buildMemoryWriter(): ExplicitMemoryTurnPort {
+    const legacy = this.buildLegacyMemoryWriter()
+    if (!this.flags.epistemicBeliefHumanEnabled || !this.kernel) return legacy
+    return { handleTurn: async request => {
+      const handled = await handleEblPreferenceTurn(this.kernel!.stores.db, this.kernel!.characterId, this.ids.userId, request)
+      if (handled === undefined) return legacy.handleTurn(request)
+      if (handled.kind === 'written' && this.turnScope) await labelWrittenMemory({ db: this.kernel!.stores.db,
+        scope: this.turnScope, memoryId: handled.memoryId })
+      return handled
+    } }
+  }
+
+  private buildLegacyMemoryWriter(): ExplicitMemoryTurnPort {
     if (this.flags.memoryPostTurnModelEnabled) return deferredMemoryTurnPort()
     if (!this.kernel) throw new Error('buildMemoryWriter 需要 kernel')
     const kernel = this.kernel
@@ -3806,6 +3925,19 @@ class ChatSession {
         detector: createExplicitMemoryIntentDetector({
           classifier: new LlmMemoryIntentClassifier({ invokeModel: invokeMemoryModel }),
         }),
+        readIntentContext: async request => {
+          const event = await getConversationEvent(db, request.event.id)
+          if (!event) throw new Error('memory_intent_source_missing')
+          const withdrawn = this.flags.withdrawnContextMaskingEnabled
+            ? await computeWithdrawnEvidence(db, store, owner) : undefined
+          if (withdrawn?.ok === false) throw new Error('memory_intent_context_unavailable')
+          const rows = await recentConversationEvents(db, { characterId: kernel.characterId,
+            conversationId: event.conversationId, beforeSequence: event.sequence - 1, limit: 12 })
+          return rows.filter(row => row.conversationId === event.conversationId
+            && (row.actorType === 'user' || row.actorType === 'character')
+            && !withdrawn?.withdrawnEventIds.includes(String(row.id)))
+            .map(row => ({ actor: row.actorType as 'user' | 'character', text: [...row.content].slice(0, 1000).join('') }))
+        },
       } : {}),
     })
     /*
@@ -4102,11 +4234,12 @@ class ChatSession {
       )
     }
 
-    if (this.flags.beliefEnabled && this.kernel && !this.dryRun) {
+    if ((this.flags.beliefEnabled || this.flags.epistemicBeliefHumanEnabled) && this.kernel && !this.dryRun) {
       const scheduling = await withoutReadScope(async () => maybeRunBeliefEvaluation(this.kernel!.stores.db, {
         characterId: this.kernel!.characterId,
         activeUserId: this.ids.userId,
         activationId: 'open-catchup',
+        retireExplanationInference: true,
       }))
       logger.info(`[m9] 信念交互流追赶：${describeBeliefScheduling(scheduling)}`)
       const memoryScheduling = await withoutReadScope(async () => maybeRunBeliefMemoryReconciliation(
@@ -4177,6 +4310,7 @@ class ChatSession {
         }
       }
       this.automaticMemory = this.flags.memoryPostTurnModelEnabled ? new PostTurnModelMemoryConsumer({
+        epistemicManagedStyle: this.flags.epistemicBeliefHumanEnabled,
         ownerUserId: this.ids.userId,
         db: kernel.stores.db, characterId: kernel.characterId, speaker: entityRef('user', this.ids.userId), registry: kernel.registry,
         invoke: async (prompt) => (await callModelText(this.runtime, prompt, { temperature: 0, maxTokens: 4096, signal: AbortSignal.any([this.automaticMemoryAbort.signal, AbortSignal.timeout(30_000)]) })).text,
@@ -4184,7 +4318,9 @@ class ChatSession {
       }) : new AutomaticMemoryConsumer({
         ownerUserId: this.ids.userId,
         db: kernel.stores.db, characterId: kernel.characterId, speaker: entityRef('user', this.ids.userId), registry: kernel.registry,
-        extractor: new LangMemMemoryExtractor({ python: python!, signal: this.automaticMemoryAbort.signal }),
+        extractor: new LangMemMemoryExtractor({ python: python!, signal: this.automaticMemoryAbort.signal,
+          epistemicManagedStyle: this.flags.epistemicBeliefHumanEnabled
+            ? eventId => eblOwnsPreferenceSource(kernel.stores.db, kernel.characterId, this.ids.userId, eventId) : undefined }),
         onReading,
       })
       await this.automaticMemory.open()
@@ -4591,6 +4727,11 @@ class ChatSession {
           )
         }
       }
+
+      if ((this.flags.epistemicBeliefHumanShadow || this.flags.epistemicBeliefHumanEnabled) && this.kernel && !this.dryRun && incoming.userEvent) {
+        try { await observeEblFeedback(this.kernel.stores.db, this.kernel.characterId, this.ids.userId, String(incoming.userEvent.id), this.flags.epistemicBeliefHumanEnabled) }
+        catch { logger.warn('[ebl] human lifecycle source/transition unavailable; formal reads recheck corrections') }
+      }
       /*
        * ⚠️ 阶段点：`beginTurn`（写用户事件 + 开轮）到此为止。
        *    实测 `contextMs` 里最大的一块是**装配**（providers → prompt），
@@ -4662,11 +4803,12 @@ class ChatSession {
        * 水位不前进 ⇒ 下一轮尾窗自动补洞（领域键跨窗口撞键）。
        * ⚠️ 干跑（--test）不评估不落库（播种同一条纪律）。
        */
-      if (this.flags.beliefEnabled && this.kernel && !this.dryRun) {
+      if ((this.flags.beliefEnabled || this.flags.epistemicBeliefHumanEnabled) && this.kernel && !this.dryRun) {
         const scheduling = await withoutReadScope(async () => maybeRunBeliefEvaluation(this.kernel!.stores.db, {
           characterId: this.kernel!.characterId,
           activeUserId: this.ids.userId,
           activationId: 'turn',
+          retireExplanationInference: true,
         }))
         if (scheduling.kind === 'failed') {
           logger.warn(`[m9] 本轮信念交互评估失败（补洞语义，下一轮重覆盖）—— ${scheduling.error}`)
@@ -4740,12 +4882,13 @@ class ChatSession {
        * （召回之后）才知道（ADR-070 §9.3）。构造器内部完成资格回查 +
        * 同轮遮蔽 + renderBeliefSection 渲染；失败被网关 catch 成 absent。
        */
-      const buildBeliefSection = this.flags.beliefEnabled
+      const buildBeliefSection = (this.flags.beliefEnabled || this.flags.epistemicBeliefHumanEnabled)
         ? async (info: { selectedMemoryIds: readonly string[] }) =>
             buildBeliefContextSection(this.runtime, {
               characterId: this.ids.characterId,
               activeUserId: this.ids.userId,
               selectedMemoryIds: info.selectedMemoryIds,
+              ...(this.flags.epistemicBeliefHumanEnabled ? { epistemicHuman: { currentEventId: String(incoming?.userEvent?.id ?? '') } } : {}),
             })
         : undefined
       /*
@@ -4833,7 +4976,12 @@ class ChatSession {
          */
         ...(turnScope !== undefined ? { scope: turnScope } : {}),
         ...(checkedImages.length ? { images: checkedImages } : {}),
-        ...(imageStore ? { loadImage: (ref: string) => imageStore.load(ref) } : {}),
+        ...(imageStore ? { loadImage: (ref: string) => imageStore.load(ref),
+          loadImageHistory: () => recentContextLinesFrom(this.runtime, {
+            characterId: this.kernel!.characterId, conversationId: this.gatewayConversationId(),
+            userName: this.userName, characterName: character.name, limit: 8, imagesOnly: true,
+          }),
+        } : {}),
         turn: Object.assign(incoming, { worldObservations: storyWorldObservations, storyTurnScope }),
         ...(this.scopedIdentity?.transport === 'wechat' ? {} : {
           chatChannel: { current: this.entryKey, reminderChannels: reminderRuntimeChannels } }),
@@ -4842,27 +4990,39 @@ class ChatSession {
           .filter(line => line.at >= Date.now() - 300_000 && line.at <= Date.now())
           .map((line, index) => ({ id: asConversationEventId(`group-buffer-${index}`), createdAt: line.at, sequence: index - 20,
             speaker: `${this.scopedIdentity?.transport === 'wechat' ? '微信' : 'QQ'}用户${line.senderId}（未受理的群语境，不能作为长期事实）`, text: line.text })), ...voiceLines],
+        ...(incoming.userEvent !== undefined && !this.dryRun && this.scopedIdentity?.transport !== 'wechat' ? {
+          loadReminderDeliveryContext: async withdrawn => {
+            let ownerRef: string
+            try { ownerRef = readQqPrivateConfig(process.env).ownerId ?? this.ids.userId } catch { ownerRef = this.ids.userId }
+            // Legacy bound-owner entries have no per-user scope; reuse their trusted owner identity.
+            const scope = currentReadScope() ?? { context: this.proactiveSourceAuthorization.context,
+              ownerUserId: this.ids.userId, roomAuthorized: true }
+            return await withReadScope(scope, () => readReminderDeliveryContext(this.kernel!.stores.db, {
+              characterId: this.kernel!.characterId, ownerRef, conversationRef: String(incoming!.userEvent!.conversationId),
+              channel: this.entryKey, now: Date.now(), withdrawn,
+            }))
+          },
+        } : {}),
         ...(incoming.userEvent !== undefined && !this.dryRun ? { runReminderTurn: async (lines, withdrawn, materials) => {
           const source = incoming!.userEvent!
           const current: ReminderSource = { id: String(source.id), text: userText, createdAt: source.createdAt }
           const recent = lines.filter(line => (line.actorType === 'user' || line.actorType === 'character') && line.createdAt !== undefined && line.id !== source.id)
-            .slice(-24).map(line => ({ id: String(line.id), text: [...line.text].slice(0, 2000).join(''), createdAt: line.createdAt!, actor: line.actorType as 'user' | 'character', truncated: [...line.text].length > 2000 }))
-          if (!reminderCandidate(userText, recent)) return { kind: 'none' as const }
+            .slice(-64).map(line => ({ id: String(line.id), text: [...line.text].slice(0, 2000).join(''), createdAt: line.createdAt!, actor: line.actorType as 'user' | 'character', truncated: [...line.text].length > 2000 }))
           let ownerRef: string
           try { ownerRef = readQqPrivateConfig(process.env).ownerId ?? this.ids.userId } catch { ownerRef = this.ids.userId }
           const rows = await listPendingIntents(this.kernel!.stores.db, this.kernel!.characterId, {
             kind: 'reminder', ownerRef, conversationRef: source.conversationId, editable: true, limit: 500,
           })
           const pending = rows.filter(row => row.scheduledAt > Date.now() && withdrawn?.ok !== false &&
-            !row.sourceRefs.some(ref => withdrawn?.withdrawnEventIds.includes(ref))).map(row => ({ id: String(row.id), text: row.text!, dueAt: row.scheduledAt, sourceRefs: row.sourceRefs, channel: row.deliveryChannel }))
+            !row.sourceRefs.some(ref => withdrawn?.withdrawnEventIds.includes(ref))).map(row => ({ id: String(row.id), text: row.text!, dueAt: row.scheduledAt, sourceRefs: row.sourceRefs, channel: row.deliveryChannel, ...(row.repeatMode ? { repeatMode: row.repeatMode } : {}) }))
           const result = await runReminderTurn({ current, recent, pending, materials, now: Date.now(),
             entry: this.entryKey, availableChannels: reminderRuntimeChannels,
             enabled: this.flags.qqProactiveMode === 'on' && this.flags.entryScopedConversations && reminderRefreshHook !== undefined,
           }, {
             resolve: resolveReminder,
-            reschedule: async (target, dueAt) => {
+            reschedule: async (target, dueAt, repeatMode) => {
               const row = rows.find(item => String(item.id) === target.id)
-              return row !== undefined && await revisePendingReminder(this.kernel!.stores.db, row, { dueAt, sourceRefs: [current.id] })
+              return row !== undefined && await revisePendingReminder(this.kernel!.stores.db, row, { dueAt, sourceRefs: [current.id], ...(repeatMode ? { repeatMode } : {}) })
             },
             cancel: async target => {
               const row = rows.find(item => String(item.id) === target.id)
@@ -4879,11 +5039,11 @@ class ChatSession {
         ...(request.repeatMode === undefined ? {} : { repeatMode: request.repeatMode }),
               })
               if (created.intent === undefined) throw new Error('reminder_create_without_readback')
-              return { id: String(created.intent.id), created: created.created, text: created.intent.text!, dueAt: created.intent.scheduledAt, sourceRefs: created.intent.sourceRefs, channel: created.intent.deliveryChannel }
+              return { id: String(created.intent.id), created: created.created, text: created.intent.text!, dueAt: created.intent.scheduledAt, sourceRefs: created.intent.sourceRefs, channel: created.intent.deliveryChannel, ...(created.intent.repeatMode ? { repeatMode: created.intent.repeatMode } : {}) }
             },
-            update: async (target, text, refs, channel) => {
+            update: async (target, text, refs, channel, repeatMode) => {
               const row = rows.find(row => String(row.id) === target.id)
-              return row !== undefined && await updateReminderText(this.kernel!.stores.db, row, text, refs, Date.now(), channel)
+              return row !== undefined && await updateReminderText(this.kernel!.stores.db, row, text, refs, Date.now(), channel, repeatMode)
             },
           })
           logger.info(`[qq-proactive] 提醒入口：${result.kind}${'code' in result ? ` (${result.code})` : ''}`)
@@ -5449,11 +5609,12 @@ class ChatSession {
        * 前进，尾窗保持有界。流 2 同理补上本轮可能新落的 Memory 域事件。
        * 失败不抛；下一轮的同轮评估天然补洞（领域键跨窗口撞键）。
        */
-      if (this.flags.beliefEnabled && this.kernel && !this.dryRun) {
+      if ((this.flags.beliefEnabled || this.flags.epistemicBeliefHumanEnabled) && this.kernel && !this.dryRun) {
         const scheduling = await withoutReadScope(async () => maybeRunBeliefEvaluation(this.kernel!.stores.db, {
           characterId: this.kernel!.characterId,
           activeUserId: this.ids.userId,
           activationId: 'turn-tail',
+          retireExplanationInference: true,
         }))
         if (scheduling.kind === 'failed') {
           logger.warn(`[m9] 信念评估（轮后）失败—— ${scheduling.error}`)
@@ -5649,12 +5810,13 @@ class ChatSession {
      * 必须是"她真正读到的" prompt；召回在 dryRun 网关里照常跑，去重判据
      * 因此同样成立。开关关闭 ⇒ 不传 ⇒ 0 个 section）。
      */
-    const buildBeliefSection = this.flags.beliefEnabled
+    const buildBeliefSection = (this.flags.beliefEnabled || this.flags.epistemicBeliefHumanEnabled)
       ? async (info: { selectedMemoryIds: readonly string[] }) =>
           buildBeliefContextSection(this.runtime, {
             characterId: this.ids.characterId,
             activeUserId: this.ids.userId,
             selectedMemoryIds: info.selectedMemoryIds,
+            ...(this.flags.epistemicBeliefHumanEnabled ? { epistemicHuman: {} } : {}),
           })
       : undefined
     const recentLines = await recentContextLinesFrom(this.runtime, {
@@ -7095,7 +7257,7 @@ async function runCoexistenceHost(input: {
         channels: reminderRuntimeChannels,
         registry: channel => reminderDeliveryChannel(kernel.stores.db, channel),
         /* ★ S3 ③ 缺口 B：同上（coexist 路径）；`undefined` ⇒ 0 = 从没入站过 */
-        lastInboundAt: async () => (await lastInboundAt(kernel.stores.db, kernel.characterId)) ?? 0,
+        lastInboundAt: async intent => (await lastInboundAt(kernel.stores.db, kernel.characterId, intent?.conversationRef)) ?? 0,
         /* ★ S3 ③：同上（coexist 路径）；暂停读数与关心机会预检同源 */
         paused: async () => (await readControl(kernel.stores.db, kernel.characterId))?.paused === true,
         /* ★ 续发间隔：同上（coexist 路径） */

@@ -23,7 +23,7 @@ export function createReminderScheduling(input: {
    * ⚠️ 缺席（`undefined`）= **判不了** ⇒ 调用方按既有行为办（不续发）。
    *    与其它读数的三态纪律一致：**缺席绝不等于"没有回复"**。
    */
-  lastInboundAt?: () => Promise<number>
+  lastInboundAt?: (intent?: NotificationIntentRecord) => Promise<number>
   /*
    * ★ S3 ③（ADR-129 D05）：**停机/暂停优先于重复** —— 暂停状态的读数口。
    *
@@ -65,7 +65,7 @@ export function createReminderScheduling(input: {
           due.push({ occurrenceKey: baseKey, dueAt: intent.scheduledAt })
           continue
         }
-        const { occurrence, count } = await latestOccurrenceForIntent(input.db, intent.id)
+        const { occurrence, count, lastDeliveredAt } = await latestOccurrenceForIntent(input.db, intent.id)
         if (occurrence === undefined) {
           /* 第一条还没发过 ⇒ 仍按原排期 */
           if (attempted.has(baseKey)) continue
@@ -73,7 +73,12 @@ export function createReminderScheduling(input: {
           due.push({ occurrenceKey: baseKey, dueAt: intent.scheduledAt })
           continue
         }
-        const lastInbound = (await input.lastInboundAt?.()) ?? 0
+        const lastInbound = (await input.lastInboundAt?.(intent)) ?? 0
+        if (lastDeliveredAt !== undefined && lastInbound > lastDeliveredAt) {
+          await finishIntent(input.db, intent.id, 'delivered')
+          input.reading({ intentId: intent.id, code: 'reminder_confirmed_by_message' })
+          continue
+        }
         const armed = nextRepeatOccurrence({
           intentId: String(intent.id), planVersion: intent.planVersion, mode: intent.repeatMode,
           attempt: count, deliveredAt: occurrence.dueAt,
@@ -110,6 +115,15 @@ export function createReminderScheduling(input: {
       if (!cached) return
       const intent = await getIntent(input.db, cached.id)
       if (!intent || intent.status !== 'pending' || intent.planVersion !== cached.planVersion) return
+      // The owner may have replied after this timer was armed. Recheck before reserving/sending.
+      if (intent.repeatMode === 'until_reply') {
+        const { lastDeliveredAt } = await latestOccurrenceForIntent(input.db, intent.id)
+        if (lastDeliveredAt !== undefined && ((await input.lastInboundAt?.(intent)) ?? 0) > lastDeliveredAt) {
+          await finishIntent(input.db, intent.id, 'delivered')
+          input.reading({ intentId: intent.id, code: 'reminder_confirmed_by_message' })
+          return
+        }
+      }
       const registry = input.registry(intent.deliveryChannel)
       const decision = decideReminderDue({ dueAt: intent.scheduledAt, now: Date.now() })
       if (decision.action === 'expire') {

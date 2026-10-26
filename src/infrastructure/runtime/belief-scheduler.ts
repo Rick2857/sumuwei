@@ -468,6 +468,7 @@ export async function recoverBeliefCutoverWatermark(
 // ---------------------------------------------------------------------------
 
 export type BeliefSchedulerOutcome =
+  | { kind: 'retired'; watermark: number; latest: number }
   | { kind: 'no_tail'; watermark: number; latest: number }
   | {
       kind: 'flushed'
@@ -494,6 +495,8 @@ export async function maybeRunBeliefEvaluation(
     characterId: CharacterId | string
     /** 唯一 active user（资格四条之一；也是 v1 信念主体） */
     activeUserId: string
+    /** EBL owns this slot: retain origin/reported, execute no legacy inferred jobs. */
+    retireExplanationInference?: boolean
     activationId?: string
     now?: number
   },
@@ -536,6 +539,7 @@ export async function maybeRunBeliefEvaluation(
   )
   const watermark = watermarkRow?.processedThroughSequence ?? 0
   const latest = await latestCharacterEventSequence(db, characterId)
+  if (input.retireExplanationInference) return { kind: 'retired', watermark, latest }
   if (latest <= watermark) {
     return { kind: 'no_tail', watermark, latest }
   }
@@ -769,6 +773,7 @@ export async function maybeRunBeliefMemoryReconciliation(
 // ---------------------------------------------------------------------------
 
 export function describeBeliefScheduling(outcome: BeliefSchedulerOutcome): string {
+  if (outcome.kind === 'retired') return '旧讲解推断生成已停用；保留 origin、明确陈述与历史证据'
   if (outcome.kind === 'no_tail') {
     return `无尾窗（水位 ${String(outcome.watermark)} = 账本 ${String(outcome.latest)}）`
   }

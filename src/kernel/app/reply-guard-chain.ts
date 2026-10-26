@@ -27,7 +27,7 @@
  */
 
 import { KernelError } from '../contracts/ids.ts'
-import { truthfulReminderReply, reminderReplyConfirmsChannel, reminderReplyChangesChannel, type ReminderTurnResult } from './reminder-turn.ts'
+import { truthfulReminderReply, reminderPlanReplyMatches, reminderReplyConfirmsChannel, reminderReplyChangesChannel, claimsUnexecutedReminder, UNEXECUTED_REMINDER_REPLY, type ReminderTurnResult } from './reminder-turn.ts'
 import type { ReplyGuardReport } from '../contracts/reply-guard.ts'
 import type { ExternalEvidenceTurnReality } from '../contracts/external-evidence.ts'
 import type { ExplicitMemoryTurnResult } from './memory/explicit-turn.ts'
@@ -203,11 +203,16 @@ export function runReplyGuardChain(input: ReplyGuardChainInput): ReplyGuardChain
   if (settlement.corrected) commitmentTruth = { ...commitmentTruth, corrected: true, replyText: settlement.replyText,
     markers: [...commitmentTruth.markers, 'settlement_reconfirmation'] }
   let checkedRecordText = commitmentTruth.replyText
+  if (reminder?.kind === 'none' && claimsUnexecutedReminder(checkedRecordText)) {
+    checkedRecordText = UNEXECUTED_REMINDER_REPLY
+    reminderCorrected = true
+  }
   if (reminder !== undefined && reminder.kind !== 'none') {
     const success = 'text' in reminder
     // 通知结果优先于泛化的“没写记录”；正文仍允许角色自然措辞。
-    if ((!success && (input.partialReply !== true || /已设置|记下了|记这条|已经|说清|没.*交代|再说一遍/u.test(commitmentTruth.replyText)))
-      || /没(?:真)?记|没有.*记录|再说一遍|提醒什么|说清|默认.*哪|没有.*提醒能力|已经(?:发送|发消息)|发了.{0,8}消息/u.test(commitmentTruth.replyText)
+    if ((reminder.kind === 'planned' && input.partialReply !== true && !reminderPlanReplyMatches(reminder, commitmentTruth.replyText))
+      || (!success && reminder.kind !== 'planned' && (claimsUnexecutedReminder(commitmentTruth.replyText) || /已(?:经)?设置|记下了|记这条|已取消|取消了|已改期|改好了/u.test(commitmentTruth.replyText)))
+      || /没(?:真)?记|没找到.*记忆|没有.*记录|再说一遍|提醒什么|说清|默认.*哪|没有.*提醒能力|已经(?:发送|发消息)|发了.{0,8}消息/u.test(commitmentTruth.replyText)
       || (success && (reminderReplyChangesChannel(reminder, commitmentTruth.replyText)
         || (input.partialReply !== true && (!reminderReplyConfirmsChannel(reminder, commitmentTruth.replyText)
           || !commitmentTruth.replyText.includes(reminder.text.replace(/^记得/u, '').replace(/[。！!？?]$/u, ''))))))) {
@@ -265,7 +270,7 @@ export function runReplyGuardChain(input: ReplyGuardChainInput): ReplyGuardChain
 
   return {
     replyText: needReply.replyText,
-    ...(reminder !== undefined && reminder.kind !== 'none' ? { reminder: { corrected: reminderCorrected, outcome: reminder.kind } } : {}),
+    ...(reminder !== undefined && (reminder.kind !== 'none' || reminderCorrected) ? { reminder: { corrected: reminderCorrected, outcome: reminder.kind } } : {}),
     reports: buildGuardReports({
       memoryTruthCorrected: memoryTruth.corrected,
       memoryMarkers: memoryTruth.markers,

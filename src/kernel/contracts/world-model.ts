@@ -38,8 +38,7 @@ export const WORLD_MODEL_CONTRACT_VERSION = 'world-model-contract@1'
 /**
  * 领域闭集。
  *
- * ⚠️ `story` **不在**这里：S8 方向已于 2026-10-20 取消（ADR-147）。
- *    加它回来 = 让一个已退役的方向看起来还有落点。
+ * 此契约限定工具任务和反思；可选故事功能使用独立契约。
  */
 export const WORLD_MODEL_DOMAINS = ['tool_task', 'reflection'] as const
 export type WorldModelDomain = (typeof WORLD_MODEL_DOMAINS)[number]
@@ -282,6 +281,16 @@ export const ACTION_FORECAST_CHECK_KINDS = [
   'effect_recorded',              // 适配器自报了效果
   'turn_content_count_at_least',  // 当轮内容份数 ≥ N（读回）
   'external_evidence_count_at_least', // 外部证据条数 ≥ N
+  /*
+   * ⚠️ 2026-10-21 新增（认知能力建设计划 P2 第 3 步）：效果指纹与预期相等。
+   *
+   *    为什么需要它：世界模型的**受限转移**给出的预期是"读回来的字节与写进去的一样"，
+   *    而上面的闭集里**没有**能表达这一条的谓词（`effect_recorded` 只说"有效果"）。
+   *    ⇒ 不加它，世界模型的预期就**进不了**任务环的核对链（只会被记成一个计数）。
+   *
+   *    它是**闭集谓词**（程序判定），不是一句自然语言。
+   */
+  'effect_fingerprint_matches',
 ] as const
 export type ActionForecastCheckKind = (typeof ACTION_FORECAST_CHECK_KINDS)[number]
 
@@ -291,6 +300,8 @@ export type ActionForecastCheck =
   | { readonly kind: 'effect_recorded' }
   | { readonly kind: 'turn_content_count_at_least'; readonly count: number }
   | { readonly kind: 'external_evidence_count_at_least'; readonly count: number }
+  /** 效果的**内容指纹**与预期相等（世界模型的"写进去＝读回来"） */
+  | { readonly kind: 'effect_fingerprint_matches'; readonly expectedFingerprint: string }
 
 /** 核对条件里允许出现的**状态**闭集（与 `ACTION_STATUSES` 同形，避免跨层 import 环）。 */
 export const ACTION_FORECAST_STATUSES: readonly ActionStatus[] = [
@@ -324,6 +335,30 @@ export interface ActionForecastStep {
    *    这就是"核对失败时停止沿用依赖该结果的后续步骤"。
    */
   readonly dependsOn: readonly number[]
+  /**
+   * **规范化参数与目标绑定摘要**（2026-10-21 新增 · 计划 P2 第 3 步）。
+   *
+   * ⚠️ 为什么需要它：「同能力不同对象」必须**错得开**。
+   *    只比"能力.操作"的话，两个不同的参数会被当成同一件事。
+   *    ⇒ 摘要把"这次预测绑定的是哪一组参数"记下来，比较结论据此归因。
+   */
+  readonly parameterBindingDigest?: string
+  /**
+   * **规则依赖**（命题 id 列表；2026-10-21 新增）。
+   *
+   * ⚠️ 这是"被反驳时**是哪条规则**"的归属材料（计划 §4 的接线契约要求它）。
+   */
+  readonly ruleDependencies?: readonly {
+    readonly claimId: string
+    readonly ruleVersion: string
+    readonly evidenceFingerprint: string
+  }[]
+  /**
+   * **规则版本**（被反驳时要指名的那个；2026-10-21 新增）。
+   *
+   * ⚠️ 没有它，比较结论只能说"某条规则被反驳了"，说不出"**哪一版**"。
+   */
+  readonly ruleVersion?: string
 }
 
 export interface ActionForecast {
@@ -331,6 +366,15 @@ export interface ActionForecast {
   readonly producedAt: number
   /** 输入的 revision（**引用**；比较结论要能回答"比的是哪一版输入"） */
   readonly inputRevision: string
+  /**
+   * **模型版本**（2026-10-21 新增）。
+   *
+   * ⚠️ 计划 §4 的接线契约要求它：「比的是哪一版**模型**」。
+   *    没有它，一次"被反驳"归不到模型头上 ⇒ 收益与责任都算不清。
+   */
+  readonly modelVersion?: string
+  /** 本次预测消耗的**预算单位**（2026-10-21 新增；计划 §4 的接线契约要求它） */
+  readonly budgetCost?: number
   readonly steps: readonly ActionForecastStep[]
   /** Explicit positions when malformed or missing entries have been omitted. */
   readonly planStepIndices?: readonly number[]
@@ -343,9 +387,13 @@ export const ACTION_FORECAST_STEP_FIELDS: readonly string[] = [
   'check',
   'uncertainty',
   'dependsOn',
+  // 2026-10-21 新增（计划 P2 第 3 步）：绑定材料
+  'parameterBindingDigest',
+  'ruleDependencies',
+  'ruleVersion',
 ]
 
-export const ACTION_FORECAST_CHECK_FIELDS: readonly string[] = ['kind', 'status', 'count']
+export const ACTION_FORECAST_CHECK_FIELDS: readonly string[] = ['kind', 'status', 'count', 'expectedFingerprint']
 
 /** 预测里"预期可见结果"与"解释"的码点上界。 */
 export const FORECAST_TEXT_MAX_CODEPOINTS = 300
@@ -358,7 +406,9 @@ export function validateActionForecastCheck(value: unknown): ActionForecastCheck
   const kind = raw.kind
   const allowed = kind === 'status_is' ? ['kind', 'status']
     : kind === 'turn_content_count_at_least' || kind === 'external_evidence_count_at_least'
-      ? ['kind', 'count'] : ['kind']
+      ? ['kind', 'count']
+      : kind === 'effect_fingerprint_matches'
+        ? ['kind', 'expectedFingerprint'] : ['kind']
   if (Object.keys(raw).some(key => !allowed.includes(key))) {
     throw new KernelError('validation_error', 'action_forecast_step_unknown_field', '核对条件含未知字段')
   }
@@ -374,6 +424,13 @@ export function validateActionForecastCheck(value: unknown): ActionForecastCheck
   }
   if (kind === 'no_error' || kind === 'effect_recorded') {
     return { kind }
+  }
+  if (kind === 'effect_fingerprint_matches') {
+    const expectedFingerprint = raw.expectedFingerprint
+    if (typeof expectedFingerprint !== 'string' || expectedFingerprint.trim() === '') {
+      throw new KernelError('validation_error', 'action_forecast_step_check_bad_fingerprint', '核对条件的 expectedFingerprint 必须是非空字符串')
+    }
+    return { kind, expectedFingerprint }
   }
   const count = raw.count
   if (typeof count !== 'number' || !Number.isInteger(count) || count < 0 || count > 1000) {
@@ -436,6 +493,42 @@ export function validateActionForecastStep(
     }
     if (!dependsOn.includes(item)) dependsOn.push(item)
   }
+  /*
+   * ⚠️ 绑定材料（2026-10-21 新增）：**可选**，但给了就要**合法**
+   *    （空串 / 非字符串数组 ⇒ 拒收）。
+   */
+  const parameterBindingDigest = raw.parameterBindingDigest
+  if (parameterBindingDigest !== undefined && (typeof parameterBindingDigest !== 'string' || parameterBindingDigest.trim() === '')) {
+    throw new KernelError('validation_error', 'action_forecast_step_bad_binding', 'parameterBindingDigest 必须是非空字符串')
+  }
+  const ruleVersion = raw.ruleVersion
+  if (ruleVersion !== undefined && (typeof ruleVersion !== 'string' || ruleVersion.trim() === '')) {
+    throw new KernelError('validation_error', 'action_forecast_step_bad_binding', 'ruleVersion 必须是非空字符串')
+  }
+  const ruleDependenciesRaw = raw.ruleDependencies
+  const ruleDependencies: Array<{ claimId: string; ruleVersion: string; evidenceFingerprint: string }> = []
+  if (ruleDependenciesRaw !== undefined) {
+    if (!Array.isArray(ruleDependenciesRaw)) {
+      throw new KernelError('validation_error', 'action_forecast_step_bad_binding', 'ruleDependencies 必须是数组')
+    }
+    for (const item of ruleDependenciesRaw) {
+      if (item === null || typeof item !== 'object' || Array.isArray(item)) {
+        throw new KernelError('validation_error', 'action_forecast_step_bad_binding', 'ruleDependencies 的每一项必须是对象')
+      }
+      const rawDependency = item as Record<string, unknown>
+      for (const key of ['claimId', 'ruleVersion', 'evidenceFingerprint']) {
+        if (typeof rawDependency[key] !== 'string' || String(rawDependency[key]).trim() === '') {
+          throw new KernelError('validation_error', 'action_forecast_step_bad_binding', `ruleDependencies 的每一项都必须带非空的 ${key}`)
+        }
+      }
+      const dependency = {
+        claimId: String(rawDependency.claimId),
+        ruleVersion: String(rawDependency.ruleVersion),
+        evidenceFingerprint: String(rawDependency.evidenceFingerprint),
+      }
+      if (!ruleDependencies.some(existing => existing.claimId === dependency.claimId)) ruleDependencies.push(dependency)
+    }
+  }
   return {
     capability,
     operation,
@@ -443,6 +536,9 @@ export function validateActionForecastStep(
     check: validateActionForecastCheck(raw.check),
     uncertainty: uncertainty as WorldModelUncertainty,
     dependsOn,
+    ...(parameterBindingDigest === undefined ? {} : { parameterBindingDigest }),
+    ...(ruleVersion === undefined ? {} : { ruleVersion }),
+    ...(ruleDependencies.length === 0 ? {} : { ruleDependencies }),
   }
 }
 

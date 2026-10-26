@@ -36,6 +36,7 @@ import { createExternalEvidenceCapabilityDefinitions } from '../../src/kernel/ac
 import { createUtilityCapabilityDefinitions } from '../../src/kernel/action/utility-capabilities.ts'
 import { createLocalFileCapabilityDefinitions } from '../../src/kernel/action/local-file-capabilities.ts'
 import { createWeatherCapabilityDefinitions } from '../../src/kernel/action/weather-capability.ts'
+import { createXidianCapabilityDefinitions } from '../../src/kernel/action/xidian-capability.ts'
 import { createOfficeCapabilityDefinitions } from '../../src/kernel/action/office-capability.ts'
 import { createNewsCapabilityDefinitions } from '../../src/kernel/action/news-capability.ts'
 import { createBrowserCapabilityDefinitions } from '../../src/kernel/action/browser-capability.ts'
@@ -203,6 +204,7 @@ async function main(): Promise<number> {
     ...createUtilityCapabilityDefinitions(),
     ...createLocalFileCapabilityDefinitions(),
     ...createWeatherCapabilityDefinitions(),
+    ...createXidianCapabilityDefinitions(),
     ...createOfficeCapabilityDefinitions(),
     ...createNewsCapabilityDefinitions(),
     ...createBrowserCapabilityDefinitions(),

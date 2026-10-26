@@ -54,17 +54,16 @@ assert.equal(batch.kind, 'planned'); assert.equal(writes.length, 2)
 assert.equal(pending[0]!.dueAt, Date.parse('2026-10-20T08:55:00+08:00'))
 assert.equal(pending[1]!.dueAt, Date.parse('2026-10-21T14:55:00+08:00'))
 assert.equal((await call()).kind, 'planned'); assert.equal(writes.length, 2, '重复提案不得重复创建')
-assert.match(runReplyGuardChain({ replyText: '已经全部发送了。', reminderResult: batch }).replyText, /新增2条/u)
+assert.match(runReplyGuardChain({ replyText: '已经全部发送了。', reminderResult: batch }).replyText, /英语课签到.*已设置[\s\S]*准备开会.*已设置/u)
 measured += 6
 resolution = { ok: true, draft: { kind: 'batch', items: [
   { operation: 'create', sourceId: 'table', timeText: '2026年10月20日 09:00', leadMinutes: 5, text: '另一个提醒' },
   { operation: 'create', sourceId: 'forged', timeText: '2026年10月21日 15:00', leadMinutes: 5, text: '注入' },
 ] } }
 assert.equal((await call()).kind, 'clarify'); assert.equal(writes.length, 2, '先校验整批，伪造来源不能导致前半批写入'); measured++
-resolution = { ok: true, draft: { kind: 'batch', items: [{ operation: 'create', sourceId: 'table', timeText: '2026年10月22日 12:00', leadMinutes: 5, text: '编造日期' }] } }
-assert.equal((await call()).kind, 'refused'); assert.equal(writes.length, 2); measured++
-resolution = { ok: true, draft: { kind: 'batch', items: [{ operation: 'create', sourceId: 'table', timeText: '2026年10月20日 09:00', text: '漏减五分钟' }] } }
-assert.equal((await call()).kind, 'clarify'); measured++
+resolution = { ok: true, draft: { kind: 'batch', items: [{ operation: 'create', sourceId: 'table', timeText: '2026年13月22日 12:00', leadMinutes: 5, text: '无效日期' }] } }
+assert.equal((await call()).kind, 'clarify'); assert.equal(writes.length, 2); measured++
+assert.ok(readReminderDraft({ kind: 'batch', items: [{ operation: 'create', sourceId: 'table', timeText: '2026年10月20日 09:00', text: '准时提醒' }] }), '省略提前量仍是合法的准时提醒'); measured++
 resolution = { ok: true, draft: { kind: 'batch', items: [{ operation: 'reschedule', targetIntentId: pending[0]!.id, sourceId: 'table', timeText: '2026年10月21日 15:00' }] } }
 assert.equal((await call('把英语课提醒改到2026年10月21日15:00')).kind, 'planned')
 assert.equal(pending[0]!.dueAt, Date.parse('2026-10-21T15:00:00+08:00')); measured++
@@ -76,6 +75,7 @@ resolution = { ok: true, draft: { kind: 'batch', items: pending.map(row => ({ op
 assert.equal((await call('取消这两条提醒')).kind, 'planned'); assert.equal(pending.length, 0); measured++
 resolution = { ok: true, draft }
 assert.equal((await call(current.text, false)).kind, 'refused'); measured++
+resolution = { ok: true, draft: { kind: 'none' } }
 assert.equal((await call('这是一张课表')).kind, 'none'); measured++
 const invalid = { kind: 'batch', items: [{ operation: 'create', sourceId: 'table', timeText: '09:00', text: '签到', dueAt: now }] }
 assert.equal(readReminderDraft(invalid), undefined); measured++
@@ -89,27 +89,29 @@ await call()
 const namedCount = writes.length
 resolution = { ok: true, draft: { kind: 'batch', items: [{ operation: 'create', sourceId: 'table', eventText: '英语',
   dateText: '2026年10月20日', timeText: '09:00', leadMinutes: 5, text: '请记得签到。' }] } }
-assert.match((await call() as { message: string }).message, /新增0条，已有1条/u)
+const namedExisting = await call()
+assert.ok(namedExisting.kind === 'planned' && namedExisting.items[0]?.status === 'existing')
 assert.equal(writes.length, namedCount, '事件名称相同而提醒措辞不同仍去重'); measured++
 resolution = { ok: true, draft: { kind: 'batch', items: [{ operation: 'confirm', targetIntentId: pending[0]!.id, text: '模型改写不应落库' }] } }
 const savedText = pending[0]!.text
-assert.match((await call() as { message: string }).message, /新增0条，已有1条/u)
+assert.match((await call() as { message: string }).message, /已存在/u)
 assert.equal(pending[0]!.text, savedText); measured++
 assert.equal(readReminderDraft({ kind: 'batch', items: [{ operation: 'confirm', targetIntentId: pending[0]!.id, text: {} }] }), undefined); measured++
 resolution = { ok: true, draft: { kind: 'batch', items: [{ operation: 'create', sourceId: 'partial',
   dateText: '2026年10月20日', timeText: '09:00', leadMinutes: 5, text: '不完整资料' }] } }
-assert.equal((await call(current.text, true, [{ ...source, id: 'partial', truncated: true }])).kind, 'clarify')
-assert.equal(writes.length, namedCount); measured++
-resolution = { ok: true, draft: { kind: 'batch', items: [{ operation: 'create', sourceId: 'clock-only', timeText: '09:00', leadMinutes: 5, text: '缺日期' }] } }
-assert.equal((await call(current.text, true, [{ ...source, id: 'clock-only', text: '09:00 英语' }])).kind, 'clarify'); measured++
+assert.equal((await call(current.text, true, [{ ...source, id: 'partial', truncated: true }])).kind, 'planned')
+assert.equal(writes.length, namedCount + 1, 'model may use sufficient visible material'); measured++
+resolution = { ok: true, draft: { kind: 'batch', items: [{ operation: 'create', sourceId: 'clock-only', dateText: '2026年10月14日', timeText: '09:00', leadMinutes: 5, text: '已过事件' }] } }
+const pastClock = await call(current.text, true, [{ ...source, id: 'clock-only', text: '09:00 英语' }])
+assert.ok(pastClock.kind === 'planned' && pastClock.items[0]?.status === 'skipped', 'past model time must not become immediate catch-up'); measured++
 resolution = { ok: true, draft }
 let attempts = 0
 const partial = await runReminderTurn({ current, recent: [source], pending: [], now, enabled: true, entry: 'qq_private', availableChannels: ['qq_private'] }, {
   ...ports, create: async input => { attempts++; if (attempts === 2) throw new Error('fixture failure'); return { ...input, id: 'partial-written', created: true } },
 })
 assert.equal(attempts, 2)
-assert.match((partial as { message: string }).message, /新增1条.*失败1条/u)
-assert.match(runReplyGuardChain({ replyText: '全部成功。', reminderResult: partial }).replyText, /失败1条/u); measured++
+assert.ok(partial.kind === 'planned' && partial.items[0]?.status === 'created' && partial.items[1]?.status === 'failed')
+assert.match(runReplyGuardChain({ replyText: '全部成功。', reminderResult: partial }).replyText, /未处理成功/u); measured++
 
 let transmitted: Record<string, any> = {}
 const resolver = createOpenAiReminderResolver({ env: { OPENAI_API_KEY: 'fixture', OPENAI_SMALL_MODEL: 'small', OPENAI_LARGE_MODEL: 'vision' },

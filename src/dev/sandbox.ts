@@ -139,13 +139,34 @@ export function isolateDatabase(
   // -------------------------------------------------------------------------
   const resolution = resolveDatabaseBackend(databaseBackendEnvironmentFrom())
   if (resolution.backend === 'postgres') {
+    /*
+     * ========================================================================
+     *  显式测试目标的两个来源（S-2，2026-10-20）
+     * ========================================================================
+     *  ① 调用处给：`isolateDatabase(label, { postgres: { url } })`（首选，最显式）
+     *  ② 环境里给：`LG_TEST_PG_URL` —— 由
+     *     `scripts/postgresql/test-harness.ts` 的 `runPreparedPgGate` 注入
+     *     （它起一次性容器 + `lg_test_<id>` 库 + 装三个扩展 + 准备阶段显式应用 LG 迁移）
+     *
+     *  ⚠️ 为什么允许 ②：门的底座**已经不是 PGlite** —— 迁移 #10 的
+     *     `embedding vector(384)` 需要 pgvector，PGlite 没有（也没有 shim），
+     *     所以"无 .env + pglite"那条老跑法自 M10 起不可执行。
+     *     若逐门改 17 个文件去传 ①，改动面与出错面都远大于"在这里读一个环境变量"。
+     *
+     *  ⚠️ **失败关闭没有放松**：② 给的 URL 仍要过 `postgresIsolationDecision()`
+     *     的同一套三道判据（可解析 / ≠ 生产目标 / 库名带 `lg_test_` 前缀）；
+     *     两处都没给 ⇒ 仍然抛 `postgres_isolation_not_provided`。
+     */
+    const explicitTarget = options.postgres?.url
+    const envTarget = (process.env.LG_TEST_PG_URL ?? '').trim()
+    const target = explicitTarget !== undefined ? explicitTarget : (envTarget === '' ? undefined : envTarget)
     const decision = postgresIsolationDecision({
-      postgresUrl: options.postgres?.url,
+      postgresUrl: target,
       productionTarget: process.env.LG_PRODUCTION_POSTGRES_URL,
       testDatabasePrefix: process.env.LG_TEST_DATABASE_PREFIX,
     })
     if (!decision.allowed) {
-      const url = options.postgres?.url
+      const url = target
       throw new KernelError(
         'persistence_error',
         decision.denial ?? 'postgres_isolation_not_provided',
@@ -158,7 +179,7 @@ export function isolateDatabase(
       )
     }
 
-    const url = options.postgres!.url
+    const url = target!
     process.env.POSTGRES_URL = url
     process.env.PROJECT_LG_SANDBOX = dir // 审计标记：仍设，但**不**再是"隔离已成立"的依据
 

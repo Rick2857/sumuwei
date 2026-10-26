@@ -122,8 +122,37 @@ export function shouldBlockForPendingKernelMigration(input: {
   return isProductionDir(input.dataDir)
 }
 
-/** 待应用迁移的错误（带上待办清单与显式迁移命令，好让人知道下一步做什么） */
-function pendingMigrationError(pending: { version: number; name: string; statements: number }[]): KernelError {
+/**
+ * 本次打开的是不是**一次性 PGlite 沙箱**（`PROJECT_LG_SANDBOX` 与数据目录逐字相同）。
+ *
+ * ============================================================================
+ *  为什么要有它（S-1，2026-10-20）
+ * ============================================================================
+ *  薄宿主对 `runPluginMigrations()` 失败关闭，而 `initDatabase()` 原本在
+ *  "六张基础表缺失"时**无条件**调它 ⇒ **空沙箱上的门一个都起不来**
+ *  （实测：`verify-phasecert` 一类的门在 `isolateDatabase()` 之后立刻撞上
+ *  `thin_host_refuses_startup_ddl`）。
+ *
+ *  ⇒ 沙箱先跑**版本化迁移**（迁移 0023 已覆盖那六张表），再判缺不缺表。
+ *    这张"通行证"只发给一次性沙箱，真实库路径不变。
+ *
+ *  ⚠️ 判据与 `assertDatabaseAccessAllowed`（本文件 239-249 行）**逐字同源**：
+ *    两处对"沙箱"的定义一旦分叉，就会出现"这里放行、那里拦截"的分裂，
+ *    而这类分裂最难审计。**改一处必须改另一处**。
+ *
+ * @returns 沙箱目录（供日志用）；不是沙箱 ⇒ `undefined`（调用方必须当成"不放行"）
+ */
+export function oneShotPgliteSandboxDir(dataDir: string | undefined): string | undefined {
+  if (dataDir === undefined) return undefined
+  // 生产目录永远不是沙箱 —— 即便有人把 PROJECT_LG_SANDBOX 指过去
+  if (isProductionDir(dataDir)) return undefined
+  const sandbox = process.env.PROJECT_LG_SANDBOX
+  if (sandbox === undefined || sandbox.trim() === '') return undefined
+  // 必须逐字相同：只设了变量但指向别处 ⇒ 不算沙箱
+  return resolve(sandbox) === resolve(dataDir) ? sandbox : undefined
+}
+
+/** 待应用迁移的错误（带上待办清单与显式迁移命令，好让人知道下一步做什么） */function pendingMigrationError(pending: { version: number; name: string; statements: number }[]): KernelError {
   return new KernelError(
     'validation_error',
     'kernel_migration_pending',
@@ -564,11 +593,61 @@ async function initDatabaseInner(
       : { fromVersion: await currentSchemaVersion(kernelDbEarly), toVersion: await currentSchemaVersion(kernelDbEarly), applied: [], skipped: 0 }
   }
 
+  /*
+   * ==========================================================================
+   *  S-1（2026-10-20）：**一次性 PGlite 沙箱**先把版本化迁移跑完，再判"缺不缺表"
+   * ==========================================================================
+   *
+   *  被修的问题：薄宿主对 `runPluginMigrations()` **失败关闭**
+   *  （`thin_host_refuses_startup_ddl`），而旧代码在"六张基础表缺失"时**无条件**
+   *  调它 ⇒ **空沙箱上的门一个都起不来**（实测：`verify-phase-c.ts` 在
+   *  `isolateDatabase()` 之后立刻撞上它）。这与数据库后端无关：PGlite 沙箱会撞、
+   *  换 PG 也一样要面对"谁来建表"。
+   *
+   *  为什么这样改是**安全**的（三条判据，缺一条都不许放行）：
+   *   ① 通行证只发给"**一次性沙箱**"：`PROJECT_LG_SANDBOX` 必须与数据目录**逐字相同**，
+   *      且数据目录**不是**生产目录 —— 与 `assertDatabaseAccessAllowed`（本文件 239-249 行）
+   *      **同一套条件**，不另立一套；
+   *   ② **真实库路径一个字都没改**：它仍然落到下面的 `else` 分支调
+   *      `runPluginMigrations()`，在薄宿主上照样失败关闭；
+   *   ③ 建表走的是**版本化迁移**，不是"启动时随手 CREATE"：迁移 0023
+   *      `lg-runtime-compatibility-tables` 已完整覆盖 agents / entities / memories /
+   *      participants / rooms / worlds（实测记录见 `migrations.ts:1984-2005`）。
+   *
+   *  ⚠️ 负控（必须成立、必须能被跑出来）：拿掉 `PROJECT_LG_SANDBOX`、或把数据目录
+   *     指到真实库 ⇒ `oneShotPgliteSandboxDir()` 返回 undefined ⇒ 不走这条支路。
+   */
+  const sandboxDataDir = oneShotPgliteSandboxDir(process.env.PGLITE_DATA_DIR)
+  let migration = postgresMigration
+  if (migration === undefined) {
+    const pendingKernel = await pendingMigrations(kernelDbEarly)
+    if (
+      shouldBlockForPendingKernelMigration({
+        dataDir: process.env.PGLITE_DATA_DIR,
+        pendingCount: pendingKernel.length,
+        migrationAllowed: kernelMigrationAllowed(),
+        backend: resolution.backend,
+      })
+    ) {
+      throw pendingMigrationError(pendingKernel)
+    }
+    migration = await applyKernelMigrations(kernelDbEarly)
+  }
+  if (migration.applied.length > 0) {
+    logger.info(
+      `[kernel] schema 迁移 ${migration.fromVersion} → ${migration.toVersion}：` +
+        migration.applied.map((m) => `#${m.version} ${m.name}`).join(', ')
+    )
+  }
+
   if (resolution.backend === 'postgres' || missingBefore.length === 0) {
     logger.info(
       `[db] schema 已就绪（${tablesBefore.length} 张表，plugin 表齐全）→ 跳过启动 DDL` +
         `（schema 变更请走显式维护入口）`
     )
+  } else if (sandboxDataDir !== undefined) {
+    // S-1：一次性沙箱的六张基础表已由**版本化迁移**建好 ⇒ 不调 runPluginMigrations()
+    logger.info(`[db] 一次性沙箱（${sandboxDataDir}）：基础表由版本化迁移建立 → 跳过启动 DDL`)
   } else {
     // 缺表：保留原有的建表路径，逐字不变。
     await runtime.runPluginMigrations()
@@ -587,36 +666,12 @@ async function initDatabaseInner(
 
   logger.info(`数据库就绪: ${adapterName}，共 ${tables.length} 张表`)
 
-  // -------------------------------------------------------------------------
-  // Character Kernel schema（M2.5 + M3）
-  // -------------------------------------------------------------------------
-  // 走版本化迁移（plan 第 60 节：禁止启动时随意 CREATE / ALTER）。
-  // 放在这里而不是 main.ts，是为了让**所有**入口都得到同一个 schema：
-  // 主程序、诊断脚本、测试脚本都经由 initDatabase()。
-  //
-  // ⚠️ 但"跑不跑"由调用方显式决定：见 `allowKernelMigration()` 的说明。
-  //    临时/沙箱库不设防（它是一次性的）；**真实库**必须显式放行。
-  const kernelDb = kernelDbEarly
-  const pending = await pendingMigrations(kernelDb)
-
-  if (
-    shouldBlockForPendingKernelMigration({
-      dataDir: process.env.PGLITE_DATA_DIR,
-      pendingCount: pending.length,
-      migrationAllowed: kernelMigrationAllowed(),
-      backend: resolution.backend,
-    })
-  ) {
-    throw pendingMigrationError(pending)
-  }
-
-  const migration = postgresMigration ?? await applyKernelMigrations(kernelDb)
-  if (migration.applied.length > 0) {
-    logger.info(
-      `[kernel] schema 迁移 ${migration.fromVersion} → ${migration.toVersion}：` +
-        migration.applied.map((m) => `#${m.version} ${m.name}`).join(', ')
-    )
-  }
+  /*
+   * ⚠️ Character Kernel schema（M2.5 + M3）的**应用**已经挪到上面了
+   *    （见 `S-1` 那段注释）—— 原因：一次性 PGlite 沙箱必须在"判缺不缺表"
+   *    **之前**就让版本化迁移把六张基础表建出来，否则会走到
+   *    `runPluginMigrations()`（薄宿主失败关闭）。
+   */
 
   // -------------------------------------------------------------------------
   // 记下"本进程已打开过这个 PostgreSQL 目标"

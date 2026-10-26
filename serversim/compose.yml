@@ -1,0 +1,212 @@
+# ============================================================================
+#  服务器仿真环境 · 编排（2026-10-20）
+# ============================================================================
+#
+#  它扮演的角色：**服务器那台机器 + 那台机器上的三个容器**。
+#
+#  ---------------------------------------------------------------------------
+#  拓扑（与 serversim/server-spec.json 逐条对照）
+#  ---------------------------------------------------------------------------
+#    宿主机（本机 Windows）                     仿真"服务器主机"（simhost 容器）
+#    ┌────────────────────────────┐            ┌──────────────────────────────────┐
+#    │ 127.0.0.1:55433 ──────────┼───────────▶│ 127.0.0.1:55432  PostgreSQL 17  │
+#    │ 127.0.0.1:6702  ──────────┼───────────▶│ 127.0.0.1:6701   假 OneBot (WS) │
+#    │ 127.0.0.1:6102  ──────────┼───────────▶│ 127.0.0.1:6101   假 OneBot 控制 │
+#    │ 127.0.0.1:16175 ──────────┼───────────▶│ 127.0.0.1:16174  假微信桥       │
+#    │ 127.0.0.1:18080 ──────────┼───────────▶│ 127.0.0.1:18080  假模型端点     │
+#    │                            │            │                                  │
+#    │  lg-postgresql-production  │            │  LG 核心 + QQ 外壳               │
+#    │  lg-qq-private-napcat-1    │            │  （supervisor 形状的 systemd）    │
+#    │  ← 本机自己的生产容器，    │            │                                  │
+#    │    **仿真绝对不碰**        │            │                                  │
+#    └────────────────────────────┘            └──────────────────────────────────┘
+#
+#  ★ 关键设计：**地址同形由 simhost 里的环回转发器保证**，不靠命名空间共享。
+#    simhost 内跑 `serversim/forwarder.mjs`：
+#      127.0.0.1:55432 → pg:5432 · 127.0.0.1:6701 → onebot:6701 ·
+#      127.0.0.1:6101 → onebot:6101 · 127.0.0.1:16174 → wechat:16174 ·
+#      127.0.0.1:18080 → model:18080
+#    ⇒ 在 simhost 内部，核心看见的地址与服务器**逐字相同**
+#      （服务器上是"宿主机 55432 → 容器 5432"，这里也是 55432 → 5432）。
+#    ⇒ 宿主机侧用 55433/6702/6102/16175/18080 暴露，避开本机自己的生产容器
+#      （本机 lg-postgresql-production 占着 55432，NapCat 占着 6701/6101）。
+#
+#  ⚠️ **为什么不用 `network_mode: service:simhost`**（2026-10-20 实测）：
+#    在这台机器的 Docker Desktop 上它**没有**把 sidecar 放进 simhost 的
+#    网络命名空间 —— 三个 sidecar 抱团在另一个 netns，simhost 孤立，
+#    症状是"容器全绿但连不上"，极难诊断。详见 `serversim/forwarder.mjs` 头部。
+#
+#  ⚠️ **红线（10-14 事故的根因）**
+#    · 仿真用**自己的卷**（lg-serversim-pgdata），与任何生产卷**无共享挂载**。
+#    · 数据只走 pg_dump 逻辑转储，**绝不复制 PGDATA**。
+#    · 仿真库用**独立角色 lg_simu**（生产是 lg_migrate）⇒ 即使有人把生产库
+#      的地址填进仿真，核心的"库身份核对"也会在任何写入之前拒绝。
+# ============================================================================
+
+name: lg-serversim
+
+x-simhost-image: &simhost-image
+  build:
+    context: ..
+    dockerfile: serversim/Dockerfile
+  image: lg-serversim-host:2026-10-20
+
+services:
+  # ---------------------------------------------------------------------
+  #  仿真主机：扮演服务器本身（Node / Python / 仓库 / 核心 / 外壳）
+  # ---------------------------------------------------------------------
+  simhost:
+    <<: *simhost-image
+    container_name: lg-serversim-host
+    init: true
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+      NODE_ENV: production
+    ports:
+      - "127.0.0.1:55433:55432"   # PostgreSQL
+      - "127.0.0.1:6702:6701"     # 假 OneBot（OneBot v11 正向 WS）
+      - "127.0.0.1:6102:6101"     # 假 OneBot 控制面（注入消息 / 读回回复）
+      - "127.0.0.1:16175:16174"   # 假微信桥 API
+      - "127.0.0.1:18080:18080"   # 假模型端点
+    volumes:
+      # ⚠️ 只读挂载凭据：**不进镜像**。entrypoint 会复制进仓库根并 chmod 600。
+      - ../artifacts/serversim/local/env:/opt/serversim/env:ro
+      # 已有逻辑转储只读挂载，迁移门仅恢复到 pgtest 的新建库。
+      - ../artifacts/serversim/local/seed:/opt/serversim/seed:ro
+      # ⚠️ 遗留 PGlite 目录（**只读**）：启动保护要做 pre-open 快照校验，
+      #    源目录必须是一个**能打开、有 public 表、迁移版本连续**的真 PGlite 库
+      #    （production-db-safety.ts 的 runHealthProbe）。服务器上有这份遗留库，
+      #    仿真里也必须有，否则核心**如实拒绝启动**（source_missing）。
+      #    只读挂载：健康探针只在**一次性副本**上跑，源目录只被读取。
+      - ../data/pglite:/opt/project-lg/data/pglite:ro
+    command: ["/opt/serversim/entrypoint.sh"]
+    healthcheck:
+      # 判据 = ① supervisor 心跳新鲜（它同时证明"监督器活着"和"子进程在跑"）
+      #       ② 环回转发器的上游真的通（127.0.0.1:55432 → pg:5432）
+      # ⚠️ 第 ② 条是 2026-10-20 加的：netns 共享失败时，容器全绿但连不上，
+      #    症状只有一句 "Failed query" —— 极难诊断。让它在这里就红。
+      test: ["CMD-SHELL", "test -f /opt/serversim/state/heartbeat.json && [ $(( $(date +%s) - $(stat -c %Y /opt/serversim/state/heartbeat.json) )) -lt 30 ] && node -e \"const n=require('node:net');const s=n.connect(55432,'127.0.0.1');s.on('connect',()=>{s.destroy();process.exit(0)});s.on('error',()=>process.exit(1));setTimeout(()=>{s.destroy();process.exit(1)},2000)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+
+  # ---------------------------------------------------------------------
+  #  PostgreSQL 17 + pgvector —— 镜像 digest 与服务器**逐字相同**
+  # ---------------------------------------------------------------------
+  pg:
+    image: pgvector/pgvector@sha256:ac08538c6f8b9904c33c8224c5e5706dbe760aca29db1d096972b4052c22a75d
+    container_name: lg-serversim-postgresql
+    depends_on:
+      simhost:
+        condition: service_started
+    # ⚠️ 容器内仍用**自己的缺省 5432**（与服务器上的 PG 容器一样）；
+    #    "宿主机 55432" 这个地址由 simhost 的转发器提供。
+    environment:
+      # ⚠️ **bootstrap 超级用户**（生产是 lg_bootstrap 这一层）：
+      #    `vector` 不是 trusted 扩展 ⇒ 只有超级用户能装 ⇒ 由它建库时装。
+      #    应用用的库由 scripts/serversim/db-init.ts 按生产流程创建
+      #    （复用仓库的 010-roles.sql 与 create-production-db.sql）。
+      POSTGRES_USER: lg_bootstrap
+      POSTGRES_PASSWORD: lg_bootstrap_local_only
+      # ⚠️ 这只是**引导库**（生产对应 lg_trial）；应用库 sumuwei 由建库脚本创建。
+      POSTGRES_DB: lg_trial
+      # 四个应用账号的本地口令（**只在本机仿真里有效**）
+      LG_PG_MIGRATE_PASSWORD: lg_migrate_local_only
+      LG_PG_RUNTIME_PASSWORD: lg_runtime_local_only
+      LG_PG_READONLY_PASSWORD: lg_readonly_local_only
+      LG_PG_TEST_PASSWORD: lg_test_local_only
+      TZ: Asia/Shanghai
+    volumes:
+      - sim-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U lg_bootstrap -d lg_trial"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------
+  #  隔离测试库专用 PostgreSQL（2026-10-21 新增 · 认知能力建设计划 P0）
+  #
+  #  ⚠️ **它与核心在用的库是两个完全独立的实例**：
+  #    · 独立容器 · 独立卷（lg-serversim-pgtestdata）· 独立引导口令
+  #    · **不发布端口**到宿主机（只在 compose 网络内按服务名 `pgtest` 可达）
+  #    · 里面**只有**测试库（`lg_test_<id>`），**永远没有** `sumuwei`
+  #
+  #  为什么必须是"另一个实例"而不是"同一个实例里的另一个库"：
+  #    核心在用的 `pg` 容器里装着**真实数据副本**（若操作者显式导入了自己的数据）。
+  #    在那个实例里建测试库，隔离就只靠"库名"这一个约定 —— 一次误配就写进真实副本。
+  #    ⇒ 实例级隔离是**结构性的**：测试库所在实例**根本没有**那份数据。
+  # ---------------------------------------------------------------------
+  pgtest:
+    image: pgvector/pgvector@sha256:ac08538c6f8b9904c33c8224c5e5706dbe760aca29db1d096972b4052c22a75d
+    container_name: lg-serversim-pgtest
+    depends_on:
+      simhost:
+        condition: service_started
+    environment:
+      # 引导超级用户（只用于在**本实例内**建测试库/装扩展）
+      POSTGRES_USER: lg_test_bootstrap
+      POSTGRES_PASSWORD: lg_test_bootstrap_local_only
+      POSTGRES_DB: lg_test_bootstrap
+      TZ: Asia/Shanghai
+    volumes:
+      - sim-pgtestdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U lg_test_bootstrap -d lg_test_bootstrap"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------
+  #  假 OneBot —— 扮演服务器上的 NapCat 容器
+  # ---------------------------------------------------------------------
+  onebot:
+    <<: *simhost-image
+    container_name: lg-serversim-onebot
+    depends_on:
+      simhost:
+        condition: service_started
+    entrypoint: ["node", "/opt/serversim/onebot-mock.mjs"]
+    env_file:
+      - ../artifacts/serversim/local/env/.env.qq
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------
+  #  假微信桥 —— 扮演服务器上的 /opt/lg-wechat-bridge
+  # ---------------------------------------------------------------------
+  wechat:
+    <<: *simhost-image
+    container_name: lg-serversim-wechat
+    depends_on:
+      simhost:
+        condition: service_started
+    entrypoint: ["node", "/opt/serversim/wechat-mock.mjs"]
+    env_file:
+      - ../artifacts/serversim/local/env/.env.wechat
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------
+  #  假模型端点 —— 扮演机房外的模型 API
+  # ---------------------------------------------------------------------
+  model:
+    <<: *simhost-image
+    container_name: lg-serversim-model
+    depends_on:
+      simhost:
+        condition: service_started
+    entrypoint: ["node", "/opt/serversim/model-mock.mjs"]
+    environment:
+      SIM_MODEL_PORT: "18080"
+      SIM_MODEL_REPLY: "<response><text>我在（服务器仿真环境）。</text></response>"
+    restart: unless-stopped
+
+volumes:
+  sim-pgdata:
+    name: lg-serversim-pgdata
+  # ⚠️ 隔离测试库的卷：与 sim-pgdata、生产卷**三者互不共享**
+  sim-pgtestdata:
+    name: lg-serversim-pgtestdata

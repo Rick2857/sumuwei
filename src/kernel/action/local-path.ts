@@ -112,7 +112,7 @@ function isReservedName(segment: string): boolean {
  *
  * ⚠️ `platform` 是**显式参数**而不是读 `process.platform`：kernel 不读运行环境，
  *    而"这条路径在这台机器上意味着什么"必须能被离线穷举（两种平台都测）。
- *    缺省 `win32` —— 本仓库的生产目标就是 Windows 当前账户。
+ *    缺省保留历史 `win32`；运行时装配必须传入实际宿主平台。
  */
 export function inspectLocalPath(
   raw: string,
@@ -142,7 +142,6 @@ export function inspectLocalPath(
       if (segment.includes('\u0000')) return reject('nul', '路径含 NUL 字节')
       segments.push(segment)
     }
-    if (segments.length === 0) return reject('empty', '路径只到卷根，没有可操作的条目')
     return { ok: true, absolutePath: `/${segments.join('/')}`, volume: '/', segments }
   }
 

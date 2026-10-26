@@ -1,0 +1,98 @@
+{
+  "version": "document-corpus@1",
+  "frozenAt": "2026-10-23T11:40:00+08:00",
+  "scope": "Natural public PDFs with an INDEPENDENT content standard, plus clearly labelled derived variants that cover failure types the natural set does not contain. No synthetic sentence PDFs, no injected reader faults.",
+  "independentStandardRule": "Each natural document's required phrases must be verified against a source that is NOT the PDF text pipeline (arXiv metadata API / Wikipedia REST summary). The preparation step fails if a phrase is absent from that independent source.",
+  "routes": ["markitdown", "pdfminer"],
+  "documents": [
+    {
+      "id": "paper-en-2col",
+      "kind": "natural",
+      "category": "english_two_column_paper",
+      "arxivId": "1706.03762",
+      "url": "https://arxiv.org/pdf/1706.03762",
+      "file": "paper-en-2col.pdf",
+      "standard": {
+        "kind": "arxivMetadata",
+        "phrases": ["Attention Is All You Need", "Transformer"],
+        "minChars": 20000
+      },
+      "expected": {
+        "outcome": "nonempty",
+        "note": "Two-column English paper with a real text layer. Both routes are expected to return text; which one covers more is measured, not assumed."
+      }
+    },
+    {
+      "id": "paper-en-tables",
+      "kind": "natural",
+      "category": "english_paper_with_wide_tables",
+      "arxivId": "1810.04805",
+      "url": "https://arxiv.org/pdf/1810.04805",
+      "file": "paper-en-tables.pdf",
+      "standard": {
+        "kind": "arxivMetadata",
+        "phrases": ["BERT", "Bidirectional Transformers"],
+        "minChars": 20000
+      },
+      "expected": {
+        "outcome": "nonempty",
+        "note": "Wide result tables. MarkItDown's PDF route detects form-style pages, so the two routes may legitimately differ in layout and coverage."
+      }
+    },
+    {
+      "id": "wiki-zh-university",
+      "kind": "natural",
+      "category": "chinese_encyclopedia_article",
+      "url": "https://zh.wikipedia.org/api/rest_v1/page/pdf/%E8%A5%BF%E5%AE%89%E7%94%B5%E5%AD%90%E7%A7%91%E6%8A%80%E5%A4%A7%E5%AD%A6",
+      "file": "wiki-zh-university.pdf",
+      "standard": {
+        "kind": "urlText",
+        "sourceUrl": "https://zh.wikipedia.org/api/rest_v1/page/summary/%E8%A5%BF%E5%AE%89%E7%94%B5%E5%AD%90%E7%A7%91%E6%8A%80%E5%A4%A7%E5%AD%A6",
+        "phrases": ["示例工程科技大学", "陕西省西安市"],
+        "minChars": 2000
+      },
+      "expected": {
+        "outcome": "nonempty",
+        "note": "Chinese body text produced by a real renderer, with infobox tables and images. Covers CJK extraction."
+      }
+    },
+    {
+      "id": "derived-scan-alike",
+      "kind": "derived",
+      "category": "image_only_pdf_no_text_layer",
+      "variant": "scan-alike",
+      "derivedFrom": "paper-en-2col",
+      "file": "derived-scan-alike.pdf",
+      "standard": {
+        "kind": "none",
+        "phrases": [],
+        "minChars": 0
+      },
+      "expected": {
+        "outcome": "empty",
+        "note": "DERIVED, not a real scan: page 1 of a natural paper rendered to JPEG and embedded in a PDF with no text operators. A text extractor must find nothing; OCR is the only route that could read it."
+      }
+    },
+    {
+      "id": "derived-damaged-xref",
+      "kind": "derived",
+      "category": "damaged_pdf_structure",
+      "variant": "damaged-xref",
+      "derivedFrom": "paper-en-2col",
+      "file": "derived-damaged-xref.pdf",
+      "standard": {
+        "kind": "none",
+        "phrases": [],
+        "minChars": 0
+      },
+      "expected": {
+        "outcome": "recovered_or_failed",
+        "note": "DERIVED: the startxref offset of a natural paper is corrupted; every object is intact. Either a route recovers the text or it reports a failure - it must not silently report empty."
+      }
+    }
+  ],
+  "knownGaps": [
+    "encrypted: no stable public encrypted-PDF source was used and building one with the standard security handler is out of scope for this round; an encrypted document needs a password, not another extractor",
+    "no natural scanned document (the scan-alike is derived) and no natural Chinese government/office PDF with a stable URL"
+  ]
+}

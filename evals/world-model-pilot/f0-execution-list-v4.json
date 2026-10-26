@@ -1,0 +1,104 @@
+{
+  "version": "f0-execution-list@4",
+  "phase": "development",
+  "status": "TO_BE_SEALED_BY_RUNNER",
+  "supersedes": "f0-execution-list@3",
+  "protocol": "cognitive-evaluation@1",
+  "scope": "L 轨 F0（稳定控制），**v3 装配**：C 臂走**生产入口**（含普通规划兜底），学习发生在被测序列里。",
+  "changeFromV3": {
+    "why": "v3 装配的 C 臂**直接调模拟规划器**：无合格规则时它 `no_rule` 失败且**不执行动作** ⇒ 观察不积累 ⇒ 规则永远形成不了 ⇒ 冷启动死锁（并非'前 3 题失败后就有规则'）。另有一处目标语法不兼容：生成器给出的路径含目录分隔符，生产 `explicitFileGoal` 的正则是 `([A-Za-z0-9_-]+\\.txt)` ⇒ 目标解析不出来。",
+    "now": "① **C 臂改走生产入口** `createSimulationPlanning`：无合格规则时它返回 undefined ⇒ 外层**继续普通规划**（生产行为），动作照常执行 ⇒ 观察得以积累 ⇒ 资格可形成；有合格规则时才把选路交给模拟。② **任务路径改为扁平**且符合生产目标语法；世界的区分靠**显式 `familyId`** 与各自的隔离库/文件根，**不靠路径**。③ 逐题记录**规划模式**、规则身份与资格、实际动作与失败成本。④ **冷启动成本改为实测**（普通执行 + 观察 + 验证 + 模拟），**不预设**「前 N 题失败」。⑤ 增**同池不执行对照**：在 C 自己的候选池上额外记 A/B 会选哪个编号（三臂各自生成的池不同 ⇒ 三臂选不同编号**不能**证明规则改变了决策）。",
+    "offlineVerified": "scripts/cognitive/f0-learning-assembly-verify.ts 的 `c-arm-cold-start` 场景（零模型请求）已验证：无资格 → 普通执行（观察积累）→ 第 3 题取得资格 → 第 4 题模拟接管并**真的执行** → 规则撤回后**恢复普通规划**。"
+  },
+  "size": {
+    "worlds": 3,
+    "tasksPerWorld": 8,
+    "arms": 3,
+    "uniqueTasks": 24,
+    "units": 9,
+    "generations": 72,
+    "note": "9 个执行单元（3 世界 × 3 臂），每单元 8 个任务；每（臂，任务）各一次真实生成 ⇒ 72 次生成 = 协议口径的 72 个任务。"
+  },
+  "taskShape": {
+    "perWorld": [
+      { "phase": "early_contact", "count": 3, "note": "前三个任务**不**预赠规则；此时序列**应当还没有合格规则**，规则由这些任务的真实反馈形成。⚠️ **资格形成时间由执行轨迹决定**，不预设一定在第 3 题。" },
+      { "phase": "new_binding", "count": 3, "note": "同一规律族换一个对象（新的路径/内容实例）—— 这是**真正**的迁移阶段（v1/v2 里只是标签）。" },
+      { "phase": "scope_control", "count": 2, "note": "范围/稳定控制：确认规则没有被外推、也没有反复失效。" }
+    ],
+    "formatFamilies": "沿用文件选择器协议的四个已声明格式族（多行中文 / JSON / 引号与反斜线 / 空白与末尾换行）",
+    "pathGrammar": "**扁平**文件名且必须匹配生产目标语法 `[A-Za-z0-9_-]+\\.txt`（否则 `explicitFileGoal` 解析不出目标）",
+    "instances": "由 scripts/cognitive/f0-learning-core.ts 的纯函数生成（确定性、无随机数）⇒ 清单绑定该文件摘要即等价于绑定实例。",
+    "familyKey": "**显式 `familyId`**（`f0-family-a/b/c`），并断言族键 ≠ 目录前缀。",
+    "oracle": "真值只在执行器侧（字节匹配 + 最后一次真实读回指纹 + 假完成）。"
+  },
+  "arms": [
+    {
+      "id": "A",
+      "name": "LG 强基线",
+      "selection": "模型排第一的候选（`first_ranked`）",
+      "keeps": "同一 Kernel、Gateway、EBL 观察者、真实执行反馈；不用规则排序或否决",
+      "note": "A 也**开着观察** ⇒ 三臂的 EBL 状态都随序列推进，差异只在**是否消费**规则"
+    },
+    {
+      "id": "B",
+      "name": "简单条件策略",
+      "selection": "首个**静态**满足明确目标（写目标路径 + 内容逐字相等 + 其后有该路径的读取）的候选；没有则保持原顺序",
+      "note": "纯语法检查，不模拟、不查规则库；只写不读不算满足"
+    },
+    {
+      "id": "C",
+      "name": "世界模型＋EBL",
+      "selection": "**走生产入口** `createSimulationPlanning`：无合格规则 ⇒ 继续普通规划；有合格规则 ⇒ 选路交给模拟",
+      "note": "不改生产政策；冷启动/资格形成/撤回都按**生产行为**走，代价如实计入"
+    }
+  ],
+  "budget": {
+    "perTaskModelRequests": 1,
+    "perArmPerTaskActions": 4,
+    "perArmPerTaskPlans": 1,
+    "perArmPerTaskWallClockMs": 120000,
+    "sequenceModelRequests": 72,
+    "sequenceWallClockMs": 7200000,
+    "tokenBudget": { "maxCompletionTokensPerRequest": 1600, "maxTotalTokens": 250000 },
+    "protocolUpperBounds": { "perTaskRealActions": 12, "perTaskModelRequests": 6, "perTaskPlans": 6, "perTaskWallClockMs": 120000, "lTotalModelRequests": 864 },
+    "note": "每臂每任务的上限都在协议上界之内；**失败成本不过滤**（生成尝试与 token 单列）。"
+  },
+  "metrics": {
+    "primary": "① **资格何时形成**（逐题记录合格规则数与首次形成于第几个任务——**由轨迹决定**）；② **规则是否真的改变决策**（用**同池对照**：C 在自己池上实际选的编号 vs 同一池上 A/B 会选的编号）；③ **新对象上是否减少重复错误**（new_binding 阶段）；④ **冷启动与总成本**（普通执行 + 观察 + 验证 + 模拟，实测）。",
+    "perTaskFields": ["planningMode(ordinary|simulation)", "usableRulesBefore/After", "规则身份与资格", "实际动作与执行结果", "生成失败与其成本", "同池对照编号（仅 C）", "选中编号与理由"],
+    "deltaRule": "只有**达成任务数相同**时才给动作差值，否则置 null。",
+    "mustAlsoReport": ["每阶段拆分（早期/新绑定/范围控制）", "目标达成", "假完成", "越权/取消失效", "耗时", "token", "生成失败数与原因", "未完成数", "缺失/不可测数及原因"],
+    "notAllowed": "不用'仅成功任务平均动作'当主结论；达成率更低时不能用少动作宣称节省；**不得**把'没观察到差异'读成'机制无效'；**不得**用三臂各自的池差异证明'规则改变了决策'（必须用同池对照）。"
+  },
+  "decision": {
+    "rule": "F0 **不要求**证明学习优势；主读数是**学习是否真的发生**、**规则是否真的改变决策**与**代价**。",
+    "stopConditions": [
+      "出现目标达成或边界退化 ⇒ 先修复再扩展",
+      "隐私/真值泄漏、装配不公平 ⇒ 判无效（不是收益）",
+      "完成原规模（9 单元 × 8 任务）即止；不补采、不扩围"
+    ],
+    "conclusionSlots": "按协议 §6 的四类结论分列：测量无效 / 机制未就绪 / 有效但未获益 / 开发信号。"
+  },
+  "sealing": {
+    "listSha256": null,
+    "sealedBy": "scripts/cognitive/f0-learning-live.ts --seal",
+    "boundSources": [
+      "docs/architecture/Cognitive-Capability-Experiment-Protocol-2026-10-23.md",
+      "evals/world-model-pilot/f0-execution-list-v4.json",
+      "scripts/cognitive/f0-learning-core.ts",
+      "scripts/cognitive/f0-learning-live.ts",
+      "scripts/cognitive/file-planning-bed.ts"
+    ],
+    "rules": [
+      "清单在**任何真实模型请求之前**写定；改动即作废并重新封存",
+      "留出结果不得用于继续调参后仍自称独立验证",
+      "封存必须绑定**源码指纹 + 镜像 + 门结果**，且 `gateReadings` 不得有 MISSING"
+    ]
+  },
+  "boundaries": [
+    "F0 用既有契约（读回规则）即可，**不需要** F1 的规则族扩展",
+    "F1 的 A–D 四项扩展仍 BLOCKED（见 L 轨契约缺口分析）",
+    "本清单**不**声称任何学习收益、行为收益或泛化能力",
+    "**不训练臂**（温启动成本）不在本清单内，以后单独研究"
+  ]
+}

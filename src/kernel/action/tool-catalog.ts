@@ -63,12 +63,15 @@ export type ToolGateKey =
   | 'arxivResearchEnabled'
   | 'mathCalculateEnabled'
   | 'documentReadEnabled'
+  | 'documentRecoveryEnabled'
+  | 'epistemicBeliefEnabled'
   | 'webReadEnabled'
   | 'imageOcrEnabled'
   | 'localFileReadEnabled'
   | 'localFileWriteEnabled'
   | 'webSearchEnabled'
   | 'weatherEnabled'
+  | 'xidianTimetableEnabled'
   | 'officeGenerateEnabled'
   | 'newsReadEnabled'
   | 'browserEnabled'
@@ -107,6 +110,9 @@ export const TOOL_GATE_KEYS: Readonly<Record<string, ToolGateKey>> = {
   'sandbox.file.write': 'always',
   'math.calculate': 'mathCalculateEnabled',
   'document.read': 'documentReadEnabled',
+  'document.extract': 'documentRecoveryEnabled',
+  'document.profile': 'documentRecoveryEnabled',
+  'document.pages': 'documentRecoveryEnabled',
   'image.ocr': 'imageOcrEnabled',
   'web.read': 'webReadEnabled',
   'web.search': 'webSearchEnabled',
@@ -114,6 +120,7 @@ export const TOOL_GATE_KEYS: Readonly<Record<string, ToolGateKey>> = {
   'local.file.read': 'localFileReadEnabled',
   'local.file.write': 'localFileWriteEnabled',
   'weather.query': 'weatherEnabled',
+  'xidian.timetable': 'xidianTimetableEnabled',
   'office.generate': 'officeGenerateEnabled',
   'news.read': 'newsReadEnabled',
   'browser.read': 'browserEnabled',
@@ -141,6 +148,9 @@ export const TOOL_GATE_KEYS: Readonly<Record<string, ToolGateKey>> = {
  */
 export const TOOL_GATE_ALSO_REQUIRES: Readonly<Record<string, readonly ToolGateKey[]>> = {
   'office.generate': ['localFileWriteEnabled'],
+  'document.extract': ['documentReadEnabled', 'epistemicBeliefEnabled'],
+  'document.profile': ['documentReadEnabled', 'epistemicBeliefEnabled'],
+  'document.pages': ['documentReadEnabled', 'epistemicBeliefEnabled'],
 }
 
 /**

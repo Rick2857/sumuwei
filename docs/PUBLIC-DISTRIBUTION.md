@@ -53,3 +53,7 @@ The pinned Handlebars patch is a distribution-only dependency change. Remaining 
 The PostgreSQL source, trial Compose/SQL tools and migration documents are included. The developer's credentials, database, dump/snapshot files and production activation records remain excluded. The private checkout's repository-registration document is not copied because it describes a different Git history. PostgreSQL integration and production-operation scripts require the operator's own explicit environment; public offline CI does not reuse the developer's running PostgreSQL or model accounts. Multi-user QQ groups, the management UI and the zero-failure refusal policy are planned work, not capabilities certified by this source update.
 
 This update publishes the source snapshot selected before validation. Later additions to the shared development checkout's in-progress multi-user design drafts are excluded; they are not silently mixed into the verified PostgreSQL update.
+
+## 2026-10-26 可选课表与累计源码更新
+
+课表功能在发行代码与环境模板中默认关闭；通用配置见 [OPTIONAL-XIDIAN](OPTIONAL-XIDIAN.md)。凭据、会话、短信验证码、同步快照、原服务器画像与运行结果均不分发。MPL-2.0/MIT 衍生文件按文件级许可保留通知，不由根 Apache-2.0 许可覆盖。认知实验仍默认关闭，真实模型预算与生产启用不随源码发布授权；Lv2.5 沿公开版继续作为可选功能保留。

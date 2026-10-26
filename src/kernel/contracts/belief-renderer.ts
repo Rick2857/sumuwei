@@ -28,6 +28,7 @@
 import {
   BELIEF_INFERRED_PREDICATE,
   BELIEF_INFERRED_SCOPE,
+  beliefReportedScopeKeyOf,
   type BeliefState,
 } from './belief.ts'
 
@@ -40,6 +41,10 @@ export const BELIEF_CONTEXT_MAX_ITEMS = 4 as const
 
 /** section 合计 token 预算（含标题与限制行；由注入的 quantifier 计算） */
 export const BELIEF_CONTEXT_TOKEN_BUDGET = 400 as const
+export function isEblReplacedInference(belief: BeliefState): boolean {
+  return belief.epistemicKind === 'inferred' && belief.proposition.predicate === BELIEF_INFERRED_PREDICATE
+    && belief.proposition.scopeKey === BELIEF_INFERRED_SCOPE
+}
 
 // ---------------------------------------------------------------------------
 // 输入 / 输出
@@ -67,6 +72,12 @@ export interface BeliefContextRenderInput {
   quantifier: (text: string) => number
   /** 覆盖预算（缺省 = D17 冻结值 400；≤0 = 不产 section） */
   tokenBudget?: number
+  /** EBL takeover is explicit; absent preserves the frozen M9 renderer. */
+  epistemic?: {
+    currentOverride: boolean
+    technicalContext: boolean
+    candidate?: { claimId: string; subjectId: string; value: 'concise' | 'detailed' }
+  }
 }
 
 export interface BeliefContextRenderResult {
@@ -203,12 +214,25 @@ export function renderBeliefSection(
   if (budget <= 0) return undefined
 
   // ---- ① 相关性过滤（subject 不匹配 = 不入选）---------------------------
-  const relevant = input.candidates.filter(
+  let relevant = input.candidates.filter(
     (c) =>
       String(c.belief.subject.kind) === String(input.subject.kind) &&
       String(c.belief.subject.id) === String(input.subject.id),
   )
-  if (relevant.length === 0) return undefined
+  const technicalScope = beliefReportedScopeKeyOf({ context: 'technical' })
+  const styleReport = (belief: BeliefState) => belief.epistemicKind === 'reported'
+    && belief.proposition.predicate === 'preferred.explanation.style'
+    && ['general', technicalScope].includes(belief.proposition.scopeKey)
+  if (input.epistemic) {
+    const scoped = input.epistemic.technicalContext && relevant.some(({ belief }) => styleReport(belief) && belief.proposition.scopeKey === technicalScope)
+    relevant = relevant.filter(({ belief }) => !isEblReplacedInference(belief)
+      && !(styleReport(belief) && (input.epistemic!.currentOverride || (scoped && belief.proposition.scopeKey === 'general'))))
+    if (!input.epistemic.technicalContext) relevant = relevant.filter(({ belief }) => !(styleReport(belief) && belief.proposition.scopeKey === technicalScope))
+  }
+  const epistemic = input.epistemic?.candidate
+  const includeEpistemic = epistemic && input.epistemic?.technicalContext && !input.epistemic.currentOverride && input.subject.kind === 'user'
+    && epistemic.subjectId === input.subject.id && !relevant.some(({ belief }) => styleReport(belief))
+  if (relevant.length === 0 && !includeEpistemic) return undefined
 
   // ---- ② 槽位分组：active + 同槽 disputed 配对成原子组 -------------------
   // 槽位键 = predicate|scopeKey（**不含 value**——disputed 两侧正是同槽不同值：
@@ -236,6 +260,10 @@ export function renderBeliefSection(
     if (active === undefined) continue
     items.push(renderItem(active, disputed, coveredRoots))
   }
+  if (includeEpistemic) items.push({
+    line: `· 在技术讲解这一范围，对方可能更需要${epistemic.value === 'concise' ? '简短结论' : '步骤展开'}（经独立后续反馈检验的推断；有范围，新明确说明优先）`,
+    beliefIds: [epistemic.claimId], column: 'inferred', qualifierOnly: false,
+  })
   if (items.length === 0) return undefined
 
   // ---- ③ 条目上限（≤4 组）----------------------------------------------

@@ -18,18 +18,19 @@
 
 | 类别 | 条目数 |
 |---|---:|
-| 已登记门 | 250 |
-| 汇总/链入口 | 19 |
-| 文档入口 | 4 |
-| 内部 | 428 |
-| **合计** | **701** |
+| 已登记门 | 260 |
+| 汇总/链入口 | 21 |
+| 文档入口 | 3 |
+| 内部 | 465 |
+| **合计** | **749** |
 
-`scripts/` 下**没有任何 pnpm 入口引用**的脚本文件：**308 个**（见文末）。
+`scripts/` 下**没有任何 pnpm 入口引用**的脚本文件：**389 个**（见文末）。
 
 ## 每条 lane 的入口命令
 
 | lane | 入口 | 说明 |
 |---|---|---|
+| `ebl` | — | Epistemic Belief Lifecycle |
 | `postgresql` | — | PostgreSQL 迁移（真 PG 实例上的门） |
 | `m11.1` | `pnpm m11.1:gates` | M11.1 离线控制 |
 | `desktop-control` | `pnpm desktop-control:verify` · `pnpm desktop-control:probe` | ADR-106 桌面查看与操作（离线夹具 + 实机只读探针） |
@@ -44,7 +45,7 @@
 | `m10-semantic` | `pnpm m10-semantic:gates` | M10 语义档（真模型；计划 §16.1 的"三 lane 分开"之一） |
 | `memory-coverage` | `pnpm memory-coverage:gates` | 「记忆体量」线门（离线；D-6 裁定后的新线，2026-09-30） |
 | `m9.6` | `pnpm m9.6:gates` | M9.6（Jev 适用性）离线门（2026-10-04 登记） |
-| `postlv2` | `pnpm postlv2:s8:gates` | post-Lv2 的 S8 离线门（2026-10-04 登记） |
+| `postlv2` | `pnpm postlv2:s8:gates` | post-Lv2 当前离线门（Lv2.5 为可选功能） |
 | `postlv2-controls` | `pnpm postlv2:controls:gates` | post-Lv2 新增离线控制（2026-10-05 登记；`AUD-20261005-03`） |
 | `lv2` | `pnpm lv2:gates` · `pnpm lv2:inherited:gates` | Lv2 综合验收离线门（2026-10-04 登记） |
 | `summaries-all` | `pnpm summaries:all` | 全里程碑只读汇总门（21 道，含更晚里程碑；2026-10-04 新增） |
@@ -100,6 +101,10 @@
 
 **内部（6）**：`coexist:chat` · `coexist:check` · `coexist:pet` · `coexist:prepare` · `coexist:start` · `coexist:stop`
 
+### `cognitive`（8 条）
+
+**内部（8）**：`cognitive:collaboration:verify` · `cognitive:export:restore:verify` · `cognitive:fingerprint` · `cognitive:world-model:forecast:verify` · `cognitive:world-model:ledger:verify` · `cognitive:world-model:refusal:verify` · `cognitive:world-model:simulation:verify` · `cognitive:world-model:transition:verify`
+
 ### `db`（4 条）
 
 **入口**：
@@ -129,6 +134,10 @@
 
 **内部（1）**：`dump:prompt`
 
+### `ebl`（3 条 · **有同名 lane**）
+
+**已登记门（3）**：`ebl:human:verify` · `ebl:postgres:verify` · `ebl:verify`
+
 ### `eval`（19 条）
 
 **已登记门（6）**：`eval:dryrun` · `eval:m3` · `eval:m4` · `eval:otlp` · `eval:scenarios` · `eval:telemetry`
@@ -143,9 +152,9 @@
 
 **内部（2）**：`fast` · `fast:offline`
 
-### `gates`（3 条）
+### `gates`（7 条）
 
-**内部（3）**：`gates:profile` · `gates:run` · `gates:verify`
+**内部（7）**：`gates:isolated` · `gates:pg` · `gates:pg-chain` · `gates:pg:scenario` · `gates:profile` · `gates:run` · `gates:verify`
 
 ### `goal`（2 条）
 
@@ -375,10 +384,11 @@
 
 **入口**：
 - `postlv2:controls:gates` — 汇总/链入口
+- `postlv2:s8:gates` — 汇总/链入口
 
-**已登记门（32）**：`postlv2:affected:verify` · `postlv2:automatic-memory:recovery:verify` · `postlv2:avatar-opening:verify` · `postlv2:body:verify` · `postlv2:database-env:verify` · `postlv2:db:verify` · `postlv2:delivery:verify` · `postlv2:gate-selection:verify` · `postlv2:goal-deadline:verify` · `postlv2:goal-parallel:verify` · `postlv2:image:verify` · `postlv2:orchestration:verify` · `postlv2:oss-mechanisms:verify` · `postlv2:role-tool:path` · `postlv2:role-tool:verify` · `postlv2:s8:choice:verify` · `postlv2:s8:contracts:verify` · `postlv2:s8:daily:e2e` · `postlv2:s8:daily:verify` · `postlv2:s8:entry-lock:verify` · `postlv2:s8:gates` · `postlv2:s8:lifecycle:verify` · `postlv2:s8:measurement:verify` · `postlv2:s8:production:verify` · `postlv2:s8:reflection:verify` · `postlv2:s8:roots:verify` · `postlv2:s8:start:verify` · `postlv2:s8:state:verify` · `postlv2:s8:store:verify` · `postlv2:s8:withdraw:verify` · `postlv2:sequence-continuity:verify` · `postlv2:transport:verify`
+**已登记门（26）**：`postlv2:affected:verify` · `postlv2:automatic-memory:recovery:verify` · `postlv2:avatar-opening:verify` · `postlv2:body:verify` · `postlv2:database-env:verify` · `postlv2:db:verify` · `postlv2:delivery:verify` · `postlv2:gate-selection:verify` · `postlv2:goal-deadline:verify` · `postlv2:goal-parallel:verify` · `postlv2:image:verify` · `postlv2:orchestration:verify` · `postlv2:oss-mechanisms:verify` · `postlv2:role-tool:path` · `postlv2:role-tool:verify` · `postlv2:s8:contracts:verify` · `postlv2:s8:lifecycle:verify` · `postlv2:s8:measurement:verify` · `postlv2:s8:production:verify` · `postlv2:s8:reflection:verify` · `postlv2:s8:roots:verify` · `postlv2:s8:state:verify` · `postlv2:s8:store:verify` · `postlv2:s8:withdraw:verify` · `postlv2:sequence-continuity:verify` · `postlv2:transport:verify`
 
-**内部（67）**：`postlv2:action-delegation:verify` · `postlv2:appearance:verify` · `postlv2:asr:verify` · `postlv2:automatic-memory:live` · `postlv2:automatic-memory:verify` · `postlv2:avatar` · `postlv2:avatar-opening:chain` · `postlv2:avatar:live2d` · `postlv2:avatar:production` · `postlv2:avatar:production:verify` · `postlv2:avatar:verify` · `postlv2:baseline` · `postlv2:bridge:verify` · `postlv2:coexist:live` · `postlv2:coexist:matrix` · `postlv2:coexist:shells` · `postlv2:coexist:verify` · `postlv2:delegation-revalidation:verify` · `postlv2:delegation-wire:verify` · `postlv2:delegation:real` · `postlv2:delegation:roundtrip` · `postlv2:entry-cancel:verify` · `postlv2:entry-handshake:verify` · `postlv2:entry-reconnect:verify` · `postlv2:executor-client:verify` · `postlv2:executor-server:verify` · `postlv2:executor:readonly-probe` · `postlv2:expression:verify` · `postlv2:goal-thinking:eval` · `postlv2:image:live` · `postlv2:memory-write:live` · `postlv2:memory-write:verify` · `postlv2:mic` · `postlv2:model-memory:live` · `postlv2:model-memory:verify` · `postlv2:playback-buffer:eval` · `postlv2:qq-proactive:chain` · `postlv2:qq-proactive:live` · `postlv2:qq-proactive:measurement:verify` · `postlv2:qq-proactive:verify` · `postlv2:role-tool:activation:readback` · `postlv2:role-tool:first-use:readback` · `postlv2:role-tool:known-dirs` · `postlv2:role-tool:live` · `postlv2:role-tool:main-live` · `postlv2:role-tool:matrix` · `postlv2:role-tool:semantic:eval` · `postlv2:s7:gate` · `postlv2:s7:live` · `postlv2:s8:activation-readback` · `postlv2:s8:activation-readback:db` · `postlv2:s8:baseline` · `postlv2:s8:daily:live` · `postlv2:s8:dev-probe` · `postlv2:s8:quote:ab:live` · `postlv2:s8:semantic:eval` · `postlv2:s8:semantic:recompute` · `postlv2:semantic:production:verify` · `postlv2:semantic:verify` · `postlv2:source-root:verify` · `postlv2:source:verify` · `postlv2:speech:verify` · `postlv2:story:build` · `postlv2:story:verify` · `postlv2:text-stream:verify` · `postlv2:tts:verify` · `postlv2:world:verify`
+**内部（72）**：`postlv2:action-delegation:verify` · `postlv2:appearance:verify` · `postlv2:asr:verify` · `postlv2:automatic-memory:live` · `postlv2:automatic-memory:verify` · `postlv2:avatar` · `postlv2:avatar-opening:chain` · `postlv2:avatar:live2d` · `postlv2:avatar:production` · `postlv2:avatar:production:verify` · `postlv2:avatar:verify` · `postlv2:baseline` · `postlv2:bridge:verify` · `postlv2:coexist:live` · `postlv2:coexist:matrix` · `postlv2:coexist:shells` · `postlv2:coexist:verify` · `postlv2:delegation-revalidation:verify` · `postlv2:delegation-wire:verify` · `postlv2:delegation:real` · `postlv2:delegation:roundtrip` · `postlv2:entry-cancel:verify` · `postlv2:entry-handshake:verify` · `postlv2:entry-reconnect:verify` · `postlv2:executor-client:verify` · `postlv2:executor-server:verify` · `postlv2:executor:readonly-probe` · `postlv2:expression:verify` · `postlv2:goal-thinking:eval` · `postlv2:image:live` · `postlv2:memory-write:live` · `postlv2:memory-write:verify` · `postlv2:mic` · `postlv2:model-memory:live` · `postlv2:model-memory:verify` · `postlv2:playback-buffer:eval` · `postlv2:qq-proactive:chain` · `postlv2:qq-proactive:live` · `postlv2:qq-proactive:measurement:verify` · `postlv2:qq-proactive:verify` · `postlv2:role-tool:activation:readback` · `postlv2:role-tool:first-use:readback` · `postlv2:role-tool:known-dirs` · `postlv2:role-tool:live` · `postlv2:role-tool:main-live` · `postlv2:role-tool:matrix` · `postlv2:role-tool:semantic:eval` · `postlv2:s7:gate` · `postlv2:s7:live` · `postlv2:s8:activation-readback` · `postlv2:s8:activation-readback:db` · `postlv2:s8:baseline` · `postlv2:s8:choice:verify` · `postlv2:s8:daily:e2e` · `postlv2:s8:daily:live` · `postlv2:s8:daily:verify` · `postlv2:s8:dev-probe` · `postlv2:s8:entry-lock:verify` · `postlv2:s8:quote:ab:live` · `postlv2:s8:semantic:eval` · `postlv2:s8:semantic:recompute` · `postlv2:s8:start:verify` · `postlv2:semantic:production:verify` · `postlv2:semantic:verify` · `postlv2:source-root:verify` · `postlv2:source:verify` · `postlv2:speech:verify` · `postlv2:story:build` · `postlv2:story:verify` · `postlv2:text-stream:verify` · `postlv2:tts:verify` · `postlv2:world:verify`
 
 ### `productivity`（5 条 · **有同名 lane**）
 
@@ -392,11 +402,11 @@
 
 **内部（6）**：`qq:chat` · `qq:check` · `qq:prepare` · `qq:start` · `qq:status` · `qq:verify`
 
-### `reminder`（6 条）
+### `reminder`（7 条）
 
 **已登记门（1）**：`reminder:channels:verify`
 
-**内部（5）**：`reminder:channels:live` · `reminder:context:live` · `reminder:context:verify` · `reminder:planning:live` · `reminder:planning:verify`
+**内部（6）**：`reminder:channels:live` · `reminder:context:live` · `reminder:context:verify` · `reminder:followup:verify` · `reminder:planning:live` · `reminder:planning:verify`
 
 ### `reset`（1 条）
 
@@ -422,6 +432,14 @@
 ### `seed-status`（1 条）
 
 **内部（1）**：`seed-status`
+
+### `serversim`（16 条）
+
+**入口**：
+- `serversim:gates` — 汇总/链入口
+- `serversim:pgtest:ci` — 汇总/链入口
+
+**内部（14）**：`serversim:build` · `serversim:dbinit` · `serversim:down` · `serversim:inject` · `serversim:logs` · `serversim:migrate` · `serversim:pgtest` · `serversim:pgtest:chain` · `serversim:preflight` · `serversim:prepare` · `serversim:seed` · `serversim:shell` · `serversim:status` · `serversim:up`
 
 ### `snapshot`（1 条）
 
@@ -452,9 +470,11 @@
 
 **内部（3）**：`test` · `test:dry` · `test:guard`
 
-### `thinhost`（5 条）
+### `thinhost`（16 条）
 
-**已登记门（5）**：`thinhost:initdb:verify` · `thinhost:retirement:verify` · `thinhost:surface:verify` · `thinhost:uuid:parity` · `thinhost:wiring:verify`
+**已登记门（13）**：`thinhost:base-ddl:verify` · `thinhost:bootstrap:fingerprint` · `thinhost:initdb:verify` · `thinhost:isolation:verify` · `thinhost:lgmigration:verify` · `thinhost:logger:verify` · `thinhost:no-eliza-in-src:verify` · `thinhost:reply-parser:parity` · `thinhost:retirement:verify` · `thinhost:surface:verify` · `thinhost:uuid:parity` · `thinhost:vocabulary:verify` · `thinhost:wiring:verify`
+
+**内部（3）**：`thinhost:base-ddl:capture` · `thinhost:reply-parser:freeze` · `thinhost:sandbox-ddl:verify`
 
 ### `typecheck`（1 条）
 
@@ -476,13 +496,15 @@
 
 **内部（1）**：`with-test-model`
 
-### `worldmodel`（6 条）
+### `worldmodel`（7 条）
 
-**入口**：
-- `worldmodel:gates` — 汇总/链入口
-- `worldmodel:reflection:e2e` — 文档入口
+**已登记门（5）**：`worldmodel:forecast:verify` · `worldmodel:gates` · `worldmodel:reflection:e2e` · `worldmodel:reflection:verify` · `worldmodel:tools:ab`
 
-**内部（4）**：`worldmodel:forecast:verify` · `worldmodel:reflection:ab` · `worldmodel:reflection:verify` · `worldmodel:tools:ab`
+**内部（2）**：`worldmodel:application:verify` · `worldmodel:reflection:ab`
+
+### `xidian`（4 条）
+
+**内部（4）**：`xidian:configure` · `xidian:slider:verify` · `xidian:sync` · `xidian:verify`
 
 ## 没有任何 pnpm 入口引用的脚本文件
 
@@ -497,6 +519,78 @@
 - `scripts/coexist/readiness.ts`
 - `scripts/coexist/send-ctrl-c.mjs`
 - `scripts/coexist/start-background.ps1`
+- `scripts/cognitive/ci-chain-print.ts`
+- `scripts/cognitive/ci-chain.ts`
+- `scripts/cognitive/ci-runner.ts`
+- `scripts/cognitive/document-answer.ts`
+- `scripts/cognitive/document-corpus-discover.py`
+- `scripts/cognitive/document-corpus-observe.ts`
+- `scripts/cognitive/document-corpus-prepare.py`
+- `scripts/cognitive/document-coverage-metrics.ts`
+- `scripts/cognitive/document-coverage-verify.ts`
+- `scripts/cognitive/document-fact-flow-verify.ts`
+- `scripts/cognitive/document-metric-verify.ts`
+- `scripts/cognitive/document-pages-verify.ts`
+- `scripts/cognitive/document-profile-runner-verify.py`
+- `scripts/cognitive/document-profile-runner.py`
+- `scripts/cognitive/document-profile-verify.ts`
+- `scripts/cognitive/document-quality-verify.ts`
+- `scripts/cognitive/document-quality.ts`
+- `scripts/cognitive/document-question-bed.ts`
+- `scripts/cognitive/document-question-live.ts`
+- `scripts/cognitive/document-question-verify.ts`
+- `scripts/cognitive/document-reading-bed.ts`
+- `scripts/cognitive/document-recovery-pilot.ts`
+- `scripts/cognitive/document-recovery-verify.ts`
+- `scripts/cognitive/document-reference-crops.py`
+- `scripts/cognitive/document-reference-diagnose.py`
+- `scripts/cognitive/document-reference-packet.ts`
+- `scripts/cognitive/document-strategy-compare.ts`
+- `scripts/cognitive/evaluation-recording-verify.ts`
+- `scripts/cognitive/evaluation-recording.ts`
+- `scripts/cognitive/export-restore.ts`
+- `scripts/cognitive/f0-learning-assembly-verify.ts`
+- `scripts/cognitive/f0-learning-core-verify.ts`
+- `scripts/cognitive/f0-learning-core.ts`
+- `scripts/cognitive/f0-learning-live.ts`
+- `scripts/cognitive/f1-endpoint-metadata.ts`
+- `scripts/cognitive/f1-family-scope-verify.ts`
+- `scripts/cognitive/f1-gate-bundle.ts`
+- `scripts/cognitive/f1-live-runner-guards.ts`
+- `scripts/cognitive/f1-live-runner.ts`
+- `scripts/cognitive/f1-precondition-core.ts`
+- `scripts/cognitive/f1-precondition-evidence-verify.ts`
+- `scripts/cognitive/f1-precondition-formation-verify.ts`
+- `scripts/cognitive/f1-precondition-reachability-verify.ts`
+- `scripts/cognitive/f1-precondition-verify.ts`
+- `scripts/cognitive/f1-precondition-veto-integration-verify.ts`
+- `scripts/cognitive/f1-precondition-veto-verify.ts`
+- `scripts/cognitive/f1-prereg-negative-controls-verify.ts`
+- `scripts/cognitive/f1-quota-params-verify.ts`
+- `scripts/cognitive/f1-readiness-verify.ts`
+- `scripts/cognitive/f1-rule-shape-verify.ts`
+- `scripts/cognitive/f1-runner-guards-verify.ts`
+- `scripts/cognitive/f1-three-arm-factory.ts`
+- `scripts/cognitive/f1-three-arm-parity-verify.ts`
+- `scripts/cognitive/f2-actionturn-closed-loop-verify.ts`
+- `scripts/cognitive/f2-assembly-entry-verify.ts`
+- `scripts/cognitive/f2-measurability-calibration.ts`
+- `scripts/cognitive/f2-prep-read-verify.ts`
+- `scripts/cognitive/f2-rule-source-scope-verify.ts`
+- `scripts/cognitive/f2-source-attribution-verify.ts`
+- `scripts/cognitive/f2-source-scope-authorization-verify.ts`
+- `scripts/cognitive/f2-source-veto-integration-verify.ts`
+- `scripts/cognitive/f2-task-entry-verify.ts`
+- `scripts/cognitive/file-planning-bed.ts`
+- `scripts/cognitive/pdfminer-runner.py`
+- `scripts/cognitive/pg-snapshot-verify.ts`
+- `scripts/cognitive/rule-successor-verify.ts`
+- `scripts/cognitive/scenario-isolation-verify.ts`
+- `scripts/cognitive/simulation-planner-live.ts`
+- `scripts/cognitive/simulation-planner-verify.ts`
+- `scripts/cognitive/simulation-production-verify.ts`
+- `scripts/debt-memory-lists-verify.ts`
+- `scripts/debt-selectors-verify.ts`
 - `scripts/deploy/postgresql-backup.ts`
 - `scripts/deploy/runtime-health.ts`
 - `scripts/deploy/source-manifest.mjs`
@@ -520,6 +614,7 @@
 - `scripts/diag-seed-db-diff.ts`
 - `scripts/diag-seed-diff.ts`
 - `scripts/diag-state-db.ts`
+- `scripts/epistemic-belief-evidence.ts`
 - `scripts/executor-result-deadline-verify.ts`
 - `scripts/fixtures/retired-tavily-config.ts`
 - `scripts/fixtures/retired-tavily-search-provider.ts`
@@ -527,7 +622,9 @@
 - `scripts/gates/affected-map.ts`
 - `scripts/gates/cache.ts`
 - `scripts/gates/manifest.ts`
+- `scripts/gates/pg-target.ts`
 - `scripts/gates/reuse.ts`
+- `scripts/gates/run-pg-script.ts`
 - `scripts/gates/runner.ts`
 - `scripts/gates/types.ts`
 - `scripts/inc-01-lease-child.ts`
@@ -646,6 +743,7 @@
 - `scripts/postgresql-cutover-probe.ts`
 - `scripts/postgresql/backup.ts`
 - `scripts/postgresql/column-encoding.ts`
+- `scripts/postgresql/compatibility-catalog.ts`
 - `scripts/postgresql/credentials.ts`
 - `scripts/postgresql/external-assets.ts`
 - `scripts/postgresql/goal-fold-idempotency-probe.ts`
@@ -662,7 +760,9 @@
 - `scripts/postgresql/projection-probe.ts`
 - `scripts/postgresql/qualification-probe.ts`
 - `scripts/postgresql/row-digest.ts`
+- `scripts/postgresql/scenario-gate.ts`
 - `scripts/postgresql/second-target-probe.ts`
+- `scripts/postgresql/snapshot-source.ts`
 - `scripts/postgresql/test-harness.ts`
 - `scripts/postlv2_appearance_client.js`
 - `scripts/postlv2_cosyvoice.py`
@@ -705,6 +805,7 @@
 - `scripts/postlv2-wake-name-table.py`
 - `scripts/priority-backup-verify.ts`
 - `scripts/priority-executor-verify.ts`
+- `scripts/priority-main-pg-verify.ts`
 - `scripts/priority-main-verify.ts`
 - `scripts/priority-tools-verify.ts`
 - `scripts/productivity-skills/assembly.ts`
@@ -726,8 +827,14 @@
 - `scripts/qq/prepare-verify.ts`
 - `scripts/qq/start.cmd`
 - `scripts/qq/start.ps1`
+- `scripts/reminder-cancellation-live.ts`
+- `scripts/reminder-cancellation-truth-verify.ts`
 - `scripts/reminder-channels-frontend-verify.mjs`
 - `scripts/reminder-channels-shell-verify.py`
+- `scripts/reminder-delivery-context-verify.ts`
+- `scripts/reminder-delivery-main-verify.ts`
+- `scripts/reminder-model-decision-verify.ts`
+- `scripts/s1-e2-qq-probe.ts`
 - `scripts/scenario-json.ts`
 - `scripts/seed-m4.5-ledger-fixture.ts`
 - `scripts/semantic-empty-recall-verify.ts`
@@ -736,22 +843,15 @@
 - `scripts/test-persist-read.ts`
 - `scripts/test-persist-write.ts`
 - `scripts/text-scan.ts`
-- `scripts/thinhost-base-ddl-verify.ts`
-- `scripts/thinhost-bootstrap-fingerprint.ts`
-- `scripts/thinhost-capture-base-ddl.ts`
+- `scripts/thinhost-bootstrap-baseline.ts`
+- `scripts/thinhost-bootstrap-verify.ts`
 - `scripts/thinhost-codemod-c.ts`
 - `scripts/thinhost-codemod-dynamic.ts`
 - `scripts/thinhost-codemod-final.ts`
 - `scripts/thinhost-codemod-local-imports.ts`
 - `scripts/thinhost-codemod-sqlplugin.ts`
 - `scripts/thinhost-codemod-types.ts`
-- `scripts/thinhost-isolation-verify.ts`
-- `scripts/thinhost-lgmigration-verify.ts`
-- `scripts/thinhost-logger-verify.ts`
-- `scripts/thinhost-no-eliza-in-src-verify.ts`
-- `scripts/thinhost-reply-parser-freeze.ts`
 - `scripts/thinhost-script-cluster.ts`
-- `scripts/thinhost-vocabulary-verify.ts`
 - `scripts/utility-skills/assembly.ts`
 - `scripts/utility-skills/doc-runner.py`
 - `scripts/utility-skills/fixtures.ts`
@@ -762,6 +862,8 @@
 - `scripts/utility-skills/live.ts`
 - `scripts/utility-skills/make-fixtures.py`
 - `scripts/utility-skills/materialize-ocr-assets.ts`
+- `scripts/utility-skills/pdf-pages-runner.py`
+- `scripts/utility-skills/pdf-profile-runner.py`
 - `scripts/utility-skills/probe-delivery.ts`
 - `scripts/utility-skills/probe-documents.py`
 - `scripts/utility-skills/probe-groups.ts`
@@ -796,4 +898,5 @@
 - `scripts/wechat-group-verify.ts`
 - `scripts/wechat-main-verify.ts`
 - `scripts/world-model/isolated-bed.ts`
+- `scripts/xidian/solve-slider.py`
 

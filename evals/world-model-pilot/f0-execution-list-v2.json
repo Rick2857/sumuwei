@@ -1,0 +1,109 @@
+{
+  "version": "f0-execution-list@2",
+  "phase": "development",
+  "status": "TO_BE_SEALED_BY_RUNNER",
+  "supersedes": "f0-execution-list@1",
+  "protocol": "cognitive-evaluation@1",
+  "scope": "L 轨 F0（稳定控制）：当前明确沙箱读写/读回关系；测**额外负担**，不承担'发现新规律'的主张。",
+  "size": {
+    "worlds": 3,
+    "tasksPerWorld": 8,
+    "arms": 3,
+    "uniqueTasks": 24,
+    "totalTasks": 72,
+    "armExecutions": 72,
+    "note": "24 个**唯一任务**（3 世界 × 8），每个任务由三臂各执行一次 ⇒ **72 次臂执行 = 协议口径的 72 个任务**；协议写的 144 = F0 72 + F1 72。"
+  },
+  "changeFromV1": {
+    "why": "v1 把协议的上界（≤12 动作 / ≤6 请求 / ≤6 规划）直接抄成每任务上限，但执行床位（file-planning-bed）实际只给 maxActions=4、maxPlans=1；不先把口径对齐，运行器就只能'自称达标'或'悄悄超限'。",
+    "now": "本版改为**执行器实际消耗的上限**，并逐条标注它落在协议上界之内；同时明确**候选池共享**（见 candidatePool）。"
+  },
+  "taskShape": {
+    "perWorld": [
+      { "phase": "early_contact", "count": 3, "note": "前三个任务**不**预赠正确规则；未学会也计入该世界结果。" },
+      { "phase": "new_binding", "count": 3, "note": "同一规律族换一个对象（新的路径/内容实例）。" },
+      { "phase": "scope_control", "count": 2, "note": "范围/稳定控制：确认规则没有被外推、也没有反复失效。" }
+    ],
+    "formatFamilies": "沿用文件选择器协议的四个已声明格式族（多行中文 / JSON / 引号与反斜线 / 空白与末尾换行）",
+    "instances": "由 scripts/cognitive/f0-learning-core.ts 的**纯函数**生成（确定性、无随机数）⇒ 清单绑定该文件的摘要即等价于绑定实例；每世界每任务路径与内容都不同。",
+    "familyKey": "**显式 `familyId`**（`f0-family-a/b/c`），且生成器断言族键 ≠ 目录前缀 —— 不把任意目录天然当成规律族。",
+    "oracle": "真值只在执行器侧（`scoreFileTask` 语义：字节匹配 + 最后一次真实读回指纹 + 假完成）；规划器与评分器都看不到族内真值表。"
+  },
+  "candidatePool": {
+    "mode": "shared_per_task",
+    "what": "每个任务只**真实调用一次**模型，得到 3 份候选；三臂收到**逐字相同**的任务与候选池，各自在自己的隔离库里执行。",
+    "why": "沿用文件选择器协议的预注册口径：'模型生成成本实际只发生一次，但每臂均按一次生成调用计费口径记账'。F0 的主读数是**规则机制的额外负担**，共享候选池把'选路差异'与'生成差异'分开。",
+    "deviationFromL": "协议 §3 说 L 各臂按**自己的**真实历史规划。F0 是**稳定控制**、三臂初始状态与任务序列相同、历史不会显著分叉 ⇒ 本清单**显式声明**采用共享池，并在读数里把'共享生成按每臂各记 1 次'写清；**不得**因此把 F0 读成'学习收益'。",
+    "billing": "同一次生成在 A/B/C 三臂各记 1 次模型请求（合计 3 次/任务），总记账 216 次。"
+  },
+  "arms": [
+    {
+      "id": "A",
+      "name": "LG 强基线",
+      "selection": "模型排第一的候选（`first_ranked`）",
+      "keeps": "同一 Kernel、Gateway、EBL 观察者、真实执行反馈；**不**用规则排序或否决",
+      "infoParity": "三臂同信息、同权限、同预算"
+    },
+    {
+      "id": "B",
+      "name": "简单条件策略",
+      "selection": "首个**静态**满足明确目标（写目标路径 + 内容逐字相等 + 其后有该路径的读取）的候选；没有则保持原顺序（`static_none_first_ranked`）",
+      "note": "纯语法检查，不模拟、不查规则库；**只写不读不算满足**（离线门已断言）"
+    },
+    {
+      "id": "C",
+      "name": "世界模型＋EBL",
+      "selection": "`createSimulationTaskPlanner`：仅当前适用且合格的规则可影响选路；无合格规则时按产品现状失败（冷启动成本如实计入）",
+      "note": "复用生产已激活的模拟核心，**不改其政策**；默认关闭的开关状态不变"
+    }
+  ],
+  "budget": {
+    "perTaskModelRequests": 1,
+    "perTaskModelRequestsBilled": 3,
+    "perArmPerTaskActions": 4,
+    "perArmPerTaskPlans": 1,
+    "perArmPerTaskWallClockMs": 120000,
+    "sequenceModelRequests": 72,
+    "sequenceBilledRequests": 216,
+    "sequenceWallClockMs": 3600000,
+    "tokenBudget": { "maxCompletionTokensPerRequest": 1600, "maxTotalTokens": 150000 },
+    "protocolUpperBounds": { "perTaskRealActions": 12, "perTaskModelRequests": 6, "perTaskPlans": 6, "perTaskWallClockMs": 120000 },
+    "note": "本清单的每任务上限（4 动作 / 1 规划 / 1 次真实生成）**都在协议上界之内**；训练动作全部计费。"
+  },
+  "metrics": {
+    "primary": "达成相同目标所**增加**的真实行动（每世界、每阶段、C/B 相对 A 的差值）",
+    "deltaRule": "只有**达成任务数相同**时才给差值，否则置 null（不许用少动作冒充节省）",
+    "mustAlsoReport": ["目标达成", "假完成", "越权/取消失效", "耗时", "token", "每世界差值", "每阶段拆分（早期/新绑定/范围控制）", "未完成数", "缺失/不可测数及原因"],
+    "notAllowed": "不用'仅成功任务平均动作'当主结论；达成率更低时不能用少行动宣称节省。"
+  },
+  "decision": {
+    "rule": "F0 **不要求**证明学习优势；主读数是**额外负担**。",
+    "stopConditions": [
+      "出现目标达成或边界退化 ⇒ **先修复再扩展**",
+      "隐私/真值泄漏、装配不公平 ⇒ 判无效（不是收益）",
+      "完成原规模（72 个任务）即止；不补采、不扩围"
+    ],
+    "conclusionSlots": "按协议 §6 的四类结论分列：测量无效 / 机制未就绪 / 有效但未获益 / 开发信号。"
+  },
+  "sealing": {
+    "listSha256": null,
+    "sealedBy": "scripts/cognitive/f0-learning-live.ts --seal",
+    "boundSources": [
+      "docs/architecture/Cognitive-Capability-Experiment-Protocol-2026-10-23.md",
+      "evals/world-model-pilot/f0-execution-list-v2.json",
+      "scripts/cognitive/f0-learning-core.ts",
+      "scripts/cognitive/f0-learning-live.ts",
+      "scripts/cognitive/file-planning-bed.ts"
+    ],
+    "rules": [
+      "清单在**任何真实模型请求之前**写定；改动即作废并重新封存",
+      "留出结果不得用于继续调参后仍自称独立验证",
+      "封存必须绑定**源码指纹 + 镜像 + 门结果**，且 `gateReadings` 不得有 MISSING（D5b 的教训）"
+    ]
+  },
+  "boundaries": [
+    "F0 用既有契约（读回规则）即可，**不需要** F1 的规则族扩展",
+    "F1 的 A–D 四项扩展仍 BLOCKED（见 L 轨契约缺口分析）",
+    "本清单**不**声称任何学习收益、行为收益或泛化能力"
+  ]
+}

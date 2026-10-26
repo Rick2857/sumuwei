@@ -69,6 +69,14 @@ export interface RunM3Options {
   suiteIds?: readonly string[]
   /** 子串过滤（匹配用例 id / 套件 id / 标签） */
   filter?: string
+  /**
+   * **精确**用例 id 清单（2026-10-21 新增 · 纯追加）。
+   *
+   * ⚠️ 为什么要有它：`filter` 是**子串**匹配 ⇒ 不能用来"只跑这一条用例"
+   *    （一个 id 可能是另一个 id / 标签的子串）。逐场景子进程门需要**精确**选中。
+   *    ⇒ 给了它时按 id **完全相等**筛；不给 ⇒ 行为与改动前逐字相同。
+   */
+  caseIds?: readonly string[]
   /** 报告里的模型标识 */
   modelProfile: string
   thresholds: EvalThresholds
@@ -120,12 +128,19 @@ export interface RunM3Output {
 
 export function selectSuites(
   suites: readonly EvalSuite[],
-  options: { suiteIds?: readonly string[]; filter?: string }
+  options: { suiteIds?: readonly string[]; filter?: string; caseIds?: readonly string[] }
 ): EvalSuite[] {
   let selected = [...suites]
   if (options.suiteIds && options.suiteIds.length > 0) {
     const wanted = new Set(options.suiteIds)
     selected = selected.filter((suite) => wanted.has(suite.id))
+  }
+  if (options.caseIds && options.caseIds.length > 0) {
+    // ⚠️ **精确**匹配（不是子串）：逐场景子进程门靠它"只跑这一条用例"
+    const wanted = new Set(options.caseIds)
+    selected = selected
+      .map((suite) => ({ ...suite, cases: suite.cases.filter((item) => wanted.has(item.id)) }))
+      .filter((suite) => suite.cases.length > 0)
   }
   if (options.filter) {
     const needle = options.filter.toLowerCase()

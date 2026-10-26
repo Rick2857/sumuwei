@@ -1,0 +1,12 @@
+[Unit]
+Description=Refresh Project LG Xidian timetable every hour
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=1h
+RandomizedDelaySec=60
+Persistent=true
+Unit=lg-xidian-sync.service
+
+[Install]
+WantedBy=timers.target

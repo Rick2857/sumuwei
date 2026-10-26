@@ -1,0 +1,524 @@
+{
+  "upstream": "@elizaos/plugin-sql@1.7.2",
+  "backend": "postgres",
+  "tables": [
+    {
+      "name": "agents",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "not_null": true,
+          "default": "gen_random_uuid()"
+        },
+        {
+          "name": "enabled",
+          "type": "boolean",
+          "not_null": true,
+          "default": "true"
+        },
+        {
+          "name": "server_id",
+          "type": "uuid",
+          "not_null": false,
+          "default": null
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "not_null": true,
+          "default": "now()"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "not_null": true,
+          "default": "now()"
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "username",
+          "type": "text",
+          "not_null": false,
+          "default": null
+        },
+        {
+          "name": "system",
+          "type": "text",
+          "not_null": false,
+          "default": "''::text"
+        },
+        {
+          "name": "bio",
+          "type": "jsonb",
+          "not_null": false,
+          "default": "'[]'::jsonb"
+        },
+        {
+          "name": "message_examples",
+          "type": "jsonb",
+          "not_null": true,
+          "default": "'[]'::jsonb"
+        },
+        {
+          "name": "post_examples",
+          "type": "jsonb",
+          "not_null": true,
+          "default": "'[]'::jsonb"
+        },
+        {
+          "name": "topics",
+          "type": "jsonb",
+          "not_null": true,
+          "default": "'[]'::jsonb"
+        },
+        {
+          "name": "adjectives",
+          "type": "jsonb",
+          "not_null": true,
+          "default": "'[]'::jsonb"
+        },
+        {
+          "name": "knowledge",
+          "type": "jsonb",
+          "not_null": true,
+          "default": "'[]'::jsonb"
+        },
+        {
+          "name": "plugins",
+          "type": "jsonb",
+          "not_null": true,
+          "default": "'[]'::jsonb"
+        },
+        {
+          "name": "settings",
+          "type": "jsonb",
+          "not_null": true,
+          "default": "'{}'::jsonb"
+        },
+        {
+          "name": "style",
+          "type": "jsonb",
+          "not_null": true,
+          "default": "'{}'::jsonb"
+        }
+      ],
+      "constraints": [
+        {
+          "name": "agents_pkey",
+          "definition": "PRIMARY KEY (id)"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "agents_pkey",
+          "definition": "CREATE UNIQUE INDEX agents_pkey ON public.agents USING btree (id)"
+        }
+      ]
+    },
+    {
+      "name": "entities",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "agent_id",
+          "type": "uuid",
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp without time zone",
+          "not_null": true,
+          "default": "now()"
+        },
+        {
+          "name": "names",
+          "type": "text[]",
+          "not_null": true,
+          "default": "'{}'::text[]"
+        },
+        {
+          "name": "metadata",
+          "type": "jsonb",
+          "not_null": true,
+          "default": "'{}'::jsonb"
+        }
+      ],
+      "constraints": [
+        {
+          "name": "entities_agent_id_agents_id_fk",
+          "definition": "FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE"
+        },
+        {
+          "name": "entities_pkey",
+          "definition": "PRIMARY KEY (id)"
+        },
+        {
+          "name": "id_agent_id_unique",
+          "definition": "UNIQUE (id, agent_id)"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "entities_pkey",
+          "definition": "CREATE UNIQUE INDEX entities_pkey ON public.entities USING btree (id)"
+        },
+        {
+          "name": "id_agent_id_unique",
+          "definition": "CREATE UNIQUE INDEX id_agent_id_unique ON public.entities USING btree (id, agent_id)"
+        }
+      ]
+    },
+    {
+      "name": "worlds",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "not_null": true,
+          "default": "gen_random_uuid()"
+        },
+        {
+          "name": "agent_id",
+          "type": "uuid",
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "metadata",
+          "type": "jsonb",
+          "not_null": false,
+          "default": null
+        },
+        {
+          "name": "message_server_id",
+          "type": "uuid",
+          "not_null": false,
+          "default": null
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp without time zone",
+          "not_null": true,
+          "default": "now()"
+        }
+      ],
+      "constraints": [
+        {
+          "name": "worlds_agent_id_agents_id_fk",
+          "definition": "FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE"
+        },
+        {
+          "name": "worlds_pkey",
+          "definition": "PRIMARY KEY (id)"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "worlds_pkey",
+          "definition": "CREATE UNIQUE INDEX worlds_pkey ON public.worlds USING btree (id)"
+        }
+      ]
+    },
+    {
+      "name": "rooms",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "not_null": true,
+          "default": "gen_random_uuid()"
+        },
+        {
+          "name": "agent_id",
+          "type": "uuid",
+          "not_null": false,
+          "default": null
+        },
+        {
+          "name": "source",
+          "type": "text",
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "type",
+          "type": "text",
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "message_server_id",
+          "type": "uuid",
+          "not_null": false,
+          "default": null
+        },
+        {
+          "name": "world_id",
+          "type": "uuid",
+          "not_null": false,
+          "default": null
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "not_null": false,
+          "default": null
+        },
+        {
+          "name": "metadata",
+          "type": "jsonb",
+          "not_null": false,
+          "default": null
+        },
+        {
+          "name": "channel_id",
+          "type": "text",
+          "not_null": false,
+          "default": null
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp without time zone",
+          "not_null": true,
+          "default": "now()"
+        }
+      ],
+      "constraints": [
+        {
+          "name": "rooms_agent_id_agents_id_fk",
+          "definition": "FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE"
+        },
+        {
+          "name": "rooms_pkey",
+          "definition": "PRIMARY KEY (id)"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "rooms_pkey",
+          "definition": "CREATE UNIQUE INDEX rooms_pkey ON public.rooms USING btree (id)"
+        }
+      ]
+    },
+    {
+      "name": "participants",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "not_null": true,
+          "default": "gen_random_uuid()"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "not_null": true,
+          "default": "now()"
+        },
+        {
+          "name": "entity_id",
+          "type": "uuid",
+          "not_null": false,
+          "default": null
+        },
+        {
+          "name": "room_id",
+          "type": "uuid",
+          "not_null": false,
+          "default": null
+        },
+        {
+          "name": "agent_id",
+          "type": "uuid",
+          "not_null": false,
+          "default": null
+        },
+        {
+          "name": "room_state",
+          "type": "text",
+          "not_null": false,
+          "default": null
+        }
+      ],
+      "constraints": [
+        {
+          "name": "fk_room",
+          "definition": "FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE"
+        },
+        {
+          "name": "fk_user",
+          "definition": "FOREIGN KEY (entity_id) REFERENCES entities(id) ON DELETE CASCADE"
+        },
+        {
+          "name": "participants_agent_id_agents_id_fk",
+          "definition": "FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE"
+        },
+        {
+          "name": "participants_entity_id_entities_id_fk",
+          "definition": "FOREIGN KEY (entity_id) REFERENCES entities(id) ON DELETE CASCADE"
+        },
+        {
+          "name": "participants_pkey",
+          "definition": "PRIMARY KEY (id)"
+        },
+        {
+          "name": "participants_room_id_rooms_id_fk",
+          "definition": "FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_participants_room",
+          "definition": "CREATE INDEX idx_participants_room ON public.participants USING btree (room_id)"
+        },
+        {
+          "name": "idx_participants_user",
+          "definition": "CREATE INDEX idx_participants_user ON public.participants USING btree (entity_id)"
+        },
+        {
+          "name": "participants_pkey",
+          "definition": "CREATE UNIQUE INDEX participants_pkey ON public.participants USING btree (id)"
+        }
+      ]
+    },
+    {
+      "name": "memories",
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "type",
+          "type": "text",
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp without time zone",
+          "not_null": true,
+          "default": "now()"
+        },
+        {
+          "name": "content",
+          "type": "jsonb",
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "entity_id",
+          "type": "uuid",
+          "not_null": false,
+          "default": null
+        },
+        {
+          "name": "agent_id",
+          "type": "uuid",
+          "not_null": true,
+          "default": null
+        },
+        {
+          "name": "room_id",
+          "type": "uuid",
+          "not_null": false,
+          "default": null
+        },
+        {
+          "name": "world_id",
+          "type": "uuid",
+          "not_null": false,
+          "default": null
+        },
+        {
+          "name": "unique",
+          "type": "boolean",
+          "not_null": true,
+          "default": "true"
+        },
+        {
+          "name": "metadata",
+          "type": "jsonb",
+          "not_null": true,
+          "default": "'{}'::jsonb"
+        }
+      ],
+      "constraints": [
+        {
+          "name": "document_metadata_check",
+          "definition": "CHECK (\nCASE\n    WHEN ((metadata ->> 'type'::text) = 'document'::text) THEN (metadata ? 'timestamp'::text)\n    ELSE true\nEND)"
+        },
+        {
+          "name": "fk_agent",
+          "definition": "FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE"
+        },
+        {
+          "name": "fragment_metadata_check",
+          "definition": "CHECK (\nCASE\n    WHEN ((metadata ->> 'type'::text) = 'fragment'::text) THEN ((metadata ? 'documentId'::text) AND (metadata ? 'position'::text))\n    ELSE true\nEND)"
+        },
+        {
+          "name": "memories_agent_id_agents_id_fk",
+          "definition": "FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE"
+        },
+        {
+          "name": "memories_entity_id_entities_id_fk",
+          "definition": "FOREIGN KEY (entity_id) REFERENCES entities(id) ON DELETE CASCADE"
+        },
+        {
+          "name": "memories_pkey",
+          "definition": "PRIMARY KEY (id)"
+        },
+        {
+          "name": "memories_room_id_rooms_id_fk",
+          "definition": "FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_fragments_order",
+          "definition": "CREATE INDEX idx_fragments_order ON public.memories USING btree (((metadata ->> 'documentId'::text)), ((metadata ->> 'position'::text)))"
+        },
+        {
+          "name": "idx_memories_document_id",
+          "definition": "CREATE INDEX idx_memories_document_id ON public.memories USING btree (((metadata ->> 'documentId'::text)))"
+        },
+        {
+          "name": "idx_memories_metadata_type",
+          "definition": "CREATE INDEX idx_memories_metadata_type ON public.memories USING btree (((metadata ->> 'type'::text)))"
+        },
+        {
+          "name": "idx_memories_type_room",
+          "definition": "CREATE INDEX idx_memories_type_room ON public.memories USING btree (type, room_id)"
+        },
+        {
+          "name": "idx_memories_world_id",
+          "definition": "CREATE INDEX idx_memories_world_id ON public.memories USING btree (world_id)"
+        },
+        {
+          "name": "memories_pkey",
+          "definition": "CREATE UNIQUE INDEX memories_pkey ON public.memories USING btree (id)"
+        }
+      ]
+    }
+  ]
+}

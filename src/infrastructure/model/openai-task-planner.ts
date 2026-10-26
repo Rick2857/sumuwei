@@ -31,6 +31,8 @@ import {
   type TaskPlannerPort,
   type TaskPlanParseCode,
   parseTaskPlan,
+  extractTaskPlanJson,
+  validateTaskPlan,
   toSafeTaskPlanParseCode,
 } from '../../kernel/action/task-plan.ts'
 import type { CapabilityRegistry } from '../../kernel/action/capability-registry.ts'
@@ -65,6 +67,8 @@ export interface OpenAiTaskPlannerOptions {
   maxTokens?: number
   /** 能力登记表（解析计划时要问"这个操作存在吗"） */
   registry: CapabilityRegistry
+  /** Opt-in up to three alternatives; ordinary planner output remains unchanged. */
+  candidateCount?: 3
 }
 
 interface ChatCompletionResponse {
@@ -109,6 +113,9 @@ export function buildTaskPlannerInstruction(allowedCapabilities: readonly string
     ...lines,
     '',
     'operation 取值：',
+    ...(allowedCapabilities.includes('document.extract') ? ['document.extract=read，reader 仅为 markitdown 或 pdfminer；只读用户明确给出的 PDF 路径。'] : []),
+    ...(allowedCapabilities.includes('document.profile') ? ['document.profile=inspect，只读 path 的结构，不返回正文；部分检查或失败时文本层未知。'] : []),
+    ...(allowedCapabilities.includes('document.pages') ? ['document.pages=read，firstPage/lastPage 为从 1 开始的物理页，最多 4 页、总 1200 字符；reader 仅 pdfplumber/pdfminer，可选 prefixChars 每页前缀。只读明确请求范围，截断不能说整页已读完。'] : []),
     '  local.file.list=list · local.file.read=read · local.file.write=write ·',
     '  document.read=read · image.ocr=recognize · math.calculate=evaluate ·',
     '  web.read=read · weather.query=forecast · office.generate=generate ·',
@@ -262,7 +269,9 @@ export function createOpenAiTaskPlanner(options: OpenAiTaskPlannerOptions): Task
           },
           body: JSON.stringify({
             model,
-            messages: buildTaskPlannerMessages(input),
+            messages: options.candidateCount === 3
+              ? [{ role: 'system', content: '只输出 JSON：{"candidates":[plan,...]}，含1到3份完整候选，最佳放第一。每份 plan 恰好 goal 字符串、done 布尔、steps 数组，最多4步。每步恰好 capability、operation、args 三个字段；例如 {"capability":"sandbox.file.write","operation":"write","args":{"path":"example.txt","content":"原文"}}。只允许 sandbox.file.write/write，args 恰好 path/content；sandbox.file.read/read，args 恰好 path。路径逐字采用任务给定相对路径，正文逐字采用指定字符串解码后的内容。每份计划均须包含最终真实读回；不要声称已执行。只有已执行摘要证明目标已完成时，才给 steps=[]/done=true 的收尾计划。' }, buildTaskPlannerMessages(input)[1]!]
+              : buildTaskPlannerMessages(input),
             temperature: 0,
             max_tokens: maxTokens,
             stream: false,
@@ -291,6 +300,14 @@ export function createOpenAiTaskPlanner(options: OpenAiTaskPlannerOptions): Task
         if (typeof content !== 'string') return failed('invalid_output', 1, 'task_plan_not_object')
 
         try {
+          if (options.candidateCount === 3) {
+            const pool = extractTaskPlanJson(content) as { candidates?: unknown[] }
+            if (!pool || Object.keys(pool).length !== 1 || !Array.isArray(pool.candidates) || pool.candidates.length < 1 || pool.candidates.length > 3) {
+              return failed('invalid_output', 1)
+            }
+            const candidates = pool.candidates.map(value => validateTaskPlan(value, { registry, allowedCapabilities: input.allowedCapabilities }))
+            return { ok: true, plan: candidates[0]!, candidates, requestCount: 1 }
+          }
           const plan: TaskPlan = parseTaskPlan(content, {
             registry,
             allowedCapabilities: input.allowedCapabilities,

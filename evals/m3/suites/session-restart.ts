@@ -29,6 +29,7 @@
 import type { EvalSuite } from '../types.ts'
 import {
   conversationSequencesContiguous,
+  conversationSequencesFromOne,
   det,
   everyEvent,
   fail,
@@ -309,6 +310,30 @@ export const sessionRestartSuite: EvalSuite = {
              * 指向错误的方向，而那比不报警更糟。
              */
             return conversationSequencesContiguous(observation.newEvents)
+          },
+        }),
+        det({
+          id: 'whole-conversation-sequences-from-one',
+          description: '整条会话的会话内序号必须是 1…n（账本里没有跳号、没有重复）',
+          metric: 'EventOrderingErrorRate',
+          check: (observation) => {
+            /*
+             * ⚠️ 这条是上面那条的**补充**，不是重复。
+             *
+             * 上面那条判"本轮新增的增量里没有洞"（因为对**继续中的**会话，
+             * 增量天然不从 1 开始）。而"整条会话从 1 起连续"这条性质
+             * **仍然要有人守** —— 否则"增量没洞"会放过"整条账本从 3 开始"
+             * 这种更严重的情况。
+             *
+             * ⇒ 这里用**整条账本**的会话内序号（`ledgerSequences`）来判。
+             */
+            const ledgerSequences = observation.attributes?.ledgerSequences as
+              | number[]
+              | undefined
+            if (!Array.isArray(ledgerSequences) || ledgerSequences.length === 0) {
+              return fail('装置没有给出整条账本的会话内序号（无法判定）')
+            }
+            return conversationSequencesFromOne(ledgerSequences)
           },
         }),
       ],

@@ -59,6 +59,17 @@ export const AFFECTED_RULES: readonly AffectedRule[] = [
     gates: ['typecheck'],
   },
   {
+    what: 'EBL 生命周期、来源与执行接线',
+    match: ['src/kernel/contracts/epistemic-belief.ts', 'src/kernel/app/epistemic-belief-lifecycle/**',
+      'src/infrastructure/persistence/epistemic-belief-*.ts', 'src/infrastructure/runtime/epistemic-*.ts',
+      'src/infrastructure/runtime/adapters.ts', 'src/infrastructure/runtime/belief-scheduler.ts',
+      'src/infrastructure/runtime/post-turn-model-memory.ts', 'src/infrastructure/model/langmem-memory-extractor.ts',
+      'src/kernel/contracts/belief-renderer.ts', 'src/kernel/app/turn-gateway.ts',
+      'scripts/epistemic-belief-*.ts', 'evals/epistemic-belief-lifecycle/**',
+      'src/kernel/action/task-loop.ts', 'src/kernel/action/action-turn.ts', 'src/kernel/app/flags.ts', 'src/main.ts'],
+    gates: ['ebl:verify', 'ebl:postgres:verify', 'ebl:human:verify'],
+  },
+  {
     what: '`src/kernel/contracts/**`、`src/kernel/policies/validator.ts`、`src/kernel/projections/**`',
     match: ['src/kernel/contracts/**', 'src/kernel/policies/validator.ts', 'src/kernel/projections/**'],
     gates: ['kernel:test', 'kernel:verify'],
@@ -201,6 +212,67 @@ export const AFFECTED_RULES: readonly AffectedRule[] = [
     gates: ['m4.5:test', 'm4.5:verify', 'm4.5:measurement:verify', 'm4.5:nl-action:verify',
       /* ⚠️ 2026-10-05（`AUD-20261005-03`）：角色工具决策面就在这一组路径里（目录 / 规划器 / 限定路径） */
       'postlv2:role-tool:verify', 'postlv2:role-tool:path'],
+  },
+  {
+    /*
+     * 三域应用方案（2026-10-19 / 2026-10-20）的**行动预测**那一支。
+     *
+     * ⚠️ 为什么必须单独登记（可复核）：`src/kernel/action/**` 那条规则**不含**
+     *    `src/kernel/contracts/world-model.ts`、不含 `src/infrastructure/model/openai-action-forecast.ts`，
+     *    也不含 `src/main.ts` 与 `src/kernel/app/flags.ts` ——
+     *    也就是说"改了预测契约 / 改了开关接线"当时是**结构上可能**的一道门都不红
+     *    （同型先例：QQ 主动联系、浏览器全工具档，已各修过一次）。
+     */
+    what: '世界模型三处应用：共用最小契约 / 行动预测（工具与任务执行域）',
+    match: [
+      'src/kernel/contracts/world-model.ts',
+      'src/kernel/action/action-forecast.ts',
+      'src/kernel/action/task-loop.ts',
+      'src/kernel/action/action-turn.ts',
+      'src/infrastructure/model/openai-action-forecast.ts',
+      'scripts/world-model-action-forecast-verify.ts',
+    ],
+    gates: ['worldmodel:forecast:verify'],
+  },
+  {
+    /*
+     * 三域应用方案的**反思域**（比较材料）那一支。
+     *
+     * ⚠️ 同样必须单独登记：`src/kernel/app/reflection/**` 与
+     *    `src/infrastructure/persistence/reflection-*.ts` 此前**不在**任何
+     *    affected 规则里 ⇒ 改了比较材料**一道门都不红**是结构上可能的。
+     */
+    what: '世界模型三处应用：反思域比较材料（辅助解释，不是证据）',
+    match: [
+      'src/kernel/app/reflection/outcome-comparison.ts',
+      'src/kernel/app/reflection/draft-port.ts',
+      'src/infrastructure/runtime/reflection-runner.ts',
+      'src/infrastructure/runtime/reflection-runtime.ts',
+      'src/infrastructure/persistence/reflection-comparison-source.ts',
+      'scripts/world-model-reflection-comparison-verify.ts',
+    ],
+    gates: ['worldmodel:reflection:verify'],
+  },
+  {
+    /*
+     * 反思域的**隔离整链**（需要库）。
+     *
+     * ⚠️ **不进快车道**：它要创建隔离 PostgreSQL 容器并运行迁移，
+     *    而且是"整链"而不是"受影响的那一格" ⇒ `pnpm fast` 跑它会拖慢每次改动。
+     *    ⇒ 只登记门名（`pnpm worldmodel:reflection:e2e` 手动/收口时跑）。
+     */
+    what: '世界模型三处应用：反思域隔离整链（不做快车道，收口时手动跑）',
+    match: ['scripts/world-model-reflection-e2e-verify.ts', 'scripts/postgresql/test-harness.ts'],
+    gates: [],
+  },
+  {
+    /*
+     * 聚合门：只读已落盘证据 ⇒ 便宜、可进快车道。
+     * ⚠️ 它**只在证据已经存在时**有意义；没跑过就是 `NOT RUN`（如实）。
+     */
+    what: '世界模型三处应用：只读聚合门（按域分列，不合成总分）',
+    match: ['scripts/world-model-gates.ts'],
+    gates: ['worldmodel:gates'],
   },
   {
     what: '`src/kernel/recall/**`、`memory-retrieval-store.ts`',

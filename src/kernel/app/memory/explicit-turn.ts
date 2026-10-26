@@ -49,6 +49,7 @@ import {
   detectExplicitIntentFromEvent,
   targetHintsFrom,
   type ExplicitMemoryIntentDetector,
+  type MemoryIntentContext,
 } from './intent-detector.ts'
 import type {
   ExplicitMemoryOutcome,
@@ -144,6 +145,7 @@ export interface CreateExplicitMemoryTurnOptions {
   service: ExplicitMemoryService
   /** 意图判定器。缺省 = 规则优先（离线安全） */
   detector?: ExplicitMemoryIntentDetector
+  readIntentContext?: (request: ExplicitMemoryTurnRequest) => Promise<MemoryIntentContext>
 }
 
 /**
@@ -179,7 +181,8 @@ export function createExplicitMemoryTurnPort(
        */
       if (request.event.actorType !== 'user') return undefined
 
-      const intent = await detectExplicitIntentFromEvent(detector, request.event)
+      const recent = await options.readIntentContext?.(request)
+      const intent = await detectExplicitIntentFromEvent(detector, request.event, recent)
       if (intent === undefined) return undefined
 
       const outcome = await options.service.handle({

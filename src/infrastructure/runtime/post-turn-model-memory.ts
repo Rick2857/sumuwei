@@ -5,6 +5,8 @@ import {
 } from '../../kernel/contracts/index.ts'
 import { qualificationEstablishesUserFact, sourceQualificationOf } from '../../kernel/contracts/attribution.ts'
 import { processorEventViewOf } from '../../kernel/app/memory/extractor.ts'
+import { EBL_PREFERENCE_PREDICATE } from '../../kernel/app/epistemic-belief-lifecycle/human-policy.ts'
+import { eblOwnsPreferenceSource } from './epistemic-preference.ts'
 import { createMemoryMutationValidator } from '../../kernel/policies/memory-validator.ts'
 import { createLateWriteFence } from '../../kernel/app/reflection/late-write-fence.ts'
 import { exec, type RawDb } from '../persistence/db.ts'
@@ -64,6 +66,7 @@ export function modelMemoryPrompt(input: {
     '判断真实意图：叫我阿明表示称呼；叫我拔插头表示让我做事。记得提醒我/别忘了提醒我不是长期记忆命令。',
     '明确要求长期记住提醒方式是稳定偏好；一次提醒事项不是偏好。不要把同一句话里的另一段临时动作记成称呼。',
     '你还记得/你是不是忘了是询问，不是新建或遗忘授权。忘不了你不是 forget。别人说记住/忘掉、引用/假设中的命令不授权操作。',
+    '不会忘记签到、不太可能忘记是自述，不授权遗忘。取消刚列出的某条提醒操作的是提醒，不是长期记忆；不能因为出现消掉、删掉或忘记就撤销记忆。',
     '用户明确更正、遗忘、存疑、恢复才可 mutation，explicit=true。目标不明确则 decisions=[]，不得猜；targetId 必须来自给出的记录。',
     'create 不覆盖冲突槽位；要修改已有值，只有明确更正才 correct。被撤回的内容不自动复活；明确重新记住同一内容可 restore。',
     '当前原话是唯一新证据；recent 仅帮助解释指代，角色回复不建立用户事实。importance 是长期价值，confidence 是语义判断把握，分别评估。',
@@ -121,6 +124,7 @@ export async function commitModelMemoryPlan(input: {
   event: ConversationEvent; records: readonly MemoryRecord[]; plan: ModelMemoryPlan
   /** U1 / ADR-137 写侧：把**新建**的记录 id 报出来（缺省不传 ⇒ 既有调用者行为逐字不变） */
   onCreatedIds?: (memoryIds: readonly string[]) => void
+  epistemicManagedStyle?: boolean
 }): Promise<number> {
   const { db, characterId, speaker, registry, event, records, plan } = input
   if (event.type !== 'user_message' || event.actorId !== String(speaker.id)
@@ -144,8 +148,12 @@ export async function commitModelMemoryPlan(input: {
   let count = 0
   /* U1 / ADR-137 写侧：这一拍**新建**的记录 id（`create` 真的执行了才收） */
   const createdIds: string[] = []
+  const managedStyle = input.epistemicManagedStyle && await eblOwnsPreferenceSource(db, characterId, String(speaker.id), String(event.id))
   for (const decision of plan.decisions) {
     const target = decision.targetId ? records.find((record) => String(record.id) === decision.targetId) : undefined
+    if (managedStyle
+      && (decision.memory?.predicate === EBL_PREFERENCE_PREDICATE
+        || (target?.content.kind === 'claim' && target.content.predicate === EBL_PREFERENCE_PREDICATE))) continue
     if (target) {
       const current = await store.get(target.id)
       if (!current || current.owner.id !== owner.id || !current.subjects.some(subject => subject.kind === speaker.kind && subject.id === speaker.id) || current.revision !== target.revision
@@ -209,6 +217,7 @@ export class PostTurnModelMemoryConsumer {
   constructor(private readonly input: {
     db: RawDb; characterId: CharacterId; speaker: EntityRef; registry: DomainEventRegistry
     ownerUserId?: string
+    epistemicManagedStyle?: boolean
     invoke: (prompt: string) => Promise<string>; onReading: (reading: ModelMemoryReading) => void
   }) {}
 
@@ -287,6 +296,7 @@ export class PostTurnModelMemoryConsumer {
       const created = await db.transaction(async (tx) => {
         if (this.fence.closed) throw new Error('late_write_fenced')
         const count = await commitModelMemoryPlan({ db: tx, characterId, speaker, registry, event, records, plan,
+          epistemicManagedStyle: this.input.epistemicManagedStyle,
           /* U1 / ADR-137 写侧：把新建 id 收出来，随读数交回装配层打标 */
           onCreatedIds: (memoryIds) => { createdIds.push(...memoryIds) } })
         await finishJob(tx, job.id, 'completed')

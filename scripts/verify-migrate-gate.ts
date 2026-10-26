@@ -55,6 +55,7 @@ import {
   shouldBlockForPendingKernelMigration,
 } from '../src/db/index.ts'
 import { getRawDb } from '../src/infrastructure/persistence/db.ts'
+import { restoreSimPgSnapshot } from './postgresql/snapshot-source.ts'
 
 let passed = 0
 let failed = 0
@@ -164,15 +165,21 @@ check(
 console.log('\n=== 3. 端到端：真实**副本**上的完整路径（真实库只被复制）===')
 // ===========================================================================
 
-const copySource = liveSmokeSource(process.argv.slice(2))
-console.log(`  副本源：${copySource.directory}（${copySource.kind}）`)
-check('已验证的副本源存在', existsSync(copySource.directory))
-
-const workDir = mkdtempSync(join(tmpdir(), 'project-lg-migrate-gate-'))
-cpSync(copySource.directory, workDir, { recursive: true })
-console.log(`  已复制为副本：${workDir}（真实库全程未被打开写入）`)
-
-process.env.PGLITE_DATA_DIR = workDir
+const isPostgres = process.env.CHARACTER_DB_BACKEND === 'postgres'
+let workDir: string | undefined
+let snapshot: Awaited<ReturnType<typeof restoreSimPgSnapshot>> | undefined
+if (isPostgres) {
+  snapshot = await restoreSimPgSnapshot(process.env.LG_TEST_PG_URL ?? '')
+  check('已验证的 PG 生产快照恢复到独立测试库，各表行数相符', snapshot.rows > 0,
+    `${snapshot.tables.length} 张表 / ${snapshot.rows} 行；sha256=${snapshot.sha256}`)
+} else {
+  const copySource = liveSmokeSource(process.argv.slice(2))
+  console.log(`  副本源：${copySource.directory}（${copySource.kind}）`)
+  check('已验证的副本源存在', existsSync(copySource.directory))
+  workDir = mkdtempSync(join(tmpdir(), 'project-lg-migrate-gate-'))
+  cpSync(copySource.directory, workDir, { recursive: true })
+  process.env.PGLITE_DATA_DIR = workDir
+}
 
 const makeRuntime = (): AgentRuntime =>
   createThinHostRuntime({
@@ -191,6 +198,19 @@ await setupRuntime.registerPlugin(undefined as never)
 await await __applyKernelMigrations(__getRawDb(setupRuntime))
 
 const db = getRawDb(setupRuntime)
+// 迁移之外的真实数据不得被清空或修改；只记录摘要，不输出私人正文。
+async function dataDigests(): Promise<unknown[]> {
+  const tables = snapshot?.tables.filter(table => ![
+    'public.character_schema_migrations', 'public.character_definition_versions',
+    'public.user_identity_mappings', 'public.user_identities', 'public.conversation_identities',
+  ].includes(table)) ?? []
+  return await Promise.all(tables.map(async table => {
+    const result = await db.execute(sql.raw(`select count(*)::int as count,
+      md5(coalesce(string_agg(row_to_json(r)::text, E'\\n' order by row_to_json(r)::text), '')) as digest from ${table} r`))
+    return { table, rows: (result as { rows?: unknown[] }).rows }
+  }))
+}
+const dataBefore = await dataDigests()
 // 回退一格：删掉 0003 建的东西与它的迁移记录，制造"有待应用迁移"
 for (const table of [
   'character_definition_versions',
@@ -201,7 +221,7 @@ for (const table of [
   await db.execute(sql.raw(`drop table if exists ${table}`))
 }
 await db.execute(sql`delete from character_schema_migrations where version = 3`)
-console.log('  已把副本的迁移表回退到 v2（模拟"有待应用迁移"）')
+console.log('  已移除副本的 #3 迁移记录与其专属表（模拟"有待应用迁移"，后续版本记录保留）')
 
 // --- 未放行：必须真的拒绝（这一条在副本上跑，因此可以真的验证）----------
 const blockedRuntime = makeRuntime()
@@ -213,13 +233,12 @@ try {
 }
 
 /*
- * ⚠️ 副本目录**不是**真实库路径，因此按设计这里**不会**被拦 ——
- * 这恰好说明闸的判据是"是不是真实库"，而不是"是不是有未应用迁移"。
- * 也就是说：这一节验证的是"副本不设防"这条**预期行为**。
+ * PGlite 副本按目录判据自动迁移；PostgreSQL 当前禁止所有启动期隐式 DDL，
+ * 测试副本也须显式放行。两种后端分别核对既有产品约束，不修改启动保护。
  */
 check(
-  '副本（非真实库路径）**不**被拦 —— 判据是路径，不是"有没有待办"',
-  refusal === undefined,
+  isPostgres ? 'PG 副本也拒绝启动期隐式迁移' : '副本（非真实库路径）**不**被拦 —— 判据是路径，不是"有没有待办"',
+  isPostgres ? refusal?.code === 'kernel_migration_pending' : refusal === undefined,
   refusal ? `被拦了：${refusal.code}` : '照常通过'
 )
 
@@ -227,9 +246,8 @@ const afterCopy = await db.execute(
   sql`select count(*)::int as c from character_schema_migrations where version = 3`
 )
 check(
-  '副本上的迁移已被自动应用（临时库不设防）',
-  Number((afterCopy as { rows?: { c: number }[] }).rows?.[0]?.c ?? 0) === 1,
-  'v3 已登记'
+  isPostgres ? 'PG 未放行时迁移记录未被修改' : '副本上的迁移已被自动应用（临时库不设防）',
+  Number((afterCopy as { rows?: { c: number }[] }).rows?.[0]?.c ?? 0) === (isPostgres ? 0 : 1)
 )
 
 // --- 另一个方向：真实库路径 + 未放行 → 拦（用真实的 PRODUCTION_DB_DIR 判定）---
@@ -255,6 +273,15 @@ check(
   '放行'
 )
 
+let maintenanceRuntime: AgentRuntime | undefined
+if (isPostgres) {
+  maintenanceRuntime = makeRuntime()
+  await initDatabase(maintenanceRuntime)
+  const migrated = await db.execute(sql`select count(*)::int as c from character_schema_migrations where version = 3`)
+  check('PG 显式放行后 #3 迁移实际完成', Number((migrated as { rows?: { c: number }[] }).rows?.[0]?.c) === 1)
+  check('PG 原始对话、记忆及其他非回退表的行数与内容摘要未变', JSON.stringify(await dataDigests()) === JSON.stringify(dataBefore))
+}
+
 // ===========================================================================
 console.log(`\n${'='.repeat(74)}`)
 console.log(`迁移闸验证：${passed} 通过 / ${failed} 失败`)
@@ -267,12 +294,13 @@ console.log('='.repeat(74))
 try {
   await setupRuntime.stop()
   await blockedRuntime.stop()
+  await maintenanceRuntime?.stop()
 } catch {
   /* 关不干净不影响结论 */
 }
 
 try {
-  rmSync(workDir, { recursive: true, force: true })
+  if (workDir !== undefined) rmSync(workDir, { recursive: true, force: true })
   console.log('副本已清理')
 } catch {
   console.log('副本未能清理（可手动删）')

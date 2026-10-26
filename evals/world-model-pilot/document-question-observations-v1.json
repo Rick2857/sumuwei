@@ -1,0 +1,61 @@
+{
+  "version": "document-question-observations@1",
+  "phase": "development",
+  "scope": "评测器私有的先验可答性观察；**不**进入模型请求、**不**改变已确认的题目清单",
+  "about": {
+    "why": "D3 批次在零预算（真正无内容）下观察到一道题模型仍能答对 ⇒ 该题的答案可能来自先验知识。为了不再把'拒答'读成'没有先验'，这里逐题登记先验可答性的**已知状态**。",
+    "notAChangeToTheQuestions": "已确认的六题清单 document-questions@1 **一字未动**（答案、页码、行列对应仍是用户确认过的那一版）；本文件只是观察登记。",
+    "howToTestWhetherTheDocumentIsUsedLater": "同一问题、**不同文档数值**的**配对版本**：观察答案是否随正文改变。配对材料必须**明确标注为派生材料**并**重新复核答案**，不能与本批读数混算。"
+  },
+  "observations": [
+    {
+      "questionId": "t-position-functions",
+      "priorAnswerability": "OBSERVED_PRIOR_ANSWERABLE_AT_DEFAULT_DEPTH_ONLY",
+      "evidence": "D3（默认/最大思考深度、零预算）：无任何可见正文时 answerCorrect=true、basis=document、sourceClaim=UNSUPPORTED、correctWithoutVisibleEvidence=true；D5b（reasoning_effort=low、同条件）：答 basis=insufficient（拒答），未答对",
+      "depthDependence": "同一条'先验可答'观察在低思考深度下不成立 ⇒ 该现象与思考深度相关，不能写成一概而论；'伪造文档来源'同样只在默认深度出现",
+      "keepInSet": true,
+      "whatItStillMeasures": "来源声明是否诚实（默认深度下曾出现'答对却谎称来自文档'）；低深度下的拒答",
+      "mustNotBeUsedFor": "不得用它声称'模型依赖文档才答对'；不得据它断言其它题的先验可答性；不得把'低深度下拒答'当成'证据核对能力'的证据（那一批没有低深度正常组作对照）"
+    },
+    {
+      "questionId": "t-parsing-training",
+      "priorAnswerability": "NOT_MEASURED",
+      "evidence": "零预算下未答对（reasoning_effort 诊断批次另行测量）",
+      "keepInSet": true,
+      "whatItStillMeasures": "槽位与来源",
+      "mustNotBeUsedFor": "拒答**不能**反推'没有先验知识'"
+    },
+    {
+      "questionId": "b-vocabulary-mask",
+      "priorAnswerability": "NOT_MEASURED",
+      "evidence": "零预算下答 insufficient；先验可答性未单独测量",
+      "keepInSet": true,
+      "whatItStillMeasures": "槽位与来源",
+      "mustNotBeUsedFor": "拒答**不能**反推'没有先验知识'"
+    },
+    {
+      "questionId": "b-rte-sizes",
+      "priorAnswerability": "NOT_MEASURED",
+      "evidence": "零预算下输出预算耗尽（finish_reason=length），未得到行为读数",
+      "keepInSet": true,
+      "whatItStillMeasures": "槽位与来源（换深度后重测）",
+      "mustNotBeUsedFor": "预算耗尽的读数**不能**当成'不会答'"
+    },
+    {
+      "questionId": "w-history-years",
+      "priorAnswerability": "NOT_MEASURED",
+      "evidence": "零预算下答 insufficient；先验可答性未单独测量",
+      "keepInSet": true,
+      "whatItStillMeasures": "槽位与来源",
+      "mustNotBeUsedFor": "拒答**不能**反推'没有先验知识'"
+    },
+    {
+      "questionId": "w-card-values",
+      "priorAnswerability": "NOT_MEASURED",
+      "evidence": "零预算下答 insufficient；先验可答性未单独测量",
+      "keepInSet": true,
+      "whatItStillMeasures": "槽位与来源",
+      "mustNotBeUsedFor": "拒答**不能**反推'没有先验知识'"
+    }
+  ]
+}

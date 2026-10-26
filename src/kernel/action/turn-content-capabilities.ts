@@ -34,6 +34,7 @@ import {
   localFileCapabilityLabel,
 } from './local-file-capabilities.ts'
 import { WEATHER_QUERY, weatherCapabilityLabel } from './weather-capability.ts'
+import { XIDIAN_TIMETABLE } from './xidian-capability.ts'
 import { OFFICE_GENERATE, officeCapabilityLabel } from './office-capability.ts'
 import { NEWS_READ, newsCapabilityLabel } from './news-capability.ts'
 import { BROWSER_READ, browserCapabilityLabel } from './browser-capability.ts'
@@ -57,6 +58,7 @@ export const TURN_CONTENT_CAPABILITY_IDS: readonly string[] = [
   LOCAL_FILE_LIST,
   LOCAL_FILE_READ,
   WEATHER_QUERY,
+  XIDIAN_TIMETABLE,
   OFFICE_GENERATE,
   NEWS_READ,
   BROWSER_READ,
@@ -69,6 +71,9 @@ export const TURN_CONTENT_CAPABILITY_IDS: readonly string[] = [
   DESKTOP_INSPECT,
   PERSONAL_LIBRARY_SEARCH,
   ARXIV_RESEARCH,
+  'document.extract',
+  'document.profile',
+  'document.pages',
 ]
 
 export function producesTurnContent(capabilityId: string): boolean {
@@ -89,6 +94,9 @@ export function turnContentKindOfCapability(capabilityId: string): TurnContentKi
     case MATH_CALCULATE:
       return 'calculation'
     case DOCUMENT_READ:
+    case 'document.extract':
+    case 'document.profile':
+    case 'document.pages':
       return 'document'
     case WEB_READ:
       return 'web-article'
@@ -116,6 +124,10 @@ export function turnContentKindOfCapability(capabilityId: string): TurnContentKi
  *    否则同一个能力会有两个措辞来源，而它们迟早会分叉。
  */
 export function turnContentCapabilityLabel(capabilityId: string): string {
+  if (capabilityId === XIDIAN_TIMETABLE) return '西电本科课表查询'
+  if (capabilityId === 'document.extract') return 'PDF 正文提取'
+  if (capabilityId === 'document.profile') return 'PDF 结构检查'
+  if (capabilityId === 'document.pages') return 'PDF 指定页读取'
   if (capabilityId === PERSONAL_LIBRARY_SEARCH) return '个人资料夹检索'
   if (capabilityId === ARXIV_RESEARCH) return 'arXiv 论文查阅'
   if (UTILITY_CAPABILITY_IDS.includes(capabilityId)) {

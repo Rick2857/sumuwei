@@ -1,0 +1,74 @@
+{
+  "version": "document-questions@1",
+  "phase": "development",
+  "review": {"status": "APPROVED", "method": "agent visual review followed by human confirmation of all six answers and page/row/column correspondence", "reviewedBy": "user", "reviewedAt": "2026-10-23", "humanRuling": "六题答案及对应均确认", "scope": "six local questions only; not full-document correctness, model behavior, production activation or a holdout"},
+  "scorer": "document-answer@1",
+  "questions": [
+    {
+      "id": "t-position-functions", "document": "paper-en-2col", "file": "paper-en-2col.pdf",
+      "sha256": "bdfaa68d8984f0dc02beaca527b76f207d99b666d31d1da728ee0728182df697",
+      "page": 6, "prefixChars": 1200, "region": "section 3.5, the two positional-encoding formulae",
+      "render": "paper-en-2col-p6.png",
+      "question": "按本页 3.5 节公式，位置编码的偶数维和奇数维分别使用什么函数？用 even 和 odd 两个字段回答。",
+      "fields": [
+        {"key": "even", "accepted": ["sin", "sine", "正弦"], "evidenceNeedles": ["sin(pos/"]},
+        {"key": "odd", "accepted": ["cos", "cosine", "余弦"], "evidenceNeedles": ["cos(pos/"]}
+      ]
+    },
+    {
+      "id": "t-parsing-training", "document": "paper-en-2col", "file": "paper-en-2col.pdf",
+      "sha256": "bdfaa68d8984f0dc02beaca527b76f207d99b666d31d1da728ee0728182df697",
+      "page": 10, "prefixChars": 1200, "region": "Table 4, the two Transformer (4 layers) rows, WSJ 23 F1 column",
+      "render": "paper-en-2col-p10.png",
+      "question": "按本页 Table 4，Transformer (4 layers) 在 WSJ only, discriminative 和 semi-supervised 两种训练设置下的 WSJ 23 F1 分别是多少？用 wsj_only 和 semi_supervised 字段回答，保留一位小数。",
+      "fields": [
+        {"key": "wsj_only", "accepted": ["91.3"], "evidenceNeedles": ["Transformer(4layers)", "WSJonly,discriminative", "91.3"]},
+        {"key": "semi_supervised", "accepted": ["92.7"], "evidenceNeedles": ["Transformer(4layers)", "semi-supervised", "92.7"]}
+      ]
+    },
+    {
+      "id": "b-vocabulary-mask", "document": "paper-en-tables", "file": "paper-en-tables.pdf",
+      "sha256": "5692a5514787a8c6727b4ff3b726a3385798bc68e12138d1d4af83947e2acf6e",
+      "page": 4, "prefixChars": 1200, "region": "left column WordPiece vocabulary and right column Masked LM paragraph",
+      "render": "paper-en-tables-p4.png",
+      "question": "本页的 WordPiece 词表大小是多少，每个序列中随机遮蔽的 WordPiece token 比例是多少？用 vocabulary 和 mask_rate 字段回答，比例须带 %。",
+      "fields": [
+        {"key": "vocabulary", "accepted": ["30000", "30,000"], "evidenceNeedles": ["30,000tokenvocabulary"]},
+        {"key": "mask_rate", "accepted": ["15%"], "evidenceNeedles": ["mask15%ofallWordPiece"]}
+      ]
+    },
+    {
+      "id": "b-rte-sizes", "document": "paper-en-tables", "file": "paper-en-tables.pdf",
+      "sha256": "5692a5514787a8c6727b4ff3b726a3385798bc68e12138d1d4af83947e2acf6e",
+      "page": 6, "prefixChars": 1200, "region": "Table 1, BERT BASE/LARGE rows, RTE column (not Average)",
+      "render": "paper-en-tables-p6.png",
+      "question": "本页 Table 1 中，BERT BASE 和 BERT LARGE 的 RTE 得分各是多少？用 base 和 large 字段回答，保留一位小数；不要取 Average 列。",
+      "fields": [
+        {"key": "base", "accepted": ["66.4"], "evidenceNeedles": ["66.4"]},
+        {"key": "large", "accepted": ["70.1"], "evidenceNeedles": ["70.1"]}
+      ]
+    },
+    {
+      "id": "w-history-years", "document": "wiki-zh-university", "file": "wiki-zh-university.pdf",
+      "sha256": "85f79ee60c52b236fa8e9f4870a3ff8d7e97366bebd40e414131827fcc9af366",
+      "page": 1, "prefixChars": 1200, "region": "introductory paragraph; years refer to this frozen document",
+      "render": "wiki-zh-university-p1.png",
+      "question": "只按这份冻结文档首页，学校迁址西安和定为现名分别是哪一年？用 relocated 和 renamed 字段回答，只写四位年份。",
+      "fields": [
+        {"key": "relocated", "accepted": ["1958"], "evidenceNeedles": ["1958年学校迁址西安"]},
+        {"key": "renamed", "accepted": ["1988"], "evidenceNeedles": ["1988年定为现名"]}
+      ]
+    },
+    {
+      "id": "w-card-values", "document": "wiki-zh-university", "file": "wiki-zh-university.pdf",
+      "sha256": "85f79ee60c52b236fa8e9f4870a3ff8d7e97366bebd40e414131827fcc9af366",
+      "page": 2, "prefixChars": 1200, "region": "right-hand infobox, identifier and doctoral students rows; historical snapshot only",
+      "render": "wiki-zh-university-p2.png",
+      "question": "只按这份冻结文档第 2 页右侧信息框，学校标识码和博士生人数分别是什么？用 identifier 和 doctoral_students 字段回答，只写数字；不查询现况。",
+      "fields": [
+        {"key": "identifier", "accepted": ["4161010701"], "evidenceNeedles": ["学校标识码4161010701"]},
+        {"key": "doctoral_students", "accepted": ["2262"], "evidenceNeedles": ["博士生人數2262人"]}
+      ]
+    }
+  ]
+}

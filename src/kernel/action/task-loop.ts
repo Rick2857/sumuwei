@@ -63,9 +63,14 @@ import type { TaskAuthorization, TaskAuthorizationPort, TaskCloseReason } from '
 import {
   compareForecastStep,
   forecastDependenciesSatisfied,
+  parameterBindingDigestOf,
   type ActionForecastPort,
   type ActionForecastStateLine,
 } from './action-forecast.ts'
+import {
+  verifyPlanRulesStillUsable,
+  type RuleSnapshotPort,
+} from '../contracts/cognitive-collaboration.ts'
 import type { ActionForecast } from '../contracts/world-model.ts'
 import {
   TASK_STAGED_ARG_KEYS,
@@ -96,7 +101,46 @@ export const MAX_GATHERED_CONTENT_ITEMS = TURN_CONTENT_LIMITS.maxItemsPerTurn
 /** WP3：交给下一次规划的外部证据**条数**上限（与内容同一理由：防"搜一下把额度吃光"） */
 export const MAX_GATHERED_EVIDENCE_ITEMS = 8
 
+export interface EblTaskObserver {
+  before(input: { request: ActionRequest; authorization: TaskAuthorization; characterId: CharacterId }): Promise<{ predictionChanged: boolean } | void>
+  /**
+   * 动作**执行之后**的观察口。
+   *
+   * ⚠️ `comparison`（2026-10-21 新增 · 计划 P2 第 4 步）：**这一轮**的预测核对结论。
+   *    它是**可选**的：没有预测、没有核对 ⇒ 不给 ⇒ 观察方按"没有模型参与"处理。
+   *    ⇒ 有了它，观察方才能把「比的是**哪一版模型 / 哪条规则 / 哪个对象**」
+   *      一起落进账本（集成架构 §4 的「比较与结算」要求）。
+   */
+  after(input: {
+    request: ActionRequest
+    result: ActionResult
+    authorization: TaskAuthorization
+    characterId: CharacterId
+    comparison?: {
+      readonly verdict: 'match' | 'mismatch' | 'unknown'
+      readonly modelVersion: string
+      readonly ruleVersion: string
+      readonly parameterBindingDigest?: string
+      readonly predictionRef?: string
+    }
+  }): Promise<void>
+}
+
 export interface TaskLoopOptions {
+  /** Trusted scoped goal check; model proposals cannot install it. Selected IDs use the existing planning budget. */
+  completion?: (input: { results: TaskRunOutcome['results']; visibleContentIds: readonly string[] }) => { achieved: boolean; contentIds: string[] }
+  /** Optional, default off. Observes already-authorized actions; never adds tools or steps. */
+  epistemic?: EblTaskObserver
+  /**
+   * 规则快照读面（**可选**；计划 P2 第 5 步）。
+   *
+   * ⚠️ 给了它，任务环在**每一步执行前**复核「这一步依赖的规则**现在**还合格吗」——
+   *    规则在计划执行**途中**失去资格（被反例挂起 / 被撤回 / 换了版本）⇒
+   *    这一步**不执行**（具名拒用），计划就此停下。
+   *
+   * ⚠️ 不给 ⇒ 不做这个复核（**既有行为逐字不变**）。
+   */
+  ruleSnapshot?: RuleSnapshotPort
   gateway: ActionGateway
   registry: CapabilityRegistry
   authorizations: TaskAuthorizationPort
@@ -206,9 +250,33 @@ export interface TaskForecastComparison {
   readonly verdict: 'match' | 'mismatch' | 'unknown'
   /** 实际结果的引用（`ActionResult.actionId`；**不复制正文**） */
   readonly actualSourceRef: string
+  /**
+   * **模型版本**（2026-10-21 新增 · 计划 P2 第 3 步）。
+   *
+   * ⚠️ 比较结论要能回答"比的是哪一版**模型**" ⇒ 版本必须**跟着结论走**
+   *    （只留在 forecast 里的话，结论落账后就查不到了）。
+   */
+  readonly modelVersion?: string
+  /**
+   * **被反驳的规则版本**（2026-10-21 新增）。
+   *
+   * ⚠️ 计划 §4 的接线契约要求「比较与结算」带上它：
+   *    没有它，"被反驳"归不到**哪一条规则**头上。
+   */
+  readonly refutedRuleVersion?: string
+  /** 规则依赖（命题 id + 版本 + 证据指纹） */
+  readonly ruleDependencies?: readonly {
+    readonly claimId: string
+    readonly ruleVersion: string
+    readonly evidenceFingerprint: string
+  }[]
 }
 
 export interface TaskRunOutcome {
+  /** Retrieval verified in the planning context; final answer delivery is checked after compilation. */
+  goal?: { achieved: boolean; contentIds: string[] }
+  epistemicPredictions?: number
+  epistemicFailures?: number
   taskId: string
   /** 已经执行过的步骤（保序） */
   steps: readonly TaskStepRecord[]
@@ -232,6 +300,8 @@ export interface TaskRunOutcome {
   forecastFailureCode?: string
   /** 执行后的核对读数（**只在预测层配过时**出现） */
   comparisons?: readonly TaskForecastComparison[]
+  /** Pure simulations inside already-counted planning; no extra model calls. */
+  simulationsUsed?: number
 }
 
 export interface RunTaskInput {
@@ -258,6 +328,8 @@ export async function runTask(
   const results: { request: ActionRequest; result: ActionResult; rule: string }[] = []
   const executedSummary: string[] = []
   const failureSummary: string[] = []
+  let epistemicPredictions = 0
+  let epistemicFailures = 0
   /*
    * 已经**成功过**的"引用步骤"（`能力.操作 引用`）。
    *
@@ -279,6 +351,14 @@ export async function runTask(
    */
   const gatheredContent: TurnContent[] = []
   /**
+   * F2 准备读 · **本任务已成功的受信读回执**（沙箱相对路径 + 内容指纹）。
+   *
+   * ⚠️ 只从**真实成功的读动作**的效果里取（`effect.kind === 'content_read'` 且带指纹）。
+   *    候选自述、模型标签、夹具预知都进不来。
+   * ⚠️ 没有读过任何东西时**为空** ⇒ 规划器输入逐字段与旧档相同。
+   */
+  const trustedReads: { path: string, fingerprint: string }[] = []
+  /**
    * WP3：**已经拿到的外部证据**（搜索命中；同样只在配了 `replanContext` 时才被消费）。
    *
    * ⚠️ 按 `evidence.id` 去重：同一条命中被两次搜索带回来时不该占两份额度。
@@ -286,12 +366,18 @@ export async function runTask(
   const gatheredEvidence: ExternalEvidence[] = []
 
   let stopped: TaskStopReason = 'done'
+  const stopIfClosed = (): boolean => {
+    if (authorization.closedReason === undefined) return false
+    stopped = authorization.closedReason
+    return true
+  }
   let plannerFailureCode: string | undefined
   let planRejectedCode: string | undefined
   /** 连续多少次"模型没按格式答"（有界重试；见下面的 `invalid_output` 分支） */
   let invalidOutputStreak = 0
   /** 预测层开着时：已经用掉的预测调用次数（**已扣在规划预算里**） */
   let forecastCalls = 0
+  let simulationsUsed = 0
   /** 预测层开着时：预测失败的闭集码 */
   let forecastFailureCode: string | undefined
   /** 预测层开着时：执行后的核对读数 */
@@ -314,6 +400,14 @@ export async function runTask(
    *    后者是**任务级**的键（完成声明闸用）。键相同但含义不同 ⇒ 不合成一个集合。
    */
   const refutedKeys = new Set<string>()
+  let goal: TaskRunOutcome['goal']
+  const goalAccepted = (): boolean => {
+    if (!options.completion) return true
+    const visibleContentIds = options.replanContext ? selectTurnContentContext({items:gatheredContent,
+      budgetTokens:options.replanContext.contentTokens,quantifier:options.replanContext.quantifier}).selected.map(e=>e.item.contentId) : []
+    goal = options.completion({results,visibleContentIds})
+    return goal.achieved
+  }
 
   const authorization = input.authorization
 
@@ -348,6 +442,7 @@ export async function runTask(
   }
 
   for (;;) {
+    if (stopIfClosed()) break
     // ⓪ 时限
     if (now() >= authorization.expiresAt) {
       options.authorizations.close(authorization.taskId, 'deadline')
@@ -366,6 +461,21 @@ export async function runTask(
 
     const planned = await options.planner.plan({
       task: input.text,
+      // ⚠️ **本任务的 trace id**（ADR-151 步骤 D）：让消费方只读**这一次任务**的受信观察。
+      traceId: input.traceId,
+      /*
+       * ⚠️ **有界条件观察**（ADR-151 R1 §3）：只有本次授权带了局部范围才出现。
+       *    缺省不出现在规划器输入里 ⇒ 旧行为逐字段不变。
+       */
+      ...(authorization.boundedObservation === undefined
+        ? {}
+        : {
+          observation: {
+            targetPath: authorization.boundedObservation.targetPath,
+            conditionPath: authorization.boundedObservation.conditionPath,
+            attempted: authorization.boundedObservation.attempts > 0,
+          },
+        }),
       executed: executedSummary,
       failures: failureSummary,
       remainingActions,
@@ -378,6 +488,11 @@ export async function runTask(
       ...(options.replanContext !== undefined && gatheredContent.length > 0
         ? { content: renderedContentLines() }
         : {}),
+      /*
+       * F2 准备读 / 真值派生：**受信读回执**（路径 + 内容指纹）。
+       * ⚠️ 只在真的读到过时才出现 ⇒ 旧档的规划器输入逐字段不变。
+       */
+      ...(trustedReads.length === 0 ? {} : { trustedReads }),
       ...(options.replanContext !== undefined && gatheredEvidence.length > 0
         ? { evidence: renderedEvidenceLines() }
         : {}),
@@ -385,6 +500,9 @@ export async function runTask(
         ? { knownDirectories: options.replanContext.knownDirectories() }
         : {}),
     })
+
+    // Authorization can close while planning is awaited; its returned proposal has no execution authority.
+    if (stopIfClosed()) break
 
     if (!planned.ok) {
       /*
@@ -449,8 +567,21 @@ export async function runTask(
       break
     }
 
+    if (planned.simulation !== undefined) {
+      if (options.ruleSnapshot === undefined || options.forecast !== undefined) {
+        planRejectedCode = options.ruleSnapshot === undefined ? 'simulation_rule_unusable' : 'simulation_forecast_conflict'
+        options.authorizations.close(authorization.taskId, 'plan_failed')
+        stopped = 'plan_failed'
+        break
+      }
+      simulationsUsed++
+    }
+
     if (plan.steps.length === 0) {
-      if (plan.done && refutedKeys.size > 0) {
+      if (options.completion && (!plan.done || !goalAccepted())) {
+        options.authorizations.close(authorization.taskId, 'plan_failed'); stopped='plan_failed'; planRejectedCode='task_goal_unmet'; break
+      }
+      if (plan.done && refutedKeys.size > 0 && !goal?.achieved) {
         options.authorizations.close(authorization.taskId, 'check_refuted')
         planRejectedCode = 'task_check_refuted'
         stopped = 'check_refuted'
@@ -511,7 +642,7 @@ export async function runTask(
      * ⚠️ 预测**不延长**任务、不重试副作用、不探索：它只是一次**只读**的诊断调用。
      */
     refutedSteps.clear() // Indices belong to this plan only.
-    let forecast: ActionForecast | undefined
+    let forecast: ActionForecast | undefined = planned.simulation?.forecast
     if (options.forecast !== undefined) {
       const remainingActionsNow = authorization.budget.maxActions - authorization.actionsUsed
       if (remainingActionsNow > 0 && options.authorizations.consumePlan(authorization.taskId)) {
@@ -538,6 +669,21 @@ export async function runTask(
             operation: step.operation,
             ...(step.purpose !== undefined ? { purpose: step.purpose } : {}),
           })),
+          /*
+           * ⚠️ **参数绑定摘要**（2026-10-21 新增 · 计划 P2 第 3 步）：
+           *    预测端口分不清"这次读的是哪个文件"⇒ 它的预期会套到别的对象上（错绑）。
+           *    ⇒ 这里给**摘要**（哈希，不是参数）⇒ 端口能对齐对象，又拿不到参数原文。
+           */
+          targetBindings: plan.steps.map((step) => {
+            const reference = taskStepReferenceOf(step.args)
+            return {
+              capability: step.capability,
+              operation: step.operation,
+              bindingDigest: reference === undefined
+                ? parameterBindingDigestOf(step.capability, step.operation, '')
+                : parameterBindingDigestOf(step.capability, step.operation, reference),
+            }
+          }),
           state: stateLines,
           remainingActions: remainingActionsNow,
           remainingModelCalls: Math.max(
@@ -560,6 +706,7 @@ export async function runTask(
     // 任务编排：本批执行失败后不能沿用尚未观察结果的后续步骤，即使模型自报 done。
     let batchFailed = false
     for (const [planStepIndex, step] of plan.steps.entries()) {
+      if (stopIfClosed()) break
       if (now() >= authorization.expiresAt) {
         options.authorizations.close(authorization.taskId, 'deadline')
         stopped = 'deadline'
@@ -583,6 +730,96 @@ export async function runTask(
         failureSummary.push(`${step.capability}.${step.operation}=unregistered`)
         batchFailed = true
         break
+      }
+
+      /*
+       * ------------------------------------------------------------------
+       * **有界观察范围闸**（ADR-151 R1 §3）
+       * ------------------------------------------------------------------
+       * 本次授权带了局部范围（只有"新的两行入口"才有）⇒ **每一步**都必须落在里面：
+       * ```text
+       * 写/读回   ⇒ 只许目标路径
+       * 条件读    ⇒ 只许那个受信标记、只许 read、**只许一次**（计数在**执行前**就 +1）
+       * 其它路径  ⇒ 越界 ⇒ 这一步不执行
+       * ```
+       * ⚠️ 这道闸在**任务环**里（不在规划器闭包里）⇒ 模型换路径、重复读都绕不过去。
+       * ⚠️ 缺省没有范围 ⇒ 整段不跑（旧行为逐字不变）。
+       */
+      const bounded = authorization.boundedObservation
+      if (bounded !== undefined) {
+        const path = typeof step.args.path === 'string' ? step.args.path : undefined
+        const isTarget = path !== undefined && path === bounded.targetPath
+        const isConditionRead = path !== undefined && path === bounded.conditionPath
+          && step.capability === 'sandbox.file.read' && step.operation === 'read'
+        if (!isTarget && !isConditionRead) {
+          steps.push({ capability: step.capability, operation: step.operation, droppedReason: 'observation_out_of_scope' })
+          failureSummary.push(`${step.capability}.${step.operation}=observation_out_of_scope`)
+          batchFailed = true
+          break
+        }
+        // ⚠️ 条件读：计数必须在**执行前**完成（⇒ 重入/重试都不会读第二次）。
+        if (isConditionRead && !options.authorizations.noteConditionRead(authorization.taskId)) {
+          steps.push({ capability: step.capability, operation: step.operation, droppedReason: 'observation_limit' })
+          failureSummary.push(`${step.capability}.${step.operation}=observation_limit`)
+          batchFailed = true
+          break
+        }
+      }
+
+      /*
+       * ------------------------------------------------------------------
+       * **F2 逐路径授权闸**（最小接点 R4）
+       * ------------------------------------------------------------------
+       * 本任务带 F2 范围（只有**新 F2 入口**才有）⇒ **每一步**都必须落在里面：
+       * ```text
+       * 读   ⇒ 只读路径（缓存源 / 权威源）｜限次读（族级标记，**执行前**计数，超限即拒）｜可写路径（读回）
+       * 写   ⇒ 只许可写路径（目标）
+       * 其它 ⇒ 越界 ⇒ 这一步不执行
+       * ```
+       * ⚠️ 闸在**任务环**（不在规划器闭包）⇒ 换路径、写源文件、写标记、重复读标记都绕不过去。
+       * ⚠️ 计数在**执行前** +1 且挂在任务对象上 ⇒ 重规划/重挂**不会重置**。
+       * ⚠️ 缺省没有范围 ⇒ 整段不跑（旧入口行为逐字不变）。
+       */
+      const sourceScoped = authorization.sourceScopedPaths
+      if (sourceScoped !== undefined) {
+        const scopedPath = typeof step.args.path === 'string' ? step.args.path : undefined
+        const isRead = step.capability === 'sandbox.file.read' && step.operation === 'read'
+        const isWrite = step.capability === 'sandbox.file.write' && step.operation === 'write'
+        const inReadOnly = scopedPath !== undefined && sourceScoped.readOnly.includes(scopedPath)
+        const inLimited = scopedPath !== undefined && sourceScoped.limitedReads.some(item => item.path === scopedPath)
+        const inWritable = scopedPath !== undefined && sourceScoped.writable.includes(scopedPath)
+        const allowed = isWrite
+          ? inWritable
+          : isRead
+            ? (inReadOnly || inWritable || inLimited)
+            : false
+        if (!allowed) {
+          steps.push({ capability: step.capability, operation: step.operation, droppedReason: 'source_scope_denied' })
+          failureSummary.push(`${step.capability}.${step.operation}=source_scope_denied`)
+          batchFailed = true
+          break
+        }
+        // ⚠️ 限次读：**执行前**计数（重入/重试都不会多读一次）。
+        if (isRead && inLimited && !inReadOnly && !inWritable) {
+          if (!options.authorizations.noteSourceScopedRead(authorization.taskId, scopedPath!)) {
+            steps.push({ capability: step.capability, operation: step.operation, droppedReason: 'source_scope_read_limit' })
+            failureSummary.push(`${step.capability}.${step.operation}=source_scope_read_limit`)
+            batchFailed = true
+            break
+          }
+        }
+      }
+      // Selection depends on this rule even for a write without its own readback forecast.
+      if (planned.simulation !== undefined && options.ruleSnapshot !== undefined) {
+        const verdict = await verifyPlanRulesStillUsable({ snapshot: options.ruleSnapshot,
+          dependencies: [planned.simulation.dependency],
+        }).catch(() => ({ ok: false }))
+        if (!verdict.ok) {
+          steps.push({ capability: step.capability, operation: step.operation, droppedReason: 'simulation_rule_unusable' })
+          failureSummary.push(`${step.capability}.${step.operation}=simulation_rule_unusable`)
+          batchFailed = true
+          break
+        }
       }
 
       /*
@@ -614,6 +851,41 @@ export async function runTask(
         break
       }
 
+      /*
+       * ------------------------------------------------------------------
+       * **规则资格闸**（计划 P2 第 5 步）
+       * ------------------------------------------------------------------
+       * 这一步的预测**依赖**哪几条规则（`ruleDependencies`）⇒
+       * 那些规则**现在**还合格吗？
+       *
+       * ⚠️ 为什么要在**每一步**前查（而不是只在计划开始时查一次）：
+       *    规则可能在**计划执行途中**失去资格（被真实反例挂起 / 被撤回 / 换了版本）。
+       *    那时还照着原计划往下走 = 沿用一个**已经失效**的判断。
+       *
+       * ⚠️ 判据是"**依赖的规则不可用**"，不是"**没查到**"：
+       *    查不到（没有快照）也按不可用处理（失败关闭）。
+       */
+      if (
+        options.ruleSnapshot !== undefined &&
+        forecastStep?.ruleDependencies !== undefined &&
+        forecastStep.ruleDependencies.length > 0
+      ) {
+        const verdict = await verifyPlanRulesStillUsable({
+          dependencies: forecastStep.ruleDependencies,
+          snapshot: options.ruleSnapshot,
+        })
+        if (!verdict.ok) {
+          steps.push({
+            capability: step.capability,
+            operation: step.operation,
+            droppedReason: 'forecast_rule_unusable',
+          })
+          failureSummary.push(`${step.capability}.${step.operation}=forecast_rule_unusable`)
+          batchFailed = true
+          break
+        }
+      }
+
       const args = stagePayloadArgs(step, options.staging)
       if (args.problem !== undefined) {
         steps.push({
@@ -636,6 +908,17 @@ export async function runTask(
         sideEffect: operation.sideEffect,
       })
 
+      if (options.epistemic) {
+        try {
+          const observed = await options.epistemic.before({ request, authorization, characterId: input.characterId })
+          if (observed?.predictionChanged) epistemicPredictions++
+        } catch { epistemicFailures++ }
+        if (now() >= authorization.expiresAt) {
+          options.authorizations.close(authorization.taskId, 'deadline'); stopped = 'deadline'; break
+        }
+      }
+      // Async source checks and observer hooks may also outlive cancellation or supersession.
+      if (stopIfClosed()) break
       let result: ActionResult
       try {
         result = await options.gateway.execute(
@@ -661,6 +944,42 @@ export async function runTask(
         break
       }
 
+      /*
+       * ⚠️ **先算核对结论，再叫观察方**（2026-10-21 · 计划 P2 第 4 步）：
+       *    观察方要把「比的是**哪一版模型 / 哪条规则 / 哪个对象**」一起落进账本
+       *    ⇒ 核对结论必须在**观察方被叫之前**就算好。
+       *    ⚠️ 判定本身**不变**：它只用真实结果（`result`），与算在哪儿无关。
+       */
+      const stepComparison = forecastStep === undefined
+        ? undefined
+        : compareForecastStep(forecastStep, result, {
+          actualSourceRef: String(request.actionId),
+          ...(forecastStep.ruleVersion === undefined ? {} : { ruleVersion: forecastStep.ruleVersion }),
+        })
+      /*
+       * 模型绑定：**模型版本**与**规则版本**都在才给（缺一个就不给 ⇒ 不编版本）。
+       * ⇒ 观察方拿到的就是"这次结算比的是哪一版"。
+       */
+      const comparisonBinding = stepComparison === undefined ||
+        forecast?.modelVersion === undefined || forecastStep?.ruleVersion === undefined
+        ? undefined
+        : {
+          verdict: stepComparison.verdict,
+          modelVersion: forecast.modelVersion,
+          ruleVersion: forecastStep.ruleVersion,
+          ...(forecastStep.parameterBindingDigest === undefined ? {} : { parameterBindingDigest: forecastStep.parameterBindingDigest }),
+          ...(stepComparison.actualSourceRef === '' ? {} : { predictionRef: stepComparison.actualSourceRef }),
+        }
+
+      if (options.epistemic) {
+        try {
+          await options.epistemic.after({
+            request, result, authorization, characterId: input.characterId,
+            ...(comparisonBinding === undefined ? {} : { comparison: comparisonBinding }),
+          })
+        }
+        catch { epistemicFailures++ }
+      }
       const reason = closedSetReason(result)
       steps.push({
         capability: step.capability,
@@ -725,6 +1044,18 @@ export async function runTask(
       }
       results.push({ request, result, rule: 'task_plan_step' })
       /*
+       * F2 准备读：把**这一次真实成功的读**记成受信回执（路径 + 内容指纹）。
+       * ⚠️ 写动作**不**产生回执；失败的读**不**产生回执；指纹来自 Gateway 产出的效果。
+       */
+      if (result.status === 'success' && result.effect?.kind === 'content_read' &&
+        typeof result.effect.fingerprint === 'string' && result.effect.fingerprint !== '') {
+        const readPath = request.arguments.path
+        if (typeof readPath === 'string' &&
+          !trustedReads.some(item => item.path === readPath && item.fingerprint === result.effect?.fingerprint)) {
+          trustedReads.push({ path: readPath, fingerprint: result.effect.fingerprint })
+        }
+      }
+      /*
        * ------------------------------------------------------------------
        * **执行后核对**（三域应用方案 §2："执行后只用真实结果更新判断"）
        * ------------------------------------------------------------------
@@ -741,9 +1072,7 @@ export async function runTask(
         const refutationKey = fnv1a64Hex(JSON.stringify([
           step.capability, step.operation, step.args, forecastStep.check,
         ]))
-        const comparison = compareForecastStep(forecastStep, result, {
-          actualSourceRef: String(request.actionId),
-        })
+        const comparison = stepComparison!
         comparisons.push({
           planStepIndex,
           capability: step.capability,
@@ -751,6 +1080,9 @@ export async function runTask(
           comparable: comparison.comparable,
           verdict: comparison.verdict,
           actualSourceRef: comparison.actualSourceRef,
+          ...(forecast === undefined || forecast.modelVersion === undefined ? {} : { modelVersion: forecast.modelVersion }),
+          ...(comparison.refutedRuleVersion === undefined ? {} : { refutedRuleVersion: comparison.refutedRuleVersion }),
+          ...(forecastStep.ruleDependencies === undefined ? {} : { ruleDependencies: forecastStep.ruleDependencies }),
         })
         if (comparison.verdict === 'mismatch') {
           refutedSteps.add(planStepIndex)
@@ -770,8 +1102,12 @@ export async function runTask(
       }
     }
 
+    if (stopIfClosed()) break
     if (stopped !== 'done') break
     if (plan.done && !batchFailed) {
+      if (!goalAccepted()) {
+        options.authorizations.close(authorization.taskId, 'plan_failed'); stopped='plan_failed'; planRejectedCode='task_goal_unmet'; break
+      }
       /*
        * ⚠️ **完成声明闸**（三域应用方案 §2 的"误报完成数"）。
        *
@@ -786,7 +1122,7 @@ export async function runTask(
        * ⇒ 停止原因**另立** `check_refuted`，与 `done` 分开（如实说"没做完"）。
        * ⚠️ 被反驳的键**在再次核对通过时**才清除（见 `refutedKeys`）。
        */
-      if (refutedKeys.size > 0) {
+      if (refutedKeys.size > 0 && !goal?.achieved) {
         options.authorizations.close(authorization.taskId, 'check_refuted')
         planRejectedCode = 'task_check_refuted'
         stopped = 'check_refuted'
@@ -800,6 +1136,7 @@ export async function runTask(
 
   return {
     taskId: authorization.taskId,
+    ...(options.completion ? {goal:goal??{achieved:false,contentIds:[]}} : {}),
     steps,
     results,
     plansUsed: authorization.plansUsed,
@@ -813,7 +1150,9 @@ export async function runTask(
      */
     ...(options.forecast !== undefined ? { forecastCallsUsed: forecastCalls } : {}),
     ...(forecastFailureCode !== undefined ? { forecastFailureCode } : {}),
-    ...(options.forecast !== undefined ? { comparisons } : {}),
+    ...(options.forecast !== undefined || simulationsUsed > 0 ? { comparisons } : {}),
+    ...(simulationsUsed > 0 ? { simulationsUsed } : {}),
+    ...(options.epistemic ? { epistemicPredictions, epistemicFailures } : {}),
   }
 }
 
@@ -913,6 +1252,7 @@ export function describeTaskRun(outcome: TaskRunOutcome): string {
     `行动=${String(outcome.actionsUsed)} 停止=${outcome.stopped}` +
     `${outcome.plannerFailureCode !== undefined ? ` 规划失败=${outcome.plannerFailureCode}` : ''}` +
     `${outcome.planRejectedCode !== undefined ? ` 计划被拒=${outcome.planRejectedCode}` : ''}` +
+    `${outcome.epistemicPredictions !== undefined ? ` 信念预测=${outcome.epistemicPredictions} 信念失败=${outcome.epistemicFailures ?? 0}` : ''}` +
     // ⚠️ 预测那一栏**只在预测层开过时**出现（旧档逐字不变）。
     `${outcome.forecastCallsUsed !== undefined && outcome.forecastCallsUsed > 0
       ? ` 预测=${String(outcome.forecastCallsUsed)}`

@@ -46,6 +46,50 @@ export const DEFAULT_TASK_BUDGET: TaskBudget = {
   deadlineMs: 10 * 60 * 1000,
 }
 
+/**
+ * **任务局部的有界观察范围**（ADR-151 R1 §3）。
+ *
+ * ============================================================================
+ *  它是什么
+ * ============================================================================
+ * ```text
+ * 原任务只授权"一个目标的写入与读回"
+ * 前置条件观察需要**另一个文件**的一次只读 —— 那是**额外**权限
+ *   ⇒ 它必须由**程序**从"原始请求 + 受信声明"生成，**不能**由模型 plan 字段、
+ *     也不能由一个 `enabled` 布尔值授予。
+ * ```
+ * ⚠️ `attempts` 是**任务局部**的可变计数：在读**真的执行之前**就 +1 ⇒ 重入/并发/重规划
+ *    都**不会**产生第二次读（ADR-151 R1 §4）。
+ * ⚠️ 缺省不提供 ⇒ 旧行为逐字不变。
+ */
+/**
+ * **F2 逐路径授权**（最小接点 R4 · 可选）：一个任务里**哪些路径能读、哪些能写、哪些只能限次读**。
+ *
+ * ⚠️ 只有"**新的 F2 任务入口**"才挂；缺省 ⇒ 无额外限制，**旧入口行为逐字不变**。
+ * ⚠️ 由装配层**挂上**（同一任务对象），任务环**逐步**校验；模型给的路径绕不过去。
+ * ⚠️ 计数**在执行前** +1（重入/重试不会多读）；重挂**不能**扩大范围、**不能**重置计数。
+ */
+export interface TaskSourceScopedPaths {
+  /** 只读路径（本对象的缓存源与权威源）。 */
+  readonly readOnly: readonly string[]
+  /** 限次只读路径（族级条件标记；通常 maxReads = 1）。 */
+  readonly limitedReads: readonly { readonly path: string; readonly maxReads: number }[]
+  /** 可写路径（目标；写后允许**读回**）。 */
+  readonly writable: readonly string[]
+  /** 限次读的已用次数（稳定标识 === 路径；程序计数）。 */
+  attempts: Record<string, number>
+}
+export interface TaskBoundedObservation {
+  /** 本任务唯一的目标路径（写 + 读回）。 */
+  readonly targetPath: string
+  /** 唯一允许额外**只读**一次的条件标记路径。 */
+  readonly conditionPath: string
+  /** 只读次数上限（当前恒为 1）。 */
+  readonly maxReads: number
+  /** 已经尝试过的次数（程序计数）。 */
+  attempts: number
+}
+
 export interface NewTaskAuthorization {
   /** 会话键（当前会话绑定；不新增数据库表） */
   conversationKey: string
@@ -76,6 +120,18 @@ export interface TaskAuthorization {
   plansUsed: number
   /** 关闭原因（关闭后不再复用） */
   closedReason?: TaskCloseReason
+  /**
+   * **任务局部的有界观察范围**（ADR-151 R1 · **可选**）。
+   *
+   * ⚠️ 只有"明确的两行请求 + 受信声明"才给；缺省 ⇒ 无额外权限。
+   * ⚠️ 由装配层在规划装配完成后**挂上**（同一任务对象），任务环对每一步校验。
+   */
+  boundedObservation?: TaskBoundedObservation
+  /**
+   * **F2 逐路径范围**（最小接点 R4 · 可选）。
+   * 缺省 ⇒ 无额外限制（旧入口行为逐字不变）。
+   */
+  sourceScopedPaths?: TaskSourceScopedPaths
 }
 
 export type TaskCloseReason =
@@ -101,6 +157,14 @@ export type TaskCloseReason =
    *    ⇒ 停止原因与 `done` **分开**，如实告诉调用方"没做完，且原因是什么"。
    */
   | 'check_refuted'
+  /**
+   * **任务入口被明确拒绝**（ADR-151 R1 修补 ①）。
+   *
+   * ⚠️ 它与 `plan_failed` 分开：这不是"模型没给出计划"，而是**程序**判定
+   *    "这条请求自称 F1 但形状/辅助路径不合法" ⇒ **一个动作都不许执行**
+   *    （也**不许**退回单动作路径 —— 那会截半执行）。
+   */
+  | 'entry_rejected'
   | 'cancelled'
   | 'superseded'
 
@@ -117,6 +181,15 @@ export interface TaskAuthorizationPort {
   /** 时限到了没有（到点即视为关闭，但**如实**留下原因） */
   expired(taskId: string, now?: number): boolean
   close(taskId: string, reason: TaskCloseReason): void
+  /**
+   * **记一次条件只读尝试**（ADR-151 R1 §4）。
+   *
+   * ⚠️ 调它**就**表示"这次读算数了"—— 调用方必须在**执行之前**调用（这样重入也不会读第二次）。
+   * 返回 `false` ⇒ 没有范围 / 已经用满 ⇒ **不许**执行这次读。
+   */
+  noteConditionRead(taskId: string): boolean
+  /** R4：族级标记的限次读；**计数在执行前** +1；超限或路径不在范围内 ⇒ false。 */
+  noteSourceScopedRead(taskId: string, path: string): boolean
   list(): readonly TaskAuthorization[]
 }
 
@@ -227,10 +300,96 @@ export function createTaskAuthorizationRegistry(
       if (task === undefined) return
       if (task.closedReason === undefined) task.closedReason = reason
     },
+    noteSourceScopedRead(taskId, path) {
+    const task = byId.get(taskId)
+    if (task === undefined) return false
+    const scope = task.sourceScopedPaths
+    if (scope === undefined) return false
+    const entry = scope.limitedReads.find(item => item.path === path)
+    if (entry === undefined) return false
+    const used = scope.attempts[path] ?? 0
+    if (used >= entry.maxReads) return false
+    scope.attempts[path] = used + 1
+    return true
+  },
+  noteConditionRead(taskId) {
+      const task = byId.get(taskId)
+      if (task === undefined) return false
+      const scope = task.boundedObservation
+      if (scope === undefined) return false
+      if (scope.attempts >= scope.maxReads) return false
+      scope.attempts += 1
+      return true
+    },
     list() {
       return [...byId.values()]
     },
   }
+}
+
+/**
+ * 把**程序生成的有界观察范围**挂到一份任务授权上（ADR-151 R1 §3）。
+ *
+ * ⚠️ **同任务重复挂载是幂等的**（ADR-151 R1 修补 ②）：已有范围时
+ *    - 范围**完全相同** ⇒ **保留原计数**（`attempts` 不重置 ⇒ 不会因为重新配置又多一次读）；
+ *    - 范围**不同** ⇒ **拒绝更换**（第一次挂上的那份才是这次任务的；不许借重新配置换范围）。
+ * ⚠️ 只有**装配层**（从原始请求 + 受信声明）与**测试夹具**该调它；
+ *    模型与计划字段**没有**路径能到这里。
+ * ⚠️ 传 `undefined` ⇒ 什么都不做（旧行为）。
+ * @returns 这次挂载**是否被接受**（已有不同范围 ⇒ `false`）。
+ */
+/**
+ * **挂载 F2 逐路径范围**（最小接点 R4）。
+ *
+ * ⚠️ **幂等且不可扩**：
+ *  · 没挂过 ⇒ 挂上（计数从 0 开始）；
+ *  · 已挂过 ⇒ 只有**完全相同**的范围才返回 true（保留已用计数）；
+ *    **任何扩大/改变**（多一个可读路径、多一个可写路径、把 maxReads 变大）⇒ 返回 false 且**不改原范围**。
+ *  · 计数**不会**因重挂而重置。
+ */
+export function applySourceScopedPaths(
+  task: TaskAuthorization,
+  scope: { readonly readOnly: readonly string[], readonly limitedReads: readonly { readonly path: string, readonly maxReads: number }[], readonly writable: readonly string[] } | undefined
+): boolean {
+  if (scope === undefined) return false
+  const normalize = (value: { readOnly: readonly string[], limitedReads: readonly { path: string, maxReads: number }[], writable: readonly string[] }): string =>
+    JSON.stringify({
+      readOnly: [...value.readOnly].sort(),
+      limitedReads: [...value.limitedReads].map(item => `${item.path}:${String(item.maxReads)}`).sort(),
+      writable: [...value.writable].sort(),
+    })
+  const existing = task.sourceScopedPaths
+  if (existing !== undefined) {
+    // 已挂过：只接受**完全相同**（计数保留）；任何扩大 ⇒ false 且不改
+    return normalize({ readOnly: existing.readOnly, limitedReads: existing.limitedReads, writable: existing.writable })
+      === normalize(scope)
+  }
+  task.sourceScopedPaths = {
+    readOnly: [...scope.readOnly],
+    limitedReads: scope.limitedReads.map(item => ({ path: item.path, maxReads: item.maxReads })),
+    writable: [...scope.writable],
+    attempts: {},
+  }
+  return true
+}
+export function applyBoundedObservation(
+  task: TaskAuthorization,
+  scope: { readonly targetPath: string; readonly conditionPath: string; readonly maxReads: number } | undefined
+): boolean {
+  if (scope === undefined) return false
+  const existing = task.boundedObservation
+  if (existing !== undefined) {
+    return existing.targetPath === scope.targetPath
+      && existing.conditionPath === scope.conditionPath
+      && existing.maxReads === scope.maxReads
+  }
+  task.boundedObservation = {
+    targetPath: scope.targetPath,
+    conditionPath: scope.conditionPath,
+    maxReads: scope.maxReads,
+    attempts: 0,
+  }
+  return true
 }
 
 /**

@@ -24,7 +24,7 @@
 
 import 'dotenv/config'
 import { isolateDatabase } from '../src/dev/sandbox.ts'
-import { runPreparedPgGate } from './postgresql/test-harness.ts'
+import { runPreparedPgGate, runPreparedPgGateInInstance } from './postgresql/test-harness.ts'
 
 if (process.env.LG_WORLD_MODEL_PG_CHILD !== '1') {
   const attempt = resolve('artifacts/post-lv2/local/world-model-reflection-e2e', new Date().toISOString().replace(/[:.]/g, '-'))
@@ -32,7 +32,18 @@ if (process.env.LG_WORLD_MODEL_PG_CHILD !== '1') {
   writeFileSync(resolve(attempt, 'verification.json'), JSON.stringify({ status: 'RUNNING', backend: 'postgres' }) + '\n')
   process.env.LG_WORLD_MODEL_RUN_DIR = attempt
   process.env.LG_WORLD_MODEL_PG_CHILD = '1'
-  await runPreparedPgGate('worldmodel-reflection', 'scripts/world-model-reflection-e2e-verify.ts')
+  /*
+   * ⚠️ **仿真内没有 docker CLI** ⇒ 宿主模式那套"自己起一次性容器"用不了。
+   *    ⇒ 仿真里改用**同一个专用隔离实例**（`LG_SIM_PGTEST_ADMIN_URL`），
+   *      准备阶段逐条相同（显式迁移 + 身份核对 + `lg_test_` 前缀）。
+   *    宿主模式（不给那个变量）**逐字保留**既有行为。
+   */
+  const simAdminUrl = (process.env.LG_SIM_PGTEST_ADMIN_URL ?? '').trim()
+  if (simAdminUrl !== '') {
+    await runPreparedPgGateInInstance(simAdminUrl, 'worldmodel-reflection', 'scripts/world-model-reflection-e2e-verify.ts')
+  } else {
+    await runPreparedPgGate('worldmodel-reflection', 'scripts/world-model-reflection-e2e-verify.ts')
+  }
   process.exit(0)
 }
 
