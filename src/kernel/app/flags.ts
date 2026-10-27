@@ -706,6 +706,37 @@ export interface KernelFlags {
    *    + `src/main.ts` 的两处旁路（`CheckedSpeechStream` 与 `decodeExpressiveSpeech`）。
    */
   expressiveSpeechEnabled: boolean
+  /**
+   * **QQ 出站媒介选择协议**（`CHARACTER_QQ_VOICE_REPLY`，代码缺省 **false**）。
+   *
+   * ```text
+   * off（缺省）= 不挂 QQ 媒介 section、不解析任何封套 ⇒ 旧行为逐字不变
+   * on          = 只在 **QQ 入口** 的正式回复里挂一条 `qq-media-reply` section，
+   *               并把"文字 / 语音"作为**她的**同轮选择交给既有正文处理链
+   * ```
+   *
+   * ⚠️ 它**不是**"所有回复都变语音"的开关，也**不是**发送权限：
+   *    目标、群、API、音色、文件路径仍由受信配置决定（选择只影响这一条的呈现）。
+   * ⚠️ 它**必须与 {@link qqVoiceOutputEnabled} 同时开**才算"语音真的可用" ——
+   *    只开这一个 ⇒ 不挂 section（没有可选项时不该告诉她有得选）。
+   * ⚠️ 它**必须被 `main.ts` 真的消费**（仓库既有教训：只读不接 = 惰性开关）。
+   */
+  qqVoiceReplyEnabled: boolean
+  /**
+   * **QQ 语音输出能力声明**（`CHARACTER_QQ_VOICE_OUTPUT`，代码缺省 **false**）。
+   *
+   * ```text
+   * off（缺省）= 这个出口现在**没有**合成/发送语音的能力
+   * on          = 外壳已装上受信 TTS 端口（P2 起才有真实实现；P1 只有门里的假端口）
+   * ```
+   *
+   * ⚠️ 为什么"能力声明"要单独一个开关：**核心进程不知道外壳装了哪个 TTS**。
+   *    把"能不能发语音"和"要不要给她选择"混成一个开关，会让核心在她面前
+   *    假装有这个能力 —— 那正是"程序替她选"之外的另一种不诚实。
+   * ⚠️ 声明为 on 而外壳其实没有端口 ⇒ 语音选择会**如实**回落到文字并记
+   *    `voice_output_absent`（不是假装发过语音，也不是把稿子念错）。
+   */
+  qqVoiceOutputEnabled: boolean
   /** Deadline for the optional story decision model. */
   storyChoiceDecisionTimeoutMs: number
   /**
@@ -1170,6 +1201,9 @@ export function readKernelFlags(env: NodeJS.ProcessEnv = process.env): KernelFla
      *    语义放宽（`1/true/yes/on` 都算开）见接口上的字段说明 —— 不是逐字等价。
      */
     expressiveSpeechEnabled: truthy(env.CHARACTER_EXPRESSIVE_SPEECH, false),
+    /* QQ 出站媒介：两个开关都缺省 **false**（P1 只接通协议；真实 TTS 是 P2/P3） */
+    qqVoiceReplyEnabled: truthy(env.CHARACTER_QQ_VOICE_REPLY, false),
+    qqVoiceOutputEnabled: truthy(env.CHARACTER_QQ_VOICE_OUTPUT, false),
     storyChoiceDecisionTimeoutMs: 8_000,
     // M9.1 / ADR-072 D12：重述复活发射缺省 **off** —— 激活属独立裁定（先例 ADR-048/065/067/071）
     memoryRestatementRevivalEnabled: truthy(env.CHARACTER_MEMORY_RESTATEMENT_ENABLED, false),
@@ -1492,6 +1526,12 @@ export function describeKernelFlags(flags: KernelFlags): string {
   record('interjection', flags.interjectionEnabled)
   // Lv4 / ADR-102：逐句表达（它决定装不装表达 section、走不走表达旁路）
   record('expressive-speech', flags.expressiveSpeechEnabled)
+  /*
+   * post-Lv2 / QQ 媒介选择（P1）：**两行**，理由与前面几行一样 ——
+   * "协议开了"与"语音真的可用"是两件事，合成一个会让"只开协议"看起来像"已经能发语音"。
+   */
+  record('qq-voice-reply', flags.qqVoiceReplyEnabled)
+  record(`qq-voice-output`, flags.qqVoiceOutputEnabled && flags.qqVoiceReplyEnabled)
   // M9.5 / WP6：语义召回（它决定装不装探针 + 选不选混合策略版本）
   record('memory-semantic-recall', flags.memorySemanticRecallEnabled)
   // M9.5 / WP8：模式（"观察还是切换"必须一眼可见）

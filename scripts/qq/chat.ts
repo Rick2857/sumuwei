@@ -6,6 +6,8 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { assertProductionAvatarEnvironment } from '../postlv2-production-env.ts'
 import { readQqPrivateConfig } from '../../src/infrastructure/qq/private-config.ts'
 import { OneBotPrivateClient } from '../../src/infrastructure/qq/onebot-private-client.ts'
+import { openQqDeliveryJournal } from '../../src/infrastructure/qq/voice-delivery-journal.ts'
+import { createHttpQqVoiceSynthesizer, readQqTtsConfig } from '../../src/infrastructure/qq/tts-executor.ts'
 import { LgStdioClient } from '../../src/infrastructure/qq/lg-stdio-client.ts'
 import { readWechatConfig, WechatGroupClient } from '../../src/infrastructure/wechat/group-client.ts'
 
@@ -22,6 +24,37 @@ if (existsSync(wechatFile)) {
 const wechatConfig = readWechatConfig(process.env)
 assertProductionAvatarEnvironment(process.env, root)
 const settings = readQqPrivateConfig(process.env)
+/*
+ * post-Lv2 / P2：QQ 语音输出的**唯一装配点**（缺省全关 ⇒ 与 P1 之前逐字相同）。
+ *
+ * ```text
+ * CHARACTER_QQ_VOICE_REPLY      协议开关（核心只在它为真时给她"文字/语音"选择）
+ * CHARACTER_QQ_VOICE_OUTPUT     能力声明（核心据此认为语音可用）
+ * CHARACTER_QQ_TTS_*            真实 TTS 端点/密钥/模型/音色（四件齐全才装端口）
+ * CHARACTER_QQ_DELIVERY_JOURNAL 投递日志路径（缺省 data/qq-reply-delivery.jsonl）
+ * ```
+ * ⚠️ **失败关闭**：日志打不开 / TTS 配置不全 ⇒ **不装**语音端口 ⇒ 她选语音时
+ *    外壳如实回落到文字（核心会记 `voice_output_absent`、投递日志不会记录未发送的语音）。
+ * ⚠️ 日志与端口的**装载条件在这里**，不在客户端里 —— 装配层才看得见配置。
+ */
+const enabledFlag = (value: string | undefined): boolean => /^(1|true|yes|on)$/i.test((value ?? '').trim())
+const voiceProtocolEnabled = enabledFlag(process.env.CHARACTER_QQ_VOICE_REPLY)
+const voiceOutputDeclared = voiceProtocolEnabled && enabledFlag(process.env.CHARACTER_QQ_VOICE_OUTPUT)
+const journalPath = resolve(root, (process.env.CHARACTER_QQ_DELIVERY_JOURNAL ?? 'data/qq-reply-delivery.jsonl').trim())
+const deliveryJournal = voiceProtocolEnabled ? openQqDeliveryJournal(journalPath) : undefined
+const ttsConfig = voiceOutputDeclared ? readQqTtsConfig(process.env) : undefined
+const voiceOutput = ttsConfig !== undefined && deliveryJournal?.journal !== undefined
+  ? { synthesizer: createHttpQqVoiceSynthesizer(ttsConfig) }
+  : undefined
+if (voiceProtocolEnabled && deliveryJournal?.error !== undefined) {
+  console.log(JSON.stringify({ event: 'qq_delivery_journal_open_failed', reason: deliveryJournal.error, path: journalPath }))
+}
+if (voiceOutputDeclared && voiceOutput === undefined) {
+  console.log(JSON.stringify({
+    event: 'qq_voice_output_unavailable',
+    reason: ttsConfig === undefined ? 'tts_not_configured' : deliveryJournal?.journal === undefined ? 'delivery_journal_unavailable' : 'unknown',
+  }))
+}
 if (!production.parsed?.OPENAI_API_KEY?.trim()) throw new Error('QQ requires .env OPENAI_API_KEY')
 /*
  * post-Lv2 / ADR-109：**共存连接档**（可选）。
@@ -52,7 +85,8 @@ if (process.argv.includes('--check')) {
   )
 } else {
   const lg = new LgStdioClient(root, process.env, coexistConnect === undefined ? {} : { connect: coexistConnect })
-  const client = new OneBotPrivateClient(settings, (request) => lg.submit(request), (reading) => console.log(JSON.stringify(reading)))
+  const client = new OneBotPrivateClient(settings, (request) => lg.submit(request), (reading) => console.log(JSON.stringify(reading)),
+    voiceOutput, deliveryJournal?.journal)
   /*
    * post-Lv2 / ADR-110 `D06`：**核心主动发来的投递**交给本外壳的发送面。
    *

@@ -55,6 +55,8 @@ sh scripts/deploy/bootstrap-linux-python.sh --dry-run
 
 微信为可选入口：复制 `.env.wechat.example` 并配置自己的独立桥、令牌、平台身份与群白名单。适配器要求 loopback HTTP 地址和有效账号，不包含桥镜像、登录态或任何群授权。启用前自行核验上游桥的来源与运行条件。公开离线检查不发送消息。
 
+详细能力、配置字段、共享核心和群内文字范围见 [微信群指南](WECHAT.md)。QQ 普通回复的可选 TTS 输出另见 [QQ 语音回复](QQ-VOICE.md)，不会自动扩展到微信、提醒或主动投递。
+
 ## 验证与边界
 
 ```sh

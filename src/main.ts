@@ -378,6 +378,9 @@ import { toLookupReading, TurnBridge } from './kernel/app/bridge/turn-bridge.ts'
 import { assessGroupReply } from './kernel/app/bridge/group-reply.ts'
 import { renderSeedIdentity } from './kernel/contracts/character-definition.ts'
 import { bindSpeechExpression, decodeExpressiveSpeech, withoutAppendices, type SpeechExpression } from './kernel/contracts/expressive-speech.ts'
+/* post-Lv2 / P1：QQ 出站媒介选择（同轮文字/语音；只解码**完整封套**，失败关闭） */
+import { resolveQqMediaReply, type QqMediaSelection } from './kernel/contracts/qq-media-reply.ts'
+import { readQqReplyDelivery } from './infrastructure/qq/voice-delivery-journal.ts'
 import { runBridgeTransport, sessionHost, TurnCancellationRegistry } from './infrastructure/bridge/turn-bridge-transport.ts'
 import { readQqPrivateConfig } from './infrastructure/qq/private-config.ts'
 /* U1 / `WP2b-2b`：入站平台事实 ⇒ 本轮作用域（装配层用**真 store** 解析） */
@@ -4595,6 +4598,21 @@ class ChatSession {
      *    ⇒ 不拆开就不知道该改装配、模型、守卫还是落账。
      */
     const phaseAt = { context: Date.now(), begin: 0, compile: 0, preCompile: 0, state: 0, guards: 0, complete: 0 }
+    /*
+     * post-Lv2 / P1：**QQ 媒介选择**是否在本轮生效（声明在**外层**作用域）。
+     *
+     * ```text
+     * 只有 QQ 入口（qq_private；私聊与群聊都走这一条）
+     * + 协议开关（CHARACTER_QQ_VOICE_REPLY）
+     * + 语音输出能力声明（CHARACTER_QQ_VOICE_OUTPUT）
+     * ⇒ 才挂 section、才解析封套；任何一处不满足 ⇒ 旧行为逐字不变
+     * ```
+     * ⚠️ 语音输出是**外壳**的能力：核心看不到装了哪个 TTS ⇒ 只能按声明走。
+     *    声明为开而外壳没有端口时，外壳会如实回落到文字并记 `voice_output_absent`。
+     */
+    const qqMediaChoiceEnabled = this.entryKey === 'qq_private'
+      && this.scopedIdentity?.transport !== 'wechat'
+      && this.flags.qqVoiceReplyEnabled && this.flags.qqVoiceOutputEnabled
 
     if (useCompiler && this.gateway) {
       /*
@@ -5053,6 +5071,14 @@ class ChatSession {
         stateSection,
         // Lv4 / ADR-102：开关集中在 flags.ts（2026-10-07 从裸 process.env 收进）
         ...(this.flags.expressiveSpeechEnabled ? { expressiveSpeech: true } : {}),
+        /*
+         * post-Lv2 / P1：**QQ 出站媒介选择**（两个开关都开且是 QQ 入口时才有这一条）。
+         * ⚠️ 不传 ⇒ 0 个 section ⇒ prompt 与改动前**逐字节相同**（与表达 section 同一条纪律）。
+         * ⚠️ "语音可用"是**受信配置的声明**，不是模型能选出来的能力。
+         */
+        ...(qqMediaChoiceEnabled ? { qqMediaReply: { voiceAvailable: true,
+          delivery: readQqReplyDelivery(resolve(process.cwd(), process.env.CHARACTER_QQ_DELIVERY_JOURNAL || 'data/qq-reply-delivery.jsonl'),
+            this.lastTurnReading?.replyId) } } : {}),
         // M9.1：撤销遮蔽（开关关闭 ⇒ 不传 ⇒ 0 步 trace、逐字节基线）
         ...(withdrawnMasking !== undefined ? { withdrawnMasking } : {}),
         // M7：关系注入块（未建档或开关关闭 ⇒ undefined ⇒ 0 个 section）
@@ -5311,6 +5337,27 @@ class ChatSession {
     const expressionDraft = nativeVoice === undefined && streamed === undefined && useCompiler && this.flags.expressiveSpeechEnabled
       ? decodeExpressiveSpeech(call.text)
       : undefined
+    /*
+     * post-Lv2 / P1：**同轮媒介选择**（QQ 专属、版本化封套）。
+     *
+     * ⚠️ 位置是刻意的：在既有回复文本解析之后、回复守卫**之前** ——
+     *    守卫看到的是封套里的**正文**，因此"她说过什么"与守卫的判定仍然一致。
+     * ⚠️ 坏封套**整轮失败**（不截半、不把协议念出去）；失败在桥那一侧具名上报，
+     *    QQ 外壳只会发程序诊断文字，不会把它当正文发出去。
+     */
+    let qqMediaResolved: ReturnType<typeof resolveQqMediaReply> | undefined
+    if (qqMediaChoiceEnabled && nativeVoice === undefined && streamed === undefined && useCompiler) {
+      try {
+        qqMediaResolved = resolveQqMediaReply({ raw: call.text, enabled: true, voiceAvailable: true })
+      } catch (error) {
+        if (incoming !== undefined && this.gateway !== undefined) {
+          await this.gateway.failTurn(incoming, error instanceof Error ? error : new Error('qq_media_invalid_envelope'))
+        }
+        throw error
+      }
+    }
+    /** 交给既有正文处理链的文本（无媒介选择时与改动前逐字相同） */
+    const draftedText = qqMediaResolved?.text ?? expressionDraft?.text ?? call.text
     const modelSeconds = (call.durationMs / 1000).toFixed(1)
 
     /*
@@ -5343,9 +5390,22 @@ class ChatSession {
      * 拿回来的正文与三态报告都没变（下面那几个常量只是既有名字的别名）。
      */
     const guardChain = streamed?.outcome ?? runReplyGuardChain({
-      replyText: expressionDraft?.text ?? call.text,
+      replyText: draftedText,
       ...guardFacts,
     })
+    /*
+     * post-Lv2 / P2：语音回复的**伴随来源附录**（程序追加，给眼睛看）。
+     *
+     * ```text
+     * 语音正文不念 URL；必要的原附录作为**另一条文字**发出并单独记结果。
+     * 只在"她选了语音"时随结果交给外壳；文字路径保持既有行为（附录不进交付文本）。
+     * ⚠️ 它**不是**正文的一部分：账本正文（`replyText`）一个字不动。
+     * ```
+     */
+    const mediaAppendix = qqMediaChoiceEnabled && qqMediaResolved?.media?.mode === 'voice'
+      ? [guardChain.evidenceAppendix, guardChain.turnContent.appendix]
+        .filter((part) => part.trim() !== '').join('\n\n').slice(0, 4000)
+      : ''
     /**
      * 记忆守卫的结果（诊断日志用它）。
      * ⚠️ 保留既有名字 `truth`：改名收益为零，而"看着安全、其实漏掉一处"的风险很大。
@@ -5698,6 +5758,13 @@ class ChatSession {
         ...(streamed !== undefined ? { expression: streamed.expression } : expressionDraft !== undefined ? {
           expression: bindSpeechExpression(String(outgoing.assistantEvent?.id ?? ''), spokenText, expressionDraft),
         } : {}),
+        /*
+         * post-Lv2 / P1：把**这一轮她选的媒介**随身份一起交给桥（再回给 QQ 外壳）。
+         * ⚠️ 这里不带合成/发送结果：那些只有外壳知道，核心**不**编造。
+         */
+        ...(qqMediaResolved?.media !== undefined ? { media: qqMediaResolved.media } : {}),
+        /* post-Lv2 / P2：语音回复的伴随来源附录（程序追加；不进账本正文） */
+        ...(mediaAppendix === '' ? {} : { mediaAppendix }),
       }
       return spokenText
     }
@@ -5908,6 +5975,10 @@ class ChatSession {
         traceId: string
         domainEventIds: readonly string[]
         expression?: SpeechExpression
+        /** post-Lv2 / P1：这一轮她选的 QQ 媒介（开关关 / 非 QQ ⇒ 缺席） */
+        media?: QqMediaSelection
+        /** post-Lv2 / P2：语音回复的伴随来源附录（只在她选语音时出现） */
+        mediaAppendix?: string
         streamStatus?: 'completed' | 'interrupted' | 'cancelled'
         /** 生成段内部的阶段耗时（`P4` 后的时延修复要靠它定位主导阶段） */
         timings?: {
@@ -5930,6 +6001,10 @@ class ChatSession {
         traceId: string
         domainEventIds: readonly string[]
         expression?: SpeechExpression
+        /** post-Lv2 / P1：这一轮她选的 QQ 媒介（开关关 / 非 QQ ⇒ 缺席） */
+        media?: QqMediaSelection
+        /** post-Lv2 / P2：语音回复的伴随来源附录（只在她选语音时出现） */
+        mediaAppendix?: string
         streamStatus?: 'completed' | 'interrupted' | 'cancelled'
         timings?: {
           contextMs: number

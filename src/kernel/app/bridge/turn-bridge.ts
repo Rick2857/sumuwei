@@ -39,6 +39,8 @@ import {
   decodeExpressiveSpeech,
   type SpeechExpression,
 } from '../../contracts/expressive-speech.ts'
+/* post-Lv2 / P1：QQ 出站媒介选择（**呈现元数据**，不是权限；形状由契约判，桥只运输） */
+import type { QqMediaSelection } from '../../contracts/qq-media-reply.ts'
 /* Lv4.5 / ADR-131：机会报文的入口字面量**只有一处**（不在这里另写 'avatar'） */
 import { OPENING_ENTRY } from '../../contracts/proactive-opening.ts'
 import {
@@ -116,6 +118,20 @@ export interface BridgeSubmitResult {
   streamStatus?: 'completed' | 'interrupted' | 'cancelled'
   /** LG-owned sidecar bound to the final checked reply; never a new action permission. */
   expression?: SpeechExpression
+  /**
+   * post-Lv2 / P1：这一轮 QQ 回复的**媒介选择**（`text | voice`）。
+   *
+   * ⚠️ 只是呈现元数据：**不是**发送权限，也不选目标/音色/文件。
+   * ⚠️ 缺席 ⇒ 外壳按既有文字路径处理（旧核心 / 非 QQ / 开关关 ⇒ 逐字旧行为）。
+   */
+  media?: QqMediaSelection
+  /**
+   * post-Lv2 / P2：语音回复的**伴随来源附录**（程序追加，给眼睛看的）。
+   *
+   * ⚠️ 只在"语音真的发出"时有意义：语音正文不念 URL；附录作为**另一条文字**发出。
+   * ⚠️ 它**不是**正文的一部分：不写进账本正文、不改 her 说过什么。
+   */
+  mediaAppendix?: string
   outcome: BridgeTurnOutcome
   /**
    * 生成段内部的**阶段耗时**（`P4` 后的时延修复；可选）。
@@ -366,6 +382,14 @@ export interface TurnBridgeHost {
 export interface HostTurnResult {
   streamStatus?: BridgeSubmitResult['streamStatus']
   expression?: SpeechExpression
+  /**
+   * post-Lv2 / P1：QQ 这一轮的媒介选择（可选；缺席 = 旧行为）。
+   *
+   * ⚠️ host 只报"她选了什么"，**不**报合成/发送结果 —— 那是外壳与投递事实的事。
+   */
+  media?: QqMediaSelection
+  /** post-Lv2 / P2：语音回复的伴随来源附录（可选；缺席 = 无附录） */
+  mediaAppendix?: string
   /**
    * **已经过回复守卫**的正文。
    *
@@ -674,6 +698,10 @@ export class TurnBridge {
         ...(outcome.guardStates !== undefined ? { guardStates: [...outcome.guardStates] } : {}),
         delivery: outcome.streamStatus === 'interrupted' || outcome.streamStatus === 'cancelled' ? 'failed' : 'generated',
         ...(outcome.expression !== undefined ? { expression: outcome.expression } : {}),
+        /* post-Lv2 / P1：媒介选择原样运输（形状由契约保证；桥不重判她的选择） */
+        ...(outcome.media !== undefined ? { media: outcome.media } : {}),
+        /* post-Lv2 / P2：语音回复的伴随附录原样运输（程序追加；不进账本正文） */
+        ...(outcome.mediaAppendix !== undefined ? { mediaAppendix: outcome.mediaAppendix } : {}),
         /* `P4` 后的时延修复：阶段耗时**原样**带出去（只是读数，不参与任何判据） */
         ...(outcome.timings !== undefined ? { timings: outcome.timings } : {}),
       }
@@ -1905,6 +1933,15 @@ export interface BridgeWireResponse {
   speech?: CheckedSpeechSegment
   streamStatus?: BridgeSubmitResult['streamStatus']
   expression?: SpeechExpression
+  /**
+   * `TURN_RESULT` 才有：这一轮 QQ 回复的**媒介选择**（post-Lv2 / P1）。
+   *
+   * ⚠️ 外壳**只**按它决定"发文字还是发语音"；它不携带目标、音色、文件或 URL。
+   * ⚠️ 缺席 ⇒ 文字（旧核心 / 非 QQ 入口 / 开关关 ⇒ 与改动前逐字相同）。
+   */
+  media?: QqMediaSelection
+  /** `TURN_RESULT` 才有：语音回复的伴随来源附录（post-Lv2 / P2；缺席 = 无） */
+  mediaAppendix?: string
   kind:
     | 'GROUP_REPLY_DECISION'
     | 'TURN_RESULT'
@@ -2700,6 +2737,10 @@ export async function handleBridgeMessage(
     ...(result.traceId !== undefined ? { traceId: result.traceId } : {}),
     ...(result.domainEventIds !== undefined ? { domainEventIds: result.domainEventIds } : {}),
     ...(result.expression !== undefined ? { expression: result.expression } : {}),
+    /* post-Lv2 / P1：媒介选择随轮次结果回外壳（不写日志：stdout 是协议通道） */
+    ...(result.media !== undefined ? { media: result.media } : {}),
+    /* post-Lv2 / P2：语音回复的伴随附录随轮次结果回外壳 */
+    ...(result.mediaAppendix !== undefined ? { mediaAppendix: result.mediaAppendix } : {}),
     /* `P4` 后的时延修复：阶段耗时随结果回外壳（**不**写日志：stdout 是协议通道） */
     ...(result.timings !== undefined ? { timings: result.timings } : {}),
     delivery: result.delivery,

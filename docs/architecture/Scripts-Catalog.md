@@ -18,11 +18,11 @@
 
 | 类别 | 条目数 |
 |---|---:|
-| 已登记门 | 260 |
+| 已登记门 | 263 |
 | 汇总/链入口 | 21 |
 | 文档入口 | 3 |
 | 内部 | 465 |
-| **合计** | **749** |
+| **合计** | **752** |
 
 `scripts/` 下**没有任何 pnpm 入口引用**的脚本文件：**389 个**（见文末）。
 
@@ -380,13 +380,13 @@
 
 **内部（4）**：`postgresql:cutover:apply` · `postgresql:goal-rebuild:apply` · `postgresql:live:smoke` · `postgresql:p02:verify`
 
-### `postlv2`（100 条 · **有同名 lane**）
+### `postlv2`（103 条 · **有同名 lane**）
 
 **入口**：
 - `postlv2:controls:gates` — 汇总/链入口
 - `postlv2:s8:gates` — 汇总/链入口
 
-**已登记门（26）**：`postlv2:affected:verify` · `postlv2:automatic-memory:recovery:verify` · `postlv2:avatar-opening:verify` · `postlv2:body:verify` · `postlv2:database-env:verify` · `postlv2:db:verify` · `postlv2:delivery:verify` · `postlv2:gate-selection:verify` · `postlv2:goal-deadline:verify` · `postlv2:goal-parallel:verify` · `postlv2:image:verify` · `postlv2:orchestration:verify` · `postlv2:oss-mechanisms:verify` · `postlv2:role-tool:path` · `postlv2:role-tool:verify` · `postlv2:s8:contracts:verify` · `postlv2:s8:lifecycle:verify` · `postlv2:s8:measurement:verify` · `postlv2:s8:production:verify` · `postlv2:s8:reflection:verify` · `postlv2:s8:roots:verify` · `postlv2:s8:state:verify` · `postlv2:s8:store:verify` · `postlv2:s8:withdraw:verify` · `postlv2:sequence-continuity:verify` · `postlv2:transport:verify`
+**已登记门（29）**：`postlv2:affected:verify` · `postlv2:automatic-memory:recovery:verify` · `postlv2:avatar-opening:verify` · `postlv2:body:verify` · `postlv2:database-env:verify` · `postlv2:db:verify` · `postlv2:delivery:verify` · `postlv2:gate-selection:verify` · `postlv2:goal-deadline:verify` · `postlv2:goal-parallel:verify` · `postlv2:image:verify` · `postlv2:orchestration:verify` · `postlv2:oss-mechanisms:verify` · `postlv2:qq-voice-delivery:verify` · `postlv2:qq-voice-main:verify` · `postlv2:qq-voice-reply:verify` · `postlv2:role-tool:path` · `postlv2:role-tool:verify` · `postlv2:s8:contracts:verify` · `postlv2:s8:lifecycle:verify` · `postlv2:s8:measurement:verify` · `postlv2:s8:production:verify` · `postlv2:s8:reflection:verify` · `postlv2:s8:roots:verify` · `postlv2:s8:state:verify` · `postlv2:s8:store:verify` · `postlv2:s8:withdraw:verify` · `postlv2:sequence-continuity:verify` · `postlv2:transport:verify`
 
 **内部（72）**：`postlv2:action-delegation:verify` · `postlv2:appearance:verify` · `postlv2:asr:verify` · `postlv2:automatic-memory:live` · `postlv2:automatic-memory:verify` · `postlv2:avatar` · `postlv2:avatar-opening:chain` · `postlv2:avatar:live2d` · `postlv2:avatar:production` · `postlv2:avatar:production:verify` · `postlv2:avatar:verify` · `postlv2:baseline` · `postlv2:bridge:verify` · `postlv2:coexist:live` · `postlv2:coexist:matrix` · `postlv2:coexist:shells` · `postlv2:coexist:verify` · `postlv2:delegation-revalidation:verify` · `postlv2:delegation-wire:verify` · `postlv2:delegation:real` · `postlv2:delegation:roundtrip` · `postlv2:entry-cancel:verify` · `postlv2:entry-handshake:verify` · `postlv2:entry-reconnect:verify` · `postlv2:executor-client:verify` · `postlv2:executor-server:verify` · `postlv2:executor:readonly-probe` · `postlv2:expression:verify` · `postlv2:goal-thinking:eval` · `postlv2:image:live` · `postlv2:memory-write:live` · `postlv2:memory-write:verify` · `postlv2:mic` · `postlv2:model-memory:live` · `postlv2:model-memory:verify` · `postlv2:playback-buffer:eval` · `postlv2:qq-proactive:chain` · `postlv2:qq-proactive:live` · `postlv2:qq-proactive:measurement:verify` · `postlv2:qq-proactive:verify` · `postlv2:role-tool:activation:readback` · `postlv2:role-tool:first-use:readback` · `postlv2:role-tool:known-dirs` · `postlv2:role-tool:live` · `postlv2:role-tool:main-live` · `postlv2:role-tool:matrix` · `postlv2:role-tool:semantic:eval` · `postlv2:s7:gate` · `postlv2:s7:live` · `postlv2:s8:activation-readback` · `postlv2:s8:activation-readback:db` · `postlv2:s8:baseline` · `postlv2:s8:choice:verify` · `postlv2:s8:daily:e2e` · `postlv2:s8:daily:live` · `postlv2:s8:daily:verify` · `postlv2:s8:dev-probe` · `postlv2:s8:entry-lock:verify` · `postlv2:s8:quote:ab:live` · `postlv2:s8:semantic:eval` · `postlv2:s8:semantic:recompute` · `postlv2:s8:start:verify` · `postlv2:semantic:production:verify` · `postlv2:semantic:verify` · `postlv2:source-root:verify` · `postlv2:source:verify` · `postlv2:speech:verify` · `postlv2:story:build` · `postlv2:story:verify` · `postlv2:text-stream:verify` · `postlv2:tts:verify` · `postlv2:world:verify`
 

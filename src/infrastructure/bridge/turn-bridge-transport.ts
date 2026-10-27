@@ -179,6 +179,10 @@ export interface BridgeSessionLike {
         traceId: string
         domainEventIds: readonly string[]
         expression?: import('../../kernel/contracts/expressive-speech.ts').SpeechExpression
+        /** post-Lv2 / P1：QQ 媒介选择（开关关 / 非 QQ ⇒ 缺席 ⇒ 旧行为） */
+        media?: import('../../kernel/contracts/qq-media-reply.ts').QqMediaSelection
+        /** post-Lv2 / P2：语音回复的伴随来源附录（可选） */
+        mediaAppendix?: string
         streamStatus?: import('../../kernel/app/bridge/turn-bridge.ts').BridgeSubmitResult['streamStatus']
         /** 生成段内部的阶段耗时（`P4` 后的时延修复；可选） */
         timings?: {
@@ -384,6 +388,10 @@ export function sessionHost(
         traceId: identity.traceId,
         domainEventIds: identity.domainEventIds,
         ...(identity.expression !== undefined ? { expression: identity.expression } : {}),
+        /* post-Lv2 / P1：媒介选择随 host 结果交给桥（缺席 ⇒ 旧行为逐字不变） */
+        ...(identity.media !== undefined ? { media: identity.media } : {}),
+        /* post-Lv2 / P2：语音回复的伴随附录随 host 结果交给桥 */
+        ...(identity.mediaAppendix !== undefined ? { mediaAppendix: identity.mediaAppendix } : {}),
         /*
          * `P4` 后的时延修复：**生成段内部的阶段耗时**随结果回给外壳。
          * ⚠️ 不走日志：桥的 stdout 是 NDJSON 协议通道，外壳会丢弃非协议行

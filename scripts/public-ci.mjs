@@ -29,6 +29,7 @@ try {
     ['thinhost:surface:verify'], ['thinhost:retirement:verify'], ['thinhost:uuid:parity'],
     ['exec', 'tsx', 'scripts/priority-tools-verify.ts'], ['deploy:verify'],
     ['postlv2:entry-handshake:verify'], ['postlv2:entry-cancel:verify'], ['postlv2:entry-reconnect:verify'],
+    ['postlv2:qq-voice-reply:verify'], ['postlv2:qq-voice-delivery:verify'],
     ['postlv2:executor-server:verify'], ['postlv2:executor-client:verify']]
   for (const command of commands) {
     const runner = process.env.npm_execpath

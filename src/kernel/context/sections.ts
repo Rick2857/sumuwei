@@ -1531,11 +1531,11 @@ export const CONTEXT_COMPILER_V2_VERSION = 'context-compiler@2'
  * 外面只套一层固定的结构说明。任何模块想往 prompt 里加东西，
  * 都必须先变成一个 section（于是它会被 Trace 记录到）。
  *
- * ⚠️ M3 保留 M2.5 的措辞**一字不改**。它已经跑过真实对话，
- * 改它属于"顺手改行为"，而本阶段要保证的是身份与来源正确，
- * 不是让她的语气变好。
+ * 普通回复保留 M2.5 的措辞；已编译的 QQ 媒介 section 使用自己的封套格式，
+ * 不能在这里又以“禁止 XML”覆盖它。判断只看受信 section，不扫描用户正文。
  */
 export function composePromptFromPacket(packet: ContextPacket, agentName: string): string {
+  const qqMedia = packet.sections.some(section => section.id === 'qq-media-reply')
   return [
     '# 任务',
     `你是「${agentName}」。按她此刻的状态与语气，回应对方刚刚说的话。`,
@@ -1545,10 +1545,11 @@ export function composePromptFromPacket(packet: ContextPacket, agentName: string
     '</context>',
     '',
     '# 输出要求',
-    '只输出你会说出口的话本身。',
-    '- 不要输出任何 XML 标签、字段名、"thought"、"actions" 之类的结构。',
+    qqMedia ? '只输出本轮 QQ 媒介协议要求的一个完整 <lg-qq-media> 封套，真正说的话放在 text 字段。' : '只输出你会说出口的话本身。',
+    qqMedia ? '- mode 按当前对话自行选择 text 或 voice；封套供 QQ 外壳执行，不是发给对方看的正文。封套之外不要输出任何内容。'
+      : '- 不要输出任何 XML 标签、字段名、"thought"、"actions" 之类的结构。',
     '- 不要复述上面 context 里的条目名或数值。',
     '- 不要解释你在做什么。',
-    '- 直接开始说话。',
+    qqMedia ? '- text 中直接开始说话，不写协议说明或内部字段。' : '- 直接开始说话。',
   ].join('\n')
 }

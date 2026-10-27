@@ -48,6 +48,14 @@ function globToRegExp(glob: string): RegExp {
 
 export const AFFECTED_RULES: readonly AffectedRule[] = [
   {
+    what: 'QQ reply media, synthesis, delivery and bridge metadata',
+    match: ['src/kernel/contracts/qq-media-reply.ts', 'src/kernel/context/qq-media-reply-section.ts',
+      'src/infrastructure/qq/**', 'src/infrastructure/bridge/turn-bridge-transport.ts',
+      'src/kernel/app/bridge/turn-bridge.ts', 'scripts/qq/chat.ts', 'scripts/postlv2-qq-voice-*.ts'],
+    gates: ['postlv2:qq-voice-reply:verify', 'postlv2:qq-voice-delivery:verify',
+      'postlv2:qq-voice-main:verify', 'qq:reconnect:verify', 'postlv2:transport:verify'],
+  },
+  {
     what: 'U1 完成接线与 G1 QQ 成员/房间入口',
     match: ['src/infrastructure/persistence/read-scope.ts', 'src/infrastructure/qq/**',
       'src/infrastructure/runtime/impression-query.ts', 'scripts/u1-completion-verify.ts', 'scripts/qq/group-verify.ts'],

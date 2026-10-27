@@ -83,6 +83,7 @@ import {
 } from '../context/sections.ts'
 import { createExpressiveSpeechProvider } from '../context/expressive-speech-section.ts'
 import { createChatChannelProvider } from '../context/chat-channel-section.ts'
+import { createQqMediaReplyProvider } from '../context/qq-media-reply-section.ts'
 import type { ChatChannel } from '../contracts/chat-channel.ts'
 import { reminderFactText, type ReminderTurnResult } from './reminder-turn.ts'
 /* M9.1 / ADR-072 D16：撤销集结果形状（compute 回调的返回契约） */
@@ -762,6 +763,17 @@ export interface CompileTurnInput {
   stateSection?: { text: string; sourceRefs: string[] }
   /** Local avatar presentation only; absent preserves the existing prompt byte for byte. */
   expressiveSpeech?: boolean
+  /**
+   * **post-Lv2 / QQ 出站媒介选择**（P1）：只在 QQ 入口、且语音输出**真的**可用时传。
+   *
+   * ```text
+   * 不传（缺省）      ⇒ 0 个 section ⇒ prompt 与改动前逐字节相同
+   * { voiceAvailable: true } ⇒ 挂 `qq-media-reply`（文字/语音同轮选择协议）
+   * ```
+   * ⚠️ 与 `expressiveSpeech` 是两条不同的通道：那条是**皮套**的逐句表演，
+   *    这条是 **QQ** 的一条完整气泡；同时打开不会互相替代（封套各自独占整段）。
+   */
+  qqMediaReply?: { voiceAvailable: boolean; delivery?: import('../contracts/qq-media-reply.ts').QqReplyDeliveryFact }
   chatChannel?: { current: ChatChannel; reminderChannels: readonly ChatChannel[] }
   /**
    * M7 / ADR-064 D-6：**关系注入块**内容（由调用方从 M7 关系投影渲染）。
@@ -1639,6 +1651,7 @@ export class TurnGateway {
      * 是两种不同的承诺，合起来会让模型无法只承认其中一件。
      */
     const extraProviders = input.expressiveSpeech ? [createExpressiveSpeechProvider()] : []
+    if (input.qqMediaReply !== undefined && input.qqMediaReply.voiceAvailable) extraProviders.push(createQqMediaReplyProvider(input.qqMediaReply.delivery))
     if (input.chatChannel) extraProviders.push(createChatChannelProvider(input.chatChannel))
     if (input.turn.clarificationQuestion !== undefined) {
       const question = input.turn.clarificationQuestion
