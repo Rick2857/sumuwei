@@ -50,11 +50,6 @@ export type ReminderTurnResult =
   | { kind: 'clarify' | 'failed' | 'refused'; code: string; message: string; diagnostic?: string }
   | ({ kind: 'scheduled' | 'updated' | 'existing' } & PendingReminder & ReminderFallbackFact)
 
-export const UNEXECUTED_REMINDER_REPLY = '本轮没有新增或修改提醒，尚未确认上述安排已设置成功；已存在的提醒以实际待办为准。'
-export function claimsUnexecutedReminder(text: string): boolean {
-  return (/(提醒|课表|课前|上课前|签到)/u.test(text) && /已(?:经)?(?:设置|安排|排)|排上了|排好了|我(?:会|就|都)?(?:发(?![了过])|提醒(?![了过]))|到点(?:发|提醒)/u.test(text))
-    || /\d{1,2}[:：]\d{2}.{0,12}(?:我发你|我会发|提醒你)/u.test(text)
-}
 
 export function readReminderDraft(value: unknown): ReminderDraft | undefined {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined
@@ -230,48 +225,4 @@ export function truthfulReminderReply(result: Exclude<ReminderTurnResult, { kind
       ? `（原本走${CHAT_CHANNEL_LABELS[result.fallbackFrom]}，它现在不可用，已改用${label}）`
       : ''
   return `提醒${result.kind === 'updated' ? '已更新' : result.kind === 'existing' ? '已存在' : '已设置'}：${clock}，通过${label}${fallbackReason}，${result.text}`
-}
-
-export function reminderReplyConfirmsChannel(result: Pick<PendingReminder, 'channel'>, text: string): boolean {
-  const channel = result.channel ?? 'qq_private'
-  const names = { qq_private: 'QQ', avatar: '皮套', cli: '控制台' } as const
-  return text.includes(names[channel]) && !reminderReplyChangesChannel(result, text)
-}
-
-export function reminderReplyChangesChannel(result: Pick<PendingReminder, 'channel'>, text: string): boolean {
-  const channel = result.channel ?? 'qq_private'
-  const routes = text.matchAll(/(?:通过|用|发到|发送到|改到)\s*(QQ|皮套|控制台)/giu)
-  const names = { qq_private: 'QQ', avatar: '皮套', cli: '控制台' } as const
-  return [...routes].some(match => match[1].toUpperCase() !== names[channel].toUpperCase())
-}
-
-/** Keep natural confirmations; uncertain/mixed results fall back to their actual item receipts. */
-export function reminderPlanReplyMatches(result: ReminderPlanResult, text: string): boolean {
-  if (result.items.length === 0) return text === result.message
-  const markers: Record<string, readonly string[]> = {
-    created: ['已设置', '已经设置', '设置好了', '设好了', '排好了', '排上了'],
-    existing: ['已存在', '已经有', '已经设置', '之前已设置', '不用重复设置'],
-    updated: ['已更新', '已经更新', '更新好了', '已改期', '改好了', '改到了', '已改到', '已经改到'],
-    cancelled: ['已取消', '已经取消', '取消了', '撤掉了', '删掉了', '消掉了'],
-  }
-  const statuses = new Set(result.items.map(item => item.status))
-  if (statuses.size !== 1 || !markers[result.items[0]!.status]) return text === result.message
-  const status = result.items[0]!.status
-  if (!scanClaims(text, markers[status]!).claims) return false
-  if (Object.entries(markers).some(([other, words]) => other !== status && other !== 'existing'
-    && !(status === 'existing' && other === 'created') && scanClaims(text, words).claims)) return false
-  if (/没找到|未找到|失败|没能|尚未|全部发送|已经发送|已发送|发给你了|提醒处理：/u.test(text)) return false
-  if (result.items.some(item => item.channel && !reminderReplyConfirmsChannel(item, text))) return false
-  if (result.items.some(item => item.dueAt && !text.includes(formatReminderTime(item.dueAt).slice(-5)))) return false
-  if (result.items.some(item => item.repeatMode === 'until_reply') && !/回复/u.test(text)) return false
-  if (status === 'cancelled' && result.items.length === 1) {
-    const title = (result.items[0]!.text ?? '').split(/[：:]/u)[0]!
-    // Conservative lexical evidence permits “体育课” for “大学体育(I)”; uncertain aliases use the factual fallback.
-    const pairs = [...title.matchAll(/(?=(\p{Script=Han}{2}))/gu)].map(match => match[1]!)
-      .filter(pair => !['大学', '提醒', '上课', '课前', '签到', '记得', '那条', '这条'].includes(pair))
-    return text.split(/[，,。！？!?；;\n]/u).some(clause => scanClaims(clause, markers.cancelled!).claims
-      && (clause.includes(title) || pairs.some(pair => clause.includes(pair))))
-  }
-  // Multiple receipts must still identify each item; a generic “all done” cannot hide omissions.
-  return result.items.every(item => text.includes((item.text ?? '').split(/[：:]/u)[0]!))
 }

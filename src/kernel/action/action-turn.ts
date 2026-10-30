@@ -40,6 +40,7 @@ import { looksLikeTask } from './task-intent.ts'
 import {
   actionOfToolDecision,
   readToolDecision,
+  validateToolDecisionProposal,
   type ToolDecisionPort,
 } from './tool-decision.ts'
 import {
@@ -50,6 +51,7 @@ import {
 } from '../contracts/attribution.ts'
 
 export interface ActionTurnInput {
+  semanticDecision?: unknown
   characterId: CharacterId
   /** 本轮 traceId（§20：动作必须挂在同一轮 trace 上） */
   traceId: TraceId
@@ -139,6 +141,7 @@ export interface ActionTurnResult {
 
 export interface ActionTurnPort {
   handleTurn(input: ActionTurnInput): Promise<ActionTurnResult>
+  semanticContext?: (conversationKey?: string) => import('../app/semantic-entry.ts').SemanticToolContext
 }
 
 export interface ActionTurnPortOptions {
@@ -223,6 +226,18 @@ export interface ActionTurnPortOptions {
       entryRejected?: string
     } | undefined>
     staging: PayloadStagingPort
+    /**
+     * **P3-5b · G5：受管技能参与后的任务局部读根**（可选）。
+     *
+     * ⚠️ 缺省 ⇒ 不挂读根：旧入口与普通文件任务行为**逐字不变**。
+     * ⚠️ 它只约束**本次任务**的读动作（不是全局能力定义）；挂载时机在"受管技能真的
+     *    成功加载之后、后续动作执行之前"，越界读是**执行前拒绝**。
+     */
+    readRootScope?: {
+      readonly skillId: string
+      readonly roots: readonly string[]
+      readonly source: string
+    }
     /**
      * 本任务允许的能力集合（**装配层按开关算出** —— 模型不能扩大它）。
      * 返回空数组 ⇒ 不签发任何任务授权。
@@ -331,6 +346,14 @@ export function createActionTurnPort(options: ActionTurnPortOptions): ActionTurn
       : { initiatorEvidence: initiatorEvidenceOf(options, input) }
 
   return {
+    semanticContext: conversationKey => {
+      const open = conversationKey ? options.task?.authorizations.findOpen(conversationKey) : undefined
+      return { catalog: options.toolDecision?.catalog ?? '', capabilities: options.task?.capabilitiesFor() ?? [],
+        knownDirectories: options.task?.replanContext?.knownDirectories(),
+        openTask: open ? { originalText: open.originalText } : undefined,
+        validate: raw => { validateToolDecisionProposal(raw, { registry: options.registry,
+          allowedCapabilities: options.task?.capabilitiesFor() ?? [] }) } }
+    },
     async handleTurn(input: ActionTurnInput): Promise<ActionTurnResult> {
       /*
        * ======================================================================
@@ -344,6 +367,9 @@ export function createActionTurnPort(options: ActionTurnPortOptions): ActionTurn
        * ```
        * ⚠️ `toolDecision` 不配时本函数**逐字节**还是旧实现（M4.5 的 135 条断言走那一支）。
        */
+      if (input.semanticDecision !== undefined && options.toolDecision === undefined) {
+        return { kind: 'not_applicable', diagnostics: { semantic_entry: 'task_loop_unavailable' } }
+      }
       if (options.toolDecision !== undefined) {
         return await handleRoleTurn(options, input)
       }
@@ -527,7 +553,9 @@ async function handleRoleTurn(
   void expectedEvent
   let reading
   try {
-    reading = await readToolDecision(decision.port, {
+    reading = await readToolDecision(input.semanticDecision === undefined ? decision.port : {
+      ...decision.port, decide: async () => ({ ok: true as const, raw: input.semanticDecision, requestCount: 0 }),
+    }, {
       text: input.text,
       recentLines: input.recentLines ?? [],
       catalog: decision.catalog,
@@ -749,6 +777,9 @@ async function maybeRunTask(
        */
       resolveTarget: task.resolveTarget,
       ...(task.replanContext !== undefined ? { replanContext: task.replanContext } : {}),
+      /* P3-5b · G5：受管技能参与后的任务局部读根（缺省不传 ⇒ 旧行为逐字不变）。 */
+      ...(task.readRootScope === undefined ? {} : { readRootScope: task.readRootScope }),
+
       ...(configured === undefined && task.forecast !== undefined ? { forecast: task.forecast } : {}),
       ...(configured?.epistemic !== undefined ? { epistemic: configured.epistemic }
         : task.epistemic !== undefined ? { epistemic: task.epistemic } : {}),

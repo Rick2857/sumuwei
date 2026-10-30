@@ -54,11 +54,7 @@ assert.equal(result.kind, 'planned')
 assert.doesNotMatch(reminderFactText(result), /提醒处理：新增/u)
 const replyText = '好，体育课那条提醒已经取消了。'
 assert.equal(runReplyGuardChain({ replyText, reminderResult: result }).replyText, replyText)
-assert.notEqual(runReplyGuardChain({ replyText: '好，高数那条提醒已经取消了。', reminderResult: result }).replyText,
-  '好，高数那条提醒已经取消了。', 'a natural confirmation must not name the wrong course')
-assert.notEqual(runReplyGuardChain({ replyText: '体育课还在，高数那条提醒已经取消了。', reminderResult: result }).replyText,
-  '体育课还在，高数那条提醒已经取消了。', 'the cancelled target and completion must appear in the same clause')
-assert.doesNotMatch(runReplyGuardChain({ replyText: '提醒已经设置好了。', reminderResult: result }).replyText, /设置好了/u)
+assert.match(reminderFactText(result), /cancelled/u, 'actual cancellation remains in model context')
 assert.equal(readReminderDraft({ kind: 'cancel', targetIntentId: 'sports', text: 'extra' }), undefined)
 assert.equal(readReminderDraft({ kind: 'cancel', targetIntentId: '' }), undefined)
 const refused = await runReminderTurn({ ...input, now, enabled: true }, { ...ports,
@@ -67,20 +63,17 @@ assert.equal(refused.kind, 'refused')
 assert.deepEqual(cancelled, ['sports'])
 
 const failure = { kind: 'failed' as const, code: 'invalid_output', message: '这次提醒处理失败；已有提醒的排期和内容未改动，本轮尚未确认更新。' }
-assert.equal(runReplyGuardChain({ replyText: '已取消体育课提醒。', reminderResult: failure }).replyText, failure.message)
-assert.equal(runReplyGuardChain({ replyText: '我没找到你说的那条记忆，所以什么都没改。', reminderResult: failure,
-  memoryWriteResult: { kind: 'not_written', intent: 'forget', reason: 'target_not_found', summary: '' }, userAskedToRemember: true }).replyText, failure.message)
+assert.ok(reminderFactText(failure).includes(failure.message))
 const conflict = await runReminderTurn({ ...input, now, enabled: true }, { ...ports, cancel: async () => false })
 assert.equal(conflict.kind, 'planned')
-assert.match(runReplyGuardChain({ replyText, reminderResult: conflict }).replyText, /没能取消/u)
+assert.match(reminderFactText(conflict), /没能取消/u)
 
-for (const [receipt, draft, expected] of [[result, replyText, replyText], [conflict, replyText, '没能取消']] as const) {
+for (const [receipt, draft, expected] of [[result, replyText, replyText], [conflict, replyText, replyText]] as const) {
   const emitted: string[] = []
   const stream = new CheckedSpeechStream({ replyId: 'test', traceId: 'test', facts: { reminderResult: receipt }, emit: packet => emitted.push(packet.segment.text) })
   stream.push(draft)
-  assert.equal(emitted.length, 0, 'batch speech waits for result validation')
   const final = stream.finish(draft)
   assert.ok(final.outcome.replyText.includes(expected))
   if (receipt === result) assert.equal(final.outcome.replyText, replyText, 'no receipt appended after a valid natural confirmation')
 }
-console.log('Reminder cancellation: negation, semantic authority, context, closed single cancel, target scope, natural replies, failure priority and checked speech PASS (zero model requests)')
+console.log('Reminder cancellation: negation, semantic authority, context, closed single cancel, target scope, natural replies, execution facts and model-owned speech PASS (zero model requests)')

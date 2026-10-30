@@ -10,7 +10,6 @@ import { reminderOccurrenceKey } from '../src/kernel/contracts/notification.ts'
 import type { NotificationIntentId } from '../src/kernel/contracts/ids.ts'
 import type { ChatChannel } from '../src/kernel/contracts/chat-channel.ts'
 import { runReplyGuardChain } from '../src/kernel/app/reply-guard-chain.ts'
-import { UNEXECUTED_REMINDER_REPLY } from '../src/kernel/app/reminder-turn.ts'
 
 assert.equal(process.env.CHARACTER_DB_BACKEND, 'postgres', 'requires isolated PostgreSQL in serversim')
 assert.match(new URL(process.env.LG_TEST_PG_URL!).pathname, /^\/lg_test_/)
@@ -108,7 +107,7 @@ try {
   for (const text of ['那条提醒我发了，平台已接受发送。', '那条提醒我发过了，平台已接受发送。']) {
     assert.equal(runReplyGuardChain({ reminderResult: { kind: 'none' }, replyText: text }).replyText, text)
   }
-  assert.equal(runReplyGuardChain({ reminderResult: { kind: 'none' }, replyText: '这条提醒我会发你，到点提醒你。' }).replyText, UNEXECUTED_REMINDER_REPLY)
+  assert.equal(runReplyGuardChain({ reminderResult: { kind: 'none' }, replyText: '这条提醒我会发你，到点提醒你。' }).replyText, '这条提醒我会发你，到点提醒你。')
   if (process.argv.includes('--live')) {
     assert.equal(process.env.DSH_TEST_MODEL_WRAPPER, '1', 'only the explicit test endpoint is allowed')
     for (const [index, expected] of [[1, /平台|回执|受理|接受/u], [2, /失败|没发|未发|没能/u], [3, /不明|不确定|无法确认|不能确认|未知/u]] as const) {

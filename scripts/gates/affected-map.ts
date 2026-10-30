@@ -62,6 +62,41 @@ export const AFFECTED_RULES: readonly AffectedRule[] = [
     gates: ['u1:completion:verify', 'qq:group:verify', 'qq:group:coexist:verify'],
   },
   {
+    what: 'QQ 出站媒介选择（P1/P2：封套契约 / 可选 section / QQ 外壳 voice 分支 / 投递日志 / TTS 执行器 / 桥 media 字段）',
+    match: ['src/kernel/contracts/qq-media-reply.ts', 'src/kernel/context/qq-media-reply-section.ts',
+      'src/infrastructure/qq/voice-reply.ts', 'src/infrastructure/qq/voice-delivery-journal.ts',
+      'src/infrastructure/qq/tts-executor.ts', 'src/infrastructure/qq/onebot-private-client.ts',
+      'src/infrastructure/bridge/turn-bridge-transport.ts', 'src/kernel/app/bridge/turn-bridge.ts',
+      'scripts/qq/chat.ts', 'scripts/postlv2-qq-voice-reply-verify.ts', 'scripts/postlv2-qq-voice-delivery-verify.ts'],
+    gates: ['postlv2:qq-voice-reply:verify', 'postlv2:qq-voice-delivery:verify', 'postlv2:qq-voice-main:verify', 'qq:reconnect:verify', 'postlv2:transport:verify'],
+  },
+  {
+    what: 'QQ 主人授权群任务（ADR-156 P0–P2.1：契约闭集 / 存储 0027 / 群发送能力 / 任务授权窄路径 / 群目标消歧 / 产品接线）',
+    match: ['src/kernel/contracts/qq-group-task.ts', 'src/kernel/action/qq-group-capability.ts',
+      'src/infrastructure/action/adapters/qq-group-delivery.ts',
+      'src/infrastructure/persistence/qq-group-task-store.ts',
+      'src/infrastructure/persistence/migrations.ts',
+      'src/infrastructure/qq/group-directory.ts',
+      'src/infrastructure/qq/onebot-private-client.ts',
+      'src/infrastructure/model/openai-group-task.ts',
+      'src/infrastructure/runtime/qq-group-task-runtime.ts',
+      'src/infrastructure/project-knowledge/self-capabilities.ts',
+      'src/kernel/action/task-plan.ts', 'src/kernel/action/tool-catalog.ts',
+      'src/kernel/app/flags.ts', 'src/kernel/app/semantic-entry.ts',
+      'src/infrastructure/model/openai-semantic-entry.ts',
+      'src/infrastructure/runtime/semantic-entry.ts',
+      'src/main.ts',
+      'scripts/postlv2-qq-group-task-contract-verify.ts',
+      'scripts/postlv2-qq-group-task-store-verify.ts',
+      'scripts/postlv2-qq-group-send-verify.ts',
+      'scripts/postlv2-qq-group-resolve-verify.ts',
+      'scripts/postlv2-qq-group-facts-verify.ts',
+      'scripts/postlv2-qq-group-main-verify.ts'],
+    gates: ['postlv2:qq-group-task-contract:verify', 'postlv2:qq-group-task-store:verify',
+      'postlv2:qq-group-send:verify', 'postlv2:qq-group-resolve:verify',
+      'postlv2:qq-group-facts:verify', 'postlv2:qq-group-main:verify'],
+  },
+  {
     what: '任意 `.ts`',
     match: ['**/*.ts'],
     gates: ['typecheck'],
@@ -525,32 +560,10 @@ export const AFFECTED_RULES: readonly AffectedRule[] = [
    * 只带**离线**门：真模型档（`postlv2:s8:semantic:eval` / `lv2:short:live`）与
    * 真库档（`postlv2:s8:activation-readback:db`）按各自契约独立裁定，不自动跑。
    */
-  { what: 'post-Lv2 / S8 故事线（story-cognition 装配、故事账本与消费者、内容包）',
-    match: ['src/infrastructure/runtime/story-cognition.ts', 'src/infrastructure/runtime/story-*.ts',
-      'src/kernel/app/storyline/**', 'src/kernel/storyline/**', 'src/kernel/contracts/storyline*.ts', 'src/kernel/contracts/story-*.ts',
-      'src/content/storyline/**', 'scripts/postlv2-s8-*.ts'],
-    /* ⚠️ 2026-10-05：`postlv2:s8:start:verify`（`L-S8-30` 入口侧 `story:start`）与
-       `postlv2:s8:choice:verify`（`ADR-107` `R-1b`：候选 `choiceId` 的产出面）测的正是这一组路径
-       （`story-start-command` / `run-lifecycle` / `admin` / `choice-*` / `story-choice-draft`）⇒ 必须带出。 */
-    gates: ['postlv2:s8:store:verify', 'postlv2:s8:contracts:verify', 'postlv2:s8:roots:verify',
-      'postlv2:s8:state:verify', 'postlv2:s8:reflection:verify', 'postlv2:s8:lifecycle:verify',
-      'postlv2:s8:measurement:verify', 'postlv2:s8:production:verify', 'postlv2:s8:withdraw:verify',
-      'postlv2:s8:start:verify', 'postlv2:s8:choice:verify', 'postlv2:s8:entry-lock:verify', 'postlv2:s8:daily:verify', 'postlv2:s8:daily:e2e',
-      'postlv2:s8:gates'] },
-  /*
-   * ⚠️ 2026-10-07（本次审计 §12）：**两条线此前一条规则都没有**。
-   *
-   * 下面这两条补的是**推导集合本身**（不是"多带几道门"）：
-   *   · 共存线：改了 `entry-scope` / `turn-scheduler` / `scripts/coexist/**` 时
-   *     `postlv2:coexist:verify` 等必须跑（此前只会因未匹配路径升级 ⇒ 它们一道不跑）。
-   *   · 语音/皮套线：`src/kernel/app/bridge/**` 与 `scripts/postlv2_*.py` 是**整条**
-   *     桥 / 流式表达 / 交付契约的实现面，此前同样没有任何规则。
-   *   · 自动记忆线：ADR-117/118 的消费者与抽取器不在 `src/kernel/app/memory/**` 里
-   *     ⇒ 老的记忆规则**罩不到它**。
-   *
-   * ⚠️ 只带**离线**门：真模型档（`:live`）与"真的起一个核心"的门（`:chain` / `:shells`）
-   *    按既有契约不自动进快车道（见本文件 §"QQ 主动联系"那条的同一段理由）。
-   */
+  { what: 'Lv2.5 故事功能退役锁（ADR-147）',
+    match: ['src/main.ts', 'src/kernel/app/flags.ts', 'src/kernel/app/turn-gateway.ts', 'scripts/lv25-retirement-boundary.ts', 'scripts/postlv2-story-retirement-verify.ts'],
+    gates: ['postlv2:story:retirement:verify'],
+  },
   {
     what: '双入口共存（ADR-109）：入口维度会话 / 公平轮转 / 状态端点',
     match: [
@@ -618,6 +631,55 @@ export const AFFECTED_RULES: readonly AffectedRule[] = [
       'src/infrastructure/action/adapters/workflow-skill.ts', 'src/kernel/action/learning-capabilities.ts',
       'src/kernel/context/workflow-skill-section.ts', 'scripts/learning-skills-verify.ts', 'scripts/learning-skills/**', 'src/main.ts'],
     gates: ['learning:contracts:verify'] },
+  /* P3 统一技能域：版本/发布状态/使用追溯（迁移 25）。改这些文件必须跑两门：
+     旧路径回归（learning:contracts:verify）+ P3 真实链门（p3:skill-usage:verify）。 */
+  { what: 'P3 技能目录 / 发布状态 / 使用追溯',
+    match: ['src/kernel/contracts/workflow-skill-catalog.ts', 'src/infrastructure/action/workflow-skill-catalog.ts',
+      'src/infrastructure/action/workflow-skill-usage.ts',
+      'src/infrastructure/persistence/workflow-skill-release-store.ts',
+      'src/infrastructure/persistence/migrations.ts', 'resources/workflow-skills/catalog.json',
+      'scripts/cognitive/p3-skill-usage-chain-verify.ts', 'src/main.ts', 'src/kernel/app/flags.ts'],
+    gates: ['learning:contracts:verify', 'p3:skill-usage:verify'] },
+  /* P3-3 候选修订/实验发布（迁移 26）：改这些文件必须跑修订门 + P3-1 目录门
+     （两门共用发布状态存储与资源目录，任一改动都可能同时影响两条链）。 */
+  { what: 'P3 候选修订 / 冻结留出 / 实验发布 / 回退退役',
+    match: ['src/kernel/contracts/workflow-skill-revision.ts',
+      'src/infrastructure/action/workflow-skill-revision-assets.ts',
+      'src/infrastructure/action/workflow-skill-revision-publisher.ts',
+      'src/infrastructure/persistence/workflow-skill-release-store.ts',
+      'src/infrastructure/persistence/migrations.ts', 'resources/workflow-skills/revisions.json',
+      'resources/workflow-skills/frozen/**', 'resources/workflow-skills/catalog.json',
+      'scripts/cognitive/p3-skill-revision-verify.ts'],
+    gates: ['p3:skill-revision:verify', 'p3:skill-usage:verify'] },
+  /* P3-4 技能→P2 规则资格依赖：改这些文件必须跑依赖门 + 两条 P3 回归
+     （任务环/受管适配器是三条链共用接点）。 */
+  { what: 'P3 技能→P2 规则资格依赖',
+    match: ['src/kernel/contracts/workflow-skill-rule-dependency.ts',
+      'src/infrastructure/action/workflow-skill-rule-dependency.ts',
+      'src/kernel/contracts/cognitive-collaboration.ts', 'src/kernel/action/task-loop.ts',
+      'src/infrastructure/action/adapters/workflow-skill.ts',
+      'scripts/cognitive/p3-skill-rule-dependency-verify.ts'],
+    gates: ['p3:skill-rule-dependency:verify', 'p3:skill-usage:verify', 'p3:skill-revision:verify'] },
+  /* P3-5a 真实模型试点：判分层改了 => 必须重跑判分器量具自证门
+     （判分口径与 evaluation.json 绑定；自证门证明判分不是恒真）。 */
+  { what: 'P3-5a 判分器与试点材料',
+    match: ['scripts/cognitive/p3-5-score.ts', 'scripts/cognitive/p3-5-scorer-verify.ts',
+      'scripts/cognitive/p3-5-live-runner.ts', 'scripts/cognitive/p3-5-live-runner-guards.ts'],
+    gates: ['p3:scorer:verify'] },
+  /* P3-5b 运行守卫与评分复现：改了运行器/守卫/判分驱动 => 三门零请求门都要重跑
+     （判分器口径、守卫故障回归、评分复现是三条独立证据，缺一条就不能说"可复现"）。 */
+  { what: 'P3-5b 运行守卫与评分复现',
+    match: ['scripts/cognitive/p3-5-live-runner.ts', 'scripts/cognitive/p3-5-live-runner-guards.ts',
+      'scripts/cognitive/p3-5-runner-guards-verify.ts', 'scripts/cognitive/p3-5-score-run.ts',
+      'scripts/cognitive/p3-5-score-repro-verify.ts', 'scripts/cognitive/p3-5-score.ts'],
+    gates: ['p3:5:runner:verify', 'p3:5:score:verify', 'p3:scorer:verify'] },
+  /* P3-5b 第一批（G1/G5 入口接线）：改入口/任务环/授权 => P3 入口接线门 + 三门零请求门。 ```
+     只改 P3 接点，不覆盖并行工作流的 main.ts 改动；旧路径行为由门 32/34 与 p3:entry:wiring 的负控覆盖。 ``` */
+  { what: 'P3-5b 入口接线（G1 独立核验 / G5 任务局部读根）',
+    match: ['src/main.ts', 'src/kernel/action/task-loop.ts', 'src/kernel/action/task-authorization.ts',
+      'src/kernel/action/action-turn.ts', 'src/infrastructure/action/workflow-skill-verification.ts',
+      'scripts/cognitive/p3-entry-wiring-verify.ts'],
+    gates: ['p3:entry:wiring:verify', 'p3:skill-usage:verify', 'p3:5:runner:verify'] },
   { what: '近期能力离线契约：工具编排与规划',
     match: ['src/infrastructure/model/task-orchestration-instructions.ts', 'src/infrastructure/model/openai-task-planner.ts',
       'src/infrastructure/model/openai-tool-decision.ts', 'src/kernel/action/task-loop.ts', 'src/kernel/action/task-plan.ts',

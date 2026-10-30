@@ -6,7 +6,7 @@ import {
 import {
   runReplyGuardChain, type ReplyGuardChainInput, type ReplyGuardChainOutcome,
 } from '../reply-guard-chain.ts'
-import { truthfulReminderReply, reminderPlanReplyMatches, reminderReplyConfirmsChannel } from '../reminder-turn.ts'
+
 
 export interface CheckedSpeechSegment {
   replyId: string
@@ -111,13 +111,7 @@ export class CheckedSpeechStream {
       for (const candidate of draft.segments) this.accept(candidate)
     }
     if (this.pending !== '') { this.check(this.pending, this.pendingCue); this.pending = '' }
-    const reminder = this.options.facts.reminderResult
-    if (reminder !== undefined && reminder.kind !== 'none') {
-      const combined = this.segments.map(segment => segment.text).join('')
-      const required = 'text' in reminder ? reminder.text.replace(/^记得/u, '').replace(/[。！!？?]$/u, '') : reminder.message
-      if (reminder.kind === 'planned' ? !reminderPlanReplyMatches(reminder, combined)
-        : !combined.includes(required) || ('text' in reminder && !reminderReplyConfirmsChannel(reminder, combined))) this.check(truthfulReminderReply(reminder), 'natural')
-    }
+
     return this.snapshot()
   }
 

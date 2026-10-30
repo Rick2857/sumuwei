@@ -759,7 +759,22 @@
     "xidian:configure": "python3 scripts/xidian/configure.py",
     "xidian:sync": "tsx scripts/xidian/sync.ts",
     "xidian:verify": "tsx scripts/xidian/verify.ts",
-    "xidian:slider:verify": "python3 scripts/xidian/verify-slider.py"
+    "xidian:slider:verify": "python3 scripts/xidian/verify-slider.py",
+    "postlv2:qq-group-task-contract:verify": "tsx scripts/postlv2-qq-group-task-contract-verify.ts",
+    "postlv2:qq-group-task-store:verify": "tsx scripts/postlv2-qq-group-task-store-verify.ts",
+    "postlv2:qq-group-send:verify": "tsx scripts/postlv2-qq-group-send-verify.ts",
+    "postlv2:qq-group-resolve:verify": "tsx scripts/postlv2-qq-group-resolve-verify.ts",
+    "postlv2:qq-group-facts:verify": "tsx scripts/postlv2-qq-group-facts-verify.ts",
+    "postlv2:qq-group-main:verify": "tsx scripts/postlv2-qq-group-main-verify.ts",
+    "p3:skill-usage:verify": "tsx scripts/cognitive/p3-skill-usage-chain-verify.ts",
+    "p3:skill-revision:verify": "tsx scripts/cognitive/p3-skill-revision-verify.ts",
+    "p3:skill-rule-dependency:verify": "tsx scripts/cognitive/p3-skill-rule-dependency-verify.ts",
+    "p3:scorer:verify": "tsx scripts/cognitive/p3-5-scorer-verify.ts",
+    "p3:5:runner:verify": "tsx scripts/cognitive/p3-5-runner-guards-verify.ts",
+    "p3:5:score": "tsx scripts/cognitive/p3-5-score-run.ts",
+    "p3:5:score:verify": "tsx scripts/cognitive/p3-5-score-repro-verify.ts",
+    "p3:entry:wiring:verify": "tsx scripts/cognitive/p3-entry-wiring-verify.ts",
+    "p3:5:live": "tsx scripts/cognitive/p3-5-live-runner.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "0.3.16",

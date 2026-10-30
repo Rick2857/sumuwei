@@ -22,6 +22,7 @@ mkdirSync(out, { recursive: true })
 const pool = new pg.Pool({ connectionString: process.env.LG_TEST_PG_URL })
 const owner = '123456789', bot = '987654321', member = '222222222', group = '333333333'
 const prompts: { qq: boolean; current: string; priorDelivery: boolean }[] = []
+const semanticInputs: { current: string; voice: boolean; explanation: boolean }[] = []
 const turns: { media?: { mode: string }; outcome: string; replyText?: string }[] = []
 const checks: string[] = []
 const wxMessages: WechatMessage[] = []
@@ -36,6 +37,14 @@ const model = createServer(async (req, res) => {
   let raw = ''; for await (const chunk of req) raw += chunk
   const body = JSON.parse(raw || '{}')
   const system = String(body.messages?.[0]?.content ?? '')
+  if (Array.isArray(body.tools)) {
+    const input = JSON.parse(body.messages[1].content)
+    semanticInputs.push({ current, voice: input.replyMedia?.qqVoiceAvailable === true,
+      explanation: system.includes('不需要 lg_tools 或 lg_relay') })
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { tool_calls: [] } }] }))
+    return
+  }
   const qq = system.includes('【本轮 QQ 出站媒介】')
   if (qq) {
     const output = system.slice(system.lastIndexOf('# 输出要求'))
@@ -99,6 +108,7 @@ const wxConfig = { baseUrl: `http://127.0.0.1:${portOf(wxApi)}`, token: 'fixture
   botId: 'wxid_bot', ownerId: 'wxid_owner', groupIds: ['111@chatroom'], stateFile: resolve(sandbox.dir, 'wx-seen.json') }
 const host = await startCoexistHost({ dbDir: sandbox.dir, modelPort: portOf(model), env: {
   CHARACTER_CONTEXT_COMPILER_V1: 'true', CHARACTER_RELATIONSHIP_CONTEXT_ENABLED: 'true',
+  CHARACTER_SEMANTIC_ENTRY_ENABLED: 'true', CHARACTER_RELAY_TASKS_ENABLED: 'true',
   CHARACTER_MEMORY_EXPLICIT_ENABLED: 'false', CHARACTER_QQ_VOICE_REPLY: 'true', CHARACTER_QQ_VOICE_OUTPUT: 'true',
   CHARACTER_QQ_DELIVERY_JOURNAL: resolve(out, 'delivery.jsonl'),
   QQ_MULTI_USER_ENABLED: 'true', QQ_ALLOWED_GROUP_IDS: group, QQ_ONEBOT_WS_URL: wsUrl,
@@ -161,12 +171,15 @@ try {
   assert.equal(prompts.at(-1)?.qq, false, 'WeChat shares qq_private entryKey but must not receive QQ media protocol')
   assert.equal(wxText, '离线测试正文，数字 42 不应改变。')
   checks.push('wechat: shared core entry does not enable QQ protocol')
-  checks.push('compiled QQ prompt: final output requirements allow its media envelope')
+  assert.ok(semanticInputs.some(row => row.current === 'voice' && row.voice && row.explanation))
+  assert.ok(semanticInputs.some(row => row.current === 'avatar' && !row.voice && !row.explanation))
+  assert.ok(semanticInputs.some(row => row.current === 'wechat' && !row.voice && !row.explanation))
+  checks.push('semantic entry: QQ reply voice is visible as presentation, absent on avatar/WeChat')
   const rows = (await pool.query("select content from conversation_events where actor_type='character'")).rows
   assert.ok(rows.length >= 5)
   assert.ok(!JSON.stringify(rows).includes('<lg-qq-media>'))
   checks.push('conversation ledger: canonical text only')
-  writeFileSync(resolve(out, 'result.json'), JSON.stringify({ status: 'PASS', checks, prompts, database: 'isolated pgtest',
+  writeFileSync(resolve(out, 'result.json'), JSON.stringify({ status: 'PASS', checks, prompts, semanticInputs, database: 'isolated pgtest',
     model: 'local fixed fixture', tts: 'local fixed WAV', qq: 'local OneBot fixture' }, null, 2))
   console.log(`PASS QQ voice real main ${checks.length} controls: ${out}`)
 } catch (error) {

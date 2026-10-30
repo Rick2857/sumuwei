@@ -33,7 +33,7 @@ const check = (label: string, pass: boolean, detail = ''): void => {
 const registry = createTaskAuthorizationRegistry({})
 let seq = 0
 const open = (): TaskAuthorization => registry.issue({
-  conversationKey: 'scope-fixture',
+  conversationKey: 'scope-test',
   originalText: 'F2 任务（逐路径授权门）',
   triggeringEventId: `evt-${String(++seq)}`,
   allowedCapabilities: ['sandbox.file.read', 'sandbox.file.write'],

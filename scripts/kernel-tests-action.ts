@@ -70,11 +70,7 @@ import {
   replyClaimsActionSuccess,
   truthfulActionSentence,
 } from '../src/kernel/action/claim-guard.ts'
-import {
-  COMMITMENT_CLAIM_MARKERS,
-  applyCommitmentClaimGuard,
-  replyClaimsCommitmentSuccess,
-} from '../src/kernel/app/goal/claim-guard.ts'
+import { runReplyGuardChain } from '../src/kernel/app/reply-guard-chain.ts'
 import { scanClaims } from '../src/kernel/action/claim-scanner.ts'
 import {
   actionIdempotencyKey,
@@ -560,52 +556,11 @@ section('§5 Action Claim Guard（未执行不得宣称成功）')
   check('§5.17 动作词表与记忆词表不共用（"记住了"不该被动作守卫拦）', memoryMarkers.every((m) => !ACTION_SUCCESS_MARKERS.includes(m)))
   check('§5.18 共用的是最底层扫描（同一条否定规则）', scanClaims('我没有完成', ['完成']).claims === false && scanClaims('我完成了', ['完成']).claims === true)
 
-  /*
-   * ---------------------------------------------------------------------------
-   * §5.19+ **目标/承诺守卫**（`app/goal/claim-guard.ts`，Lv2 `LV2-D11` ②）
-   *
-   * 出身：Lv2 第三代读数里 3/4 条严重错误是 `false_execution_claim`
-   *      （她说「说定了 / 记下了」而承诺行 = 0）。
-   * 三段式：真写了 ⇒ 放行（正控）· 没写而声称 ⇒ 必须替换（负控）· 写回真的 ⇒ 恢复安静。
-   * ---------------------------------------------------------------------------
-   */
-  check(
-    '§5.19 承诺专属标记全部能命中（什么都没写时）',
-    COMMITMENT_CLAIM_MARKERS.every((m) =>
-      replyClaimsCommitmentSuccess({ commitmentWritten: false, anythingWritten: false, replyText: `嗯。${m}。` }).claims,
-    ),
-  )
-  const commitmentAllowed = applyCommitmentClaimGuard({
-    commitmentWritten: true,
-    anythingWritten: true,
-    replyText: '嗯。说定了。',
-  })
-  check('§5.20 真写了承诺 ⇒ **允许**成功口吻（正控；这是唯一允许的情形）', !commitmentAllowed.corrected && commitmentAllowed.allowedSuccess)
-  check(
-    '§5.21 本轮写了**别的**东西（记忆）⇒ 记录类标记不算无据（不误伤记忆侧）',
-    !replyClaimsCommitmentSuccess({ commitmentWritten: false, anythingWritten: true, replyText: '行。记下了。' }).claims,
-  )
-  const commitmentFix = applyCommitmentClaimGuard({
-    commitmentWritten: false,
-    anythingWritten: false,
-    replyText: '嗯。说定了。明天十点，楼下。',
-  })
-  check('§5.22 什么都没写 + 「说定了」⇒ **必须**替换（负控）', commitmentFix.corrected && commitmentFix.markers.includes('说定了'))
-  check('§5.23 替换句不得假装已记下、也不得复述约定内容', !commitmentFix.replyText.includes('说定了') && !commitmentFix.replyText.includes('楼下'))
-  check(
-    '§5.24 否定窗口沿用同一条扫描（"没说定"不算违规）',
-    !replyClaimsCommitmentSuccess({ commitmentWritten: false, anythingWritten: false, replyText: '我们没说定。' }).claims,
-  )
-  check(
-    '§5.25 承诺词表与动作词表不共用，且不含记忆侧词（"记住了"）',
-    COMMITMENT_CLAIM_MARKERS.every((m) => !ACTION_SUCCESS_MARKERS.includes(m)) && !COMMITMENT_CLAIM_MARKERS.includes('记住了'),
-  )
-  const commitmentRecovered = applyCommitmentClaimGuard({
-    commitmentWritten: true,
-    anythingWritten: true,
-    replyText: '嗯。说定了。明天十点，楼下。',
-  })
-  check('§5.26 恢复：写回真的之后，同一句不再被替换（三段式的第三段）', !commitmentRecovered.corrected && commitmentRecovered.replyText.includes('楼下'))
+  // 用户 2026-10-26：目标/承诺措辞由模型决定，程序保留实际执行事实。
+  for (const replyText of ['嗯。说定了。', '你之前交代的我记住了。', '我们没说定。']) {
+    check('§5.19 目标/承诺词不触发程序改写', runReplyGuardChain({ replyText }).replyText === replyText)
+  }
+  await import('./reply-language-model-verify.ts')
 }
 
 // ===========================================================================

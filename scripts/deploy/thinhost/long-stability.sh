@@ -2,7 +2,7 @@
 # 长时稳定性核验：薄宿主已跑 ~1 小时，确认无重启、无内存增长、无错误。
 set -u
 CORE='project-lg/src/main.ts'
-ENVF=/home/aiagent/project-lg/.env
+ENVF=/opt/project-lg/.env
 
 echo "=== ① 开关状态 ==="
 grep -n 'CHARACTER_THIN_HOST' "$ENVF"

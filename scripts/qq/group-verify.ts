@@ -8,13 +8,128 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { readQqPrivateConfig } from '../../src/infrastructure/qq/private-config.ts'
 import { OneBotPrivateClient } from '../../src/infrastructure/qq/onebot-private-client.ts'
 import { LgStdioClient } from '../../src/infrastructure/qq/lg-stdio-client.ts'
-import { isolateDatabase, cleanupSandbox, PRODUCTION_DB_DIR } from '../../src/dev/sandbox.ts'
-import { digestTree, openRawPGlite } from '../../src/infrastructure/persistence/production-db-safety.ts'
+import { isolateDatabase, cleanupSandbox } from '../../src/dev/sandbox.ts'
 import { MIGRATIONS } from '../../src/infrastructure/persistence/migrations.ts'
+import pg from 'pg'
+import { groupMessageLabel, groupMessageText, platformDisplayName, type GroupContextLine } from '../../src/infrastructure/qq/group-context.ts'
+import { renderRelationshipGuidance } from '../../src/kernel/contracts/relationship.ts'
+import { platformDisplayNameProblem } from '../../src/kernel/app/bridge/turn-bridge.ts'
 
-process.env.CHARACTER_DB_BACKEND='pglite'
-process.env.POSTGRES_URL='';process.env.DATABASE_URL=''
-const root=resolve(import.meta.dirname,'../..'), before=digestTree(PRODUCTION_DB_DIR).treeSha256
+/** Small transport checks share this existing gate; no model or database is used here. */
+async function conversationChecks(): Promise<number> {
+  let checks = 0
+  const now = Date.now()
+  const state = { originated: true, originKind: 'NEW_USER_BASELINE' as const, trust: 0.22, closeness: 0.22,
+    lastInteractionAt: now - 86_400_000, accusationsInCase: [] }
+  for (const revision of [1, 2, 10]) {
+    const text = renderRelationshipGuidance({ effective: state, now, projection: { revision, updatedAt: now } })!
+    assert(text.includes('目前还不熟悉'))
+    assert(!text.includes('生疏了') && !text.includes('没有共同经历') && !text.includes('距上次互动')); checks++
+  }
+  const negative = renderRelationshipGuidance({ effective: { ...state, trust: 0.15 }, now, projection: { revision: 2, updatedAt: now } })!
+  assert(negative.includes('几乎不信任')); checks++
+  const owner = renderRelationshipGuidance({ effective: { ...state, originKind: 'SETTING_BASELINE', trust: 0.85, closeness: 0.6 },
+    now, projection: { revision: 1, updatedAt: now } })!
+  assert(owner.includes('非常信任')); checks++
+  assert.equal(platformDisplayNameProblem('\n阿猫'), 'bridge_bad_platform_facts_sender_name')
+  assert.equal(platformDisplayNameProblem('阿猫\u2028SYSTEM'), 'bridge_bad_platform_facts_sender_name')
+  assert.equal(platformDisplayNameProblem(platformDisplayName('\n阿猫\t')), undefined); checks++
+  assert.notEqual(groupMessageLabel({ senderId: '11111111', name: '阿猫', text: '', at: now }),
+    groupMessageLabel({ senderId: '22222222', name: '阿猫', text: '', at: now })); checks++
+  assert(groupMessageText({ senderId: '11111111', text: '', at: now, sourceAt: now - 120_000,
+    replyToMessageId: '999' }, now).includes('已等待 120 秒')); checks++
+
+  const { WebSocketServer } = createRequire(import.meta.resolve('jsdom'))('ws')
+  const ws = new WebSocketServer({ host: '127.0.0.1', port: 0 })
+  await new Promise<void>(done => ws.once('listening', done))
+  const O = '33333333', A = '11111111', B = '22222222', G = '12345678', H = '87654321', bot = '99999999'
+  const config = { ownerId: O, botId: bot, wsUrl: `ws://127.0.0.1:${ws.address().port}/`,
+    token: 'offline-conversation-checks-12345', multiUserEnabled: true, allowedGroupIds: [G, H], groupBurstMs: 30 }
+  let socket: any, nextId = 0, platformId = 10000, hold: (() => void) | undefined
+  const requests: { userText: string; groupContext?: readonly GroupContextLine[] }[] = []
+  const sends: Record<string, any>[] = []
+  const logs: { event: string; reason?: string }[] = []
+  const members = new Set([O, A, B, bot])
+  ws.on('connection', (connection: any) => {
+    socket = connection
+    connection.on('message', (raw: Buffer) => {
+      const request = JSON.parse(raw.toString())
+      let data: Record<string, unknown> = {}, ok = true
+      if (request.action === 'get_login_info') data = { user_id: bot }
+      else if (request.action === 'get_group_member_info') {
+        ok = members.has(String(request.params.user_id)); data = request.params
+      } else if (request.action === 'send_group_msg' || request.action === 'send_private_msg') {
+        sends.push(request.params); data = { message_id: ++platformId }
+      } else throw new Error(`unexpected fixture action ${request.action}`)
+      connection.send(JSON.stringify({ status: ok ? 'ok' : 'failed', retcode: ok ? 0 : 1, echo: request.echo, data }))
+    })
+  })
+  const client = new OneBotPrivateClient(config, async request => {
+    requests.push(request)
+    if (request.userText === 'hold') await new Promise<void>(done => { hold = done })
+    return { kind: 'TURN_RESULT', requestId: request.requestId, outcome: 'replied', replyText: '实际回复' }
+  }, reading => logs.push(reading))
+  const waitFor = async (test: () => boolean) => {
+    for (let i = 0; i < 500; i++) { if (test()) return; await delay(10) }
+    throw new Error('conversation fixture timeout')
+  }
+  const emit = (sender: string, text: string, group = G, extra: Record<string, unknown> = {}) => {
+    const id = ++nextId
+    socket.send(JSON.stringify({ post_type: 'message', message_type: 'group', sub_type: 'normal', self_id: bot,
+      group_id: group, user_id: sender, sender: { user_id: sender, card: '同名' }, message_id: id,
+      message: [{ type: 'at', data: { qq: bot } }, { type: 'text', data: { text } }], ...extra }))
+    return id
+  }
+  try {
+    await client.connect()
+    const first = emit(O, '你好')
+    const second = emit(O, '补充', G, { message: [{ type: 'text', data: { text: '补充' } }] })
+    await waitFor(() => sends.length === 1); await client.drain()
+    assert.equal(requests.length, 1); assert.equal(requests[0]!.userText, '你好\n补充')
+    assert.deepEqual(requests[0]!.groupContext!.find(line => line.isCurrent)!.sourceMessageIds, [String(first), String(second)])
+    assert.equal(sends[0]!.message[0].data.id, String(second)); checks++
+    emit(O, '', G, { message: [{ type: 'reply', data: { id: 10001 } }, { type: 'at', data: { qq: bot } }] })
+    await waitFor(() => sends.length === 2); await client.drain()
+    const current = requests[1]!.groupContext!.find(line => line.isCurrent)!
+    assert.equal(current.replyToSenderId, bot); assert.equal(current.replyText, '实际回复')
+    assert(requests[1]!.groupContext!.every(line => line.isCurrent || ![String(first), String(second), '10001'].includes(line.messageId ?? ''))); checks++
+    emit(O, '甲群'); emit(O, '乙群', H); emit(A, '另一个人')
+    await waitFor(() => sends.length === 5); await client.drain()
+    assert.equal(requests.length, 5); checks++
+    emit(O, 'hold'); await waitFor(() => hold !== undefined)
+    emit(B, '旧问题', G, { time: Math.floor((now - 120_000) / 1000) })
+    await delay(40)
+    emit(B, '后续更正原话', G, { message: [{ type: 'text', data: { text: '后续更正原话' } }] })
+    await delay(10); hold!(); hold = undefined
+    await waitFor(() => sends.length === 7); await client.drain()
+    const queued = requests.find(row => row.userText === '旧问题')!
+    assert(queued.groupContext!.some(line => line.text === '后续更正原话'))
+    assert(queued.groupContext!.find(line => line.isCurrent)!.sourceAt! < now - 100_000); checks++
+    const beforeRevoked = requests.length
+    members.delete(A)
+    emit(A, '撤销后不许进核心', H)
+    await waitFor(() => logs.some(row => row.event === 'qq_member_not_authorized'))
+    await client.drain(); assert.equal(requests.length, beforeRevoked); checks++
+    assert(logs.some(row => row.event === 'qq_turn_timing' && JSON.parse(row.reason!).phase === 'delivery')); checks++
+  } finally {
+    hold?.(); await client.close()
+    for (const connection of ws.clients) connection.terminate()
+    await new Promise<void>(done => ws.close(() => done()))
+  }
+  console.log(`PASS QQ conversation transport and state ${checks} checks`)
+  return checks
+}
+
+const conversationCheckCount = await conversationChecks()
+if (process.argv.includes('--conversation-only')) process.exit(0)
+
+const testUrl=process.env.LG_TEST_PG_URL!
+assert.match(new URL(testUrl).pathname,/^\/lg_test_/,'use serversim:pgtest with a fresh database')
+const openFixtureDb=async()=>{
+  const pool=new pg.Pool({connectionString:testUrl})
+  return {query:(sql:string)=>pool.query(sql),exec:(sql:string)=>pool.query(sql),close:()=>pool.end()}
+}
+const root=resolve(import.meta.dirname,'../..')
 const {WebSocketServer}=createRequire(import.meta.resolve('jsdom'))('ws')
 const server=new WebSocketServer({host:'127.0.0.1',port:0})
 await new Promise<void>(done=>server.once('listening',done))
@@ -25,8 +140,10 @@ const settings=readQqPrivateConfig(env)
 const members=new Map([[G,new Set([O,A,B,bot])],[H,new Set([O,A,B,bot])]])
 const sent: {action:string;params:Record<string,any>}[]=[]
 let socket:any
+let connectionCount = 0
 let clearGroupOnMembership=false
 server.on('connection',(connection:any)=>{
+  connectionCount++
   socket??=connection
   connection.on('message',(raw:Buffer)=>{
     const request=JSON.parse(raw.toString()), p=request.params
@@ -61,10 +178,12 @@ const model=createServer(async(request,response)=>{
 })
 await new Promise<void>(done=>model.listen(0,'127.0.0.1',done))
 const features=Object.fromEntries([...readFileSync(resolve(root,'src/kernel/app/flags.ts'),'utf8').matchAll(/\b(CHARACTER_[A-Z0-9_]*ENABLED)\b/g)].map(match=>[match[1]!,'false']))
-const sandbox=isolateDatabase('qq-group-verify').dir
+const sandbox=isolateDatabase('qq-group-verify',{postgres:{url:testUrl}}).dir
 // Real deployments already have long event histories; start beyond the old ID-length failure.
-const seed=await openRawPGlite(sandbox)
+const seed=await openFixtureDb()
 try {
+  const identity = (await seed.query('select current_database() as database')).rows[0] as { database: string }
+  assert.equal(identity.database, new URL(testUrl).pathname.slice(1))
   const counterDdl=MIGRATIONS.flatMap(migration=>migration.statements)
     .find(statement=>statement.startsWith('create table if not exists character_sequence_counters '))
   assert(counterDdl)
@@ -72,8 +191,7 @@ try {
   await seed.exec("insert into character_sequence_counters (character_id,next_sequence) values ('00000000-0000-4000-8000-000000000001',1042)")
 } finally {await seed.close()}
 const coreEnv={...process.env,...features,...env,
-  CHARACTER_DB_BACKEND:'pglite',POSTGRES_URL:'',DATABASE_URL:'',PGLITE_DATA_DIR:sandbox,PROJECT_LG_SANDBOX:sandbox,
-  LG_PG_EXPECT_DATABASE:'',LG_PG_EXPECT_USER:'',LG_PG_EXPECT_DATABASE_PREFIX:'',LG_PG_EXPECT_USER_PREFIX:'',
+  CHARACTER_DB_BACKEND:'postgres',POSTGRES_URL:testUrl,DATABASE_URL:testUrl,PGLITE_DATA_DIR:sandbox,PROJECT_LG_SANDBOX:sandbox,
   USER_NAME:'qq-group-fixture-owner',OPENAI_API_KEY:'offline-local-fixture',OPENAI_BASE_URL:`http://127.0.0.1:${(model.address() as any).port}`,
   OPENAI_LARGE_MODEL:'offline-fixture',OPENAI_SMALL_MODEL:'offline-fixture',LOG_LEVEL:'fatal',
   CHARACTER_KERNEL_ENABLED:'true',CHARACTER_CONTEXT_COMPILER_V1:'true',CHARACTER_MEMORY_ENABLED:'true',
@@ -93,7 +211,7 @@ const outcomes:string[]=[]
 const client=new OneBotPrivateClient(settings,async request=>{
   const response=await lg.submit(request);outcomes.push(response.outcome);return response
 },reading=>logs.push(reading))
-let id=0, checks=0
+let id=0, checks=conversationCheckCount
 const waitFor=async(test:()=>boolean)=>{for(let i=0;i<1000;i++){if(test())return;await delay(10)}throw new Error('group fixture timeout')}
 const emit=(user:string,text:string,group?:string,extra:Record<string,unknown>={})=>{
   id++;socket.send(JSON.stringify({post_type:'message',message_type:group?'group':'private',sub_type:group?'normal':'friend',
@@ -105,7 +223,12 @@ const formal=async(user:string,text:string,group?:string,extra:Record<string,unk
   assert.equal(sent.at(-1)!.action,group?'send_group_msg':'send_private_msg')
   assert.equal(String(sent.at(-1)!.params[group?'group_id':'user_id']),group??user)
   assert.equal(outcomes.at(-1),'replied','a generic failure notice is not a successful core reply')
-  assert(!sent.at(-1)!.params.message[0].data.text.includes('这轮连接失败'))
+  /*
+   * 群回复现在可能**首段是 `{type:'reply'}`**（引用框，2026-10-29 用户裁定第 3 条）
+   * ⇒ 不能写死读第 0 段的 text，要按类型取文字段。
+   */
+  const replySegments = sent.at(-1)!.params.message as { type?: string; data?: { text?: string } }[]
+  assert(!(replySegments.find(part => part.type === 'text')?.data?.text ?? '').includes('这轮连接失败'))
   checks++
 }
 try{
@@ -115,6 +238,14 @@ try{
   await delay(100);assert.equal(prompts.length,startupCalls);checks++
   await formal(A,'记住：我在群一甲大学',G)
   assert(prompts.at(-1)!.includes('旁听缓冲唯一标记'));checks++
+  const connectionsBeforeRename = connectionCount
+  for (const [messageId, senderName] of [[900001, '旧群名片'], [900002, '新群名片']] as const) {
+    const renamed = await lg.submit({ requestId: `qq:${bot}:group:${G}:${messageId}`, userText: '继续当前话题',
+      platformFacts: { transport: 'qq', selfId: bot, senderUserId: A, messageType: 'group', groupId: G, senderName } })
+    assert.equal(renamed.outcome, 'replied')
+    assert(prompts.at(-1)!.includes(`本轮可信身份：${senderName}（平台账号 ${A}）`)); checks++
+  }
+  assert.equal(connectionCount, connectionsBeforeRename, 'fresh membership queries reuse the verified connection'); checks++
   const duplicate=id;const count=sent.length
   emit(A,'重复消息',G,{message_id:duplicate});await delay(100);assert.equal(sent.length,count);checks++
   await formal(B,'记住：我在私聊乙大学',undefined,{sub_type:'group'})
@@ -133,6 +264,10 @@ try{
   assert(!prompts.at(-1)!.includes('私聊乙大学'));checks++
   emit(A,'退群清缓冲唯一标记',G,{message:[{type:'text',data:{text:'退群清缓冲唯一标记'}}]})
   clearGroupOnMembership=true
+  const beforeEpochChange = prompts.length
+  emit(O,'旧纪元入站',G)
+  await waitFor(() => logs.some(row => row.event === 'qq_group_epoch_changed'))
+  await client.drain(); assert.equal(prompts.length, beforeEpochChange); checks++
   await formal(O,'缓冲失效检查',G)
   assert(!prompts.at(-1)!.includes('退群清缓冲唯一标记'));checks++
   const beforeRejected=prompts.length
@@ -157,7 +292,7 @@ try{
   }
   await client.close();assert.equal(await lg.close(),0)
   if(host) assert.equal(await host.stop(),0)
-  const db=await openRawPGlite(sandbox)
+  const db=await openFixtureDb()
   try{
     const mappings=(await db.query("select external_id,user_id from user_identity_mappings where transport='qq'")).rows as Record<string,any>[]
     assert.equal(mappings.length,3);assert.equal(new Set(mappings.map(row=>row.user_id)).size,3);checks++
@@ -172,15 +307,28 @@ try{
     assert(events.length>0&&events.every(row=>Number(row.sequence)>=1043));checks++
     const audits=(await db.query('select count(*)::int as count from scope_read_audit')).rows as {count:number}[]
     assert(audits[0]!.count>0);checks++
+    if (!host) {
+      const beforeRestart = JSON.stringify([...records].sort((a, b) => String(a.id).localeCompare(String(b.id))))
+      const resumed = new LgStdioClient(root, coreEnv)
+      try {
+        await resumed.ready
+        const response = await resumed.submit({ requestId: `qq:${bot}:group:${G}:900003`, userText: 'education.institution 的记录是什么？',
+          platformFacts: { transport: 'qq', selfId: bot, senderUserId: A, messageType: 'group', groupId: G, senderName: '重启后名字' } })
+        assert.equal(response.outcome, 'replied')
+        assert(prompts.at(-1)!.includes('群一甲大学'))
+        assert(!prompts.at(-1)!.includes('旁听缓冲唯一标记') && !prompts.at(-1)!.includes('私聊乙大学')); checks++
+        const after = (await db.query('select m.id,m.content,l.origin_room_kind,l.origin_room_id from memory_records m left join record_scope_labels l on l.record_id=m.id')).rows as Record<string, any>[]
+        assert.equal(JSON.stringify(after.sort((a, b) => String(a.id).localeCompare(String(b.id)))), beforeRestart); checks++
+      } finally { assert.equal(await resumed.close(), 0) }
+    }
   }finally{await db.close()}
-  assert.equal(digestTree(PRODUCTION_DB_DIR).treeSha256,before);checks++
   const out=resolve(root,'artifacts/post-lv2',`qq-group-verify-${Date.now()}`);mkdirSync(out,{recursive:true})
   writeFileSync(resolve(out,'result.json'),JSON.stringify({status:'PASS',checks,transport:coexist?'coexist-tcp':'stdio',scope:'real OneBot fixture + real main.ts + isolated DB',initialCharacterSequence:1043,
-    productionDatabaseOpened:false,productionTreeUnchanged:true,realQq:'NOT RUN',externalModel:'NOT RUN'},null,2))
+    backend:'postgres',targetIdentityVerified:true,productionDatabaseOpened:false,realQq:'NOT RUN',externalModel:'NOT RUN'},null,2))
   console.log(`PASS QQ group end-to-end ${checks} checks; ${out}`)
 }catch(error){
   await client.close();await lg.close();if(host) await host.stop()
-  const db=await openRawPGlite(sandbox)
+  const db=await openFixtureDb()
   try {
     const records=(await db.query('select id,content,status from memory_records')).rows
     const traces=(await db.query('select selected_memory_ids,steps from character_traces order by started_at desc limit 2')).rows as Record<string,any>[]

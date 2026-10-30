@@ -401,7 +401,7 @@ check(`重启后按保存渠道投递（cli=${restartCli.outcome} · QQ=${restar
   check('S3 ③ 可注入间隔负控：不注入 ⇒ 仍是冻结的 60_000（缺省逐字不变）',
     armed.kind === 'arm' && armed.dueAt === repeatAt + repeatInterval)
   const fact = { kind: 'scheduled' as const, id: 'fixture', dueAt: Date.now() + 10000, text: '记得拔插头。', sourceRefs: ['source'], channel: 'avatar' as const }
-  check('完整回复更正错误渠道', runReplyGuardChain({ reminderResult: fact, replyText: '通过QQ提醒你拔插头。' }).replyText.includes('通过皮套'))
+  check('真实渠道保留在上下文，措辞由模型决定', fact.channel === 'avatar' && runReplyGuardChain({ reminderResult: fact, replyText: '通过QQ提醒你拔插头。' }).replyText === '通过QQ提醒你拔插头。')
   check('自然正确渠道措辞保留', runReplyGuardChain({ reminderResult: fact, replyText: '到点通过皮套提醒你拔插头。' }).replyText === '到点通过皮套提醒你拔插头。')
   const speech: string[] = []
   const stream = new CheckedSpeechStream({ replyId: 'fixture', traceId: 'fixture', facts: { reminderResult: fact }, emit: packet => speech.push(packet.segment.text) })

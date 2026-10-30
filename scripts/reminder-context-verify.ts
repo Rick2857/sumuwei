@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { readReminderDraft, runReminderTurn, type ReminderDraft, type ReminderResolution, type PendingReminder } from '../src/kernel/app/reminder-turn.ts'
+import { readReminderDraft, runReminderTurn, reminderFactText, type ReminderDraft, type ReminderResolution, type PendingReminder } from '../src/kernel/app/reminder-turn.ts'
 import { createOpenAiReminderResolver } from '../src/infrastructure/model/openai-reminder-text.ts'
 import { runReplyGuardChain } from '../src/kernel/app/reply-guard-chain.ts'
 import { runGoalTurn, type GoalTurnPorts } from '../src/kernel/app/goal/turn.ts'
@@ -46,8 +46,9 @@ assert.equal((await call(source.text, false)).kind, 'refused'); assert.equal(wri
 draft = { ok: false, failure: 'timeout' }
 const timeout = await call(source.text)
 assert.equal(timeout.kind, 'failed'); assert.equal(writes.length, 2)
-assert.match(runReplyGuardChain({ replyText: '记下了，到点发消息', reminderResult: timeout }).replyText, /超时/u)
-assert.match(runReplyGuardChain({ replyText: '这条没记，提醒什么？', reminderResult: created }).replyText, /已设置.*拔插头/u)
+assert.match(reminderFactText(timeout), /超时/u)
+assert.match(reminderFactText(created), /已保存.*已排期不等于已发送/u)
+
 draft = { ok: true, draft: { kind: 'none' } }
 const ordinary = await call('今天天气真好')
 assert.equal(ordinary.kind, 'none'); assert.equal(writes.length, 2)
@@ -77,7 +78,7 @@ const goalTimeout = await runGoalTurn({ characterId: 'character', currentInput: 
 }, goalPorts)
 assert.equal(goalTimeout.fact?.outcome, 'failed')
 assert.match(renderGoalFactBlock(goalTimeout.fact), /timeout/u)
-assert.match(runReplyGuardChain({ replyText: '你没说清，再说一遍', goalFact: goalTimeout.fact }).replyText, /超时/u)
+assert.equal(runReplyGuardChain({ replyText: '刚才处理超时了。', goalFact: goalTimeout.fact }).replyText, '刚才处理超时了。')
 const clarify = renderGoalFactBlock({ outcome: 'clarify', operation: 'clarify', clarifyReason: '需要明确完成判据' })
 assert.ok(clarify.includes('需要明确完成判据') && !clarify.includes('含义不唯一'))
 assert.ok(!runReplyGuardChain({ replyText: '行。记这条：已经答应了' }).replyText.includes('再说一遍'))
@@ -94,8 +95,7 @@ const failureEnvelope = '<lg-speech>{"segments":[{"text":"嗯。","cue":"natural
 failedStream.push(failureEnvelope)
 const failureResult = failedStream.finish(failureEnvelope)
 assert.equal(failureResult.outcome.replyText, failedSpeech.join(''))
-assert.equal(failedSpeech.filter(text => text.includes('超时')).length, 1)
-assert.ok(!failureResult.outcome.replyText.includes('已经设置了'))
+assert.equal(failureResult.outcome.replyText, '嗯。已经设置了。', 'speech does not override model wording')
 
 const output = resolve('artifacts/post-lv2/reminder-context-repair/component')
 mkdirSync(output, { recursive: true })

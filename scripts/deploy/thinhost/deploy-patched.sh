@@ -5,7 +5,7 @@
 #   ② 部署对象是"服务器当前文件 + 我的小补丁"，不是本机整体文件
 #   ③ 替换前核验：所有相对 import 都能在服务器上解析
 set -u
-REPO=/home/aiagent/project-lg
+REPO=/opt/project-lg
 STAMP=$(date +%Y%m%dT%H%M%S)
 BK="/var/backups/thinhost-$STAMP"
 STAGED=/tmp/thinhost-stage/main.patched.ts
@@ -24,7 +24,7 @@ cat > /tmp/check-imp3.mjs <<'EOF'
 import { readFileSync, existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 const file = process.argv[2]
-const srcRoot = '/home/aiagent/project-lg/src'
+const srcRoot = '/opt/project-lg/src'
 const src = readFileSync(file, 'utf8')
 const re = /from\s+'(\.[^']+)'/g
 const missing = new Set()
@@ -45,7 +45,7 @@ echo "=== ②b 语法校验（esbuild transform）—— 失败即中止 ==="
 #    这一步就是把它挡在部署之前。
 cat > /tmp/syntax-check.mjs <<'EOF'
 import { readFileSync } from 'node:fs'
-import { transform } from '/home/aiagent/project-lg/node_modules/.pnpm/esbuild@0.28.2/node_modules/esbuild/lib/main.js'
+import { transform } from '/opt/project-lg/node_modules/.pnpm/esbuild@0.28.2/node_modules/esbuild/lib/main.js'
 const file = process.argv[2]
 try {
   await transform(readFileSync(file, 'utf8'), { loader: 'ts', format: 'esm' })

@@ -85,8 +85,18 @@ if (process.argv.includes('--check')) {
   )
 } else {
   const lg = new LgStdioClient(root, process.env, coexistConnect === undefined ? {} : { connect: coexistConnect })
+  /*
+   * ADR-156 / P3-B：**群入站准入下沉给核心**（只有群任务开关打开时才下放）。
+   *
+   * ⚠️ 关着 ⇒ 外壳仍按静态群名单过滤（旧行为逐字不变）。
+   * ⚠️ 打开 ⇒ 外壳只做结构校验，准入由核心的 `decideGroupAdmission` /
+   *    `decideInboundRouting` 判（"先看生效任务，再看旧名单"）。
+   * ⚠️ 出站不放宽：旧回复路径仍查静态名单，任务发送仍只走窄路径。
+   */
+  const groupTasksEnabled = (process.env.CHARACTER_QQ_GROUP_TASKS_ENABLED ?? '').trim() === 'true'
+  const deferGroupAdmissionToCore = groupTasksEnabled
   const client = new OneBotPrivateClient(settings, (request) => lg.submit(request), (reading) => console.log(JSON.stringify(reading)),
-    voiceOutput, deliveryJournal?.journal)
+    voiceOutput, deliveryJournal?.journal, undefined, deferGroupAdmissionToCore)
   /*
    * post-Lv2 / ADR-110 `D06`：**核心主动发来的投递**交给本外壳的发送面。
    *
@@ -103,6 +113,38 @@ if (process.argv.includes('--check')) {
     console.log(JSON.stringify({ event: 'qq_proactive_delivery', deliveryId: input.deliveryId, status: reading.status, code: reading.reason }))
     return reading
   })
+  /*
+   * ADR-156 / P3-G：**核心派发来的群任务消息**交给本外壳的发送面。
+   *
+   * ```text
+   * 核心 → 外壳  DELIVER_GROUP_TASK
+   * 外壳 → 核心  REPORT_GROUP_TASK_DELIVERY（三态：api_accepted / failed_confirmed / delivery_unknown）
+   * ```
+   * ⚠️ 只在群任务开关打开时装：关着 ⇒ **不装** ⇒ 那条指令如实回报
+   *    `group_task_delivery_handler_absent`（**不会**假装发过；核心按回执结算额度）。
+   * ⚠️ 落地走 `client.deliverGroupTaskFromCore()`：**同一条串行队列**（普通回复优先）、
+   *    策略 A 四条检查（形状 / 目标绑定 / 有效期 / 发送幂等），外壳**仍然不打开数据库**——
+   *    授权是核心在派发之前按持久层任务判完的。
+   */
+  if (groupTasksEnabled) {
+    lg.setGroupTaskDeliveryHandler(async (groupTask) => await client.deliverGroupTaskFromCore(groupTask))
+  }
+  /*
+   * ADR-156 / P3-I：**核心发来的只读群列表查询**（`LIST_GROUPS`）交给本外壳那条 OneBot 连接。
+   *
+   * ```text
+   * 核心 → 外壳  LIST_GROUPS
+   * 外壳 → 核心  LIST_GROUPS_RESULT（有列表就带 groups，失败就带具名 code）
+   * ```
+   * ⚠️ 只在群任务开关打开时装：关着 ⇒ **不装** ⇒ 核心收到
+   *    `group_task_group_list_handler_absent`（**不会**拿到一个假的空列表）。
+   * ⚠️ `client.listGroups()` **只读**：一个 `get_group_list`，不发消息、不占发送队列、
+   *    不做任何放行决定 —— 核心拿它做**群目标消歧**，能不能发仍由任务授权判。
+   * ⚠️ 顺带的意义：核心不再为了读群列表而**自建第二条 ws 连接**（P3-I 的 W1）。
+   */
+  if (groupTasksEnabled) {
+    lg.setGroupListHandler(async () => await client.listGroups())
+  }
   let stopped = false
   const wechat = wechatConfig === undefined ? undefined : new WechatGroupClient(wechatConfig,
     request => lg.submit(request), reading => console.log(JSON.stringify(reading)), request => lg.assessGroupReply(request))

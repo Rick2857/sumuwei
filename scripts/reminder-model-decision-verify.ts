@@ -35,7 +35,7 @@ assert.equal((await runReminderTurn(input, ports)).kind, 'refused')
 resolution = { ok: false, failure: 'timeout' }
 assert.equal((await runReminderTurn(input, ports)).kind, 'failed'); assert.equal(writes, 1)
 const platform = process.platform === 'win32' ? 'win32' : 'posix'
-for (const path of ['/home/aiagent/project-lg/data/personal-library', '/home/aiagent/project-lg/data', '/']) {
+for (const path of ['/opt/project-lg/data/personal-library', '/opt/project-lg/data', '/']) {
   if (platform !== 'posix') continue
   const target = resolveLocalTarget({ targetType: 'local_file', rawPath: path, platform })
   assert.equal(target.target.confidence, 'exact', path)

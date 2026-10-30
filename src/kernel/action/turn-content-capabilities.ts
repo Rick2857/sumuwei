@@ -70,6 +70,8 @@ export const TURN_CONTENT_CAPABILITY_IDS: readonly string[] = [
    */
   DESKTOP_INSPECT,
   PERSONAL_LIBRARY_SEARCH,
+  'project.search',
+  'self.capabilities',
   ARXIV_RESEARCH,
   'document.extract',
   'document.profile',
@@ -129,6 +131,8 @@ export function turnContentCapabilityLabel(capabilityId: string): string {
   if (capabilityId === 'document.profile') return 'PDF 结构检查'
   if (capabilityId === 'document.pages') return 'PDF 指定页读取'
   if (capabilityId === PERSONAL_LIBRARY_SEARCH) return '个人资料夹检索'
+  if (capabilityId === 'project.search') return '项目资料检索'
+  if (capabilityId === 'self.capabilities') return '当前实例能力查询'
   if (capabilityId === ARXIV_RESEARCH) return 'arXiv 论文查阅'
   if (UTILITY_CAPABILITY_IDS.includes(capabilityId)) {
     return utilityCapabilityLabel(capabilityId)

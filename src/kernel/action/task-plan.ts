@@ -71,6 +71,8 @@ export interface TaskPlan {
 export const TASK_ARG_KEYS: Readonly<Record<string, readonly string[]>> = {
   'workflow.skill': ['skill'],
   'library.search': ['query'],
+  'project.search': ['query', 'limit', 'path', 'revision', 'section'],
+  'self.capabilities': ['capability'],
   'research.arxiv': ['query', 'limit', 'paperId', 'section'],
   'local.file.list': ['path'],
   'local.file.read': ['path'],
@@ -122,6 +124,24 @@ export const TASK_ARG_KEYS: Readonly<Record<string, readonly string[]>> = {
    */
   'qq.private.message': ['text'],
   'local.reminder.message': ['text'],
+  /*
+   * post-Lv2 / ADR-156：主人授权群任务的两个能力（**群任务 P2**）。
+   *
+   * ⚠️ 只有 `text` / `media`：**没有**群号、收件人、群名这类字段 ——
+   *    群号只能来自**任务授权事实**（适配器层的 `resolveAuthorization` 端口），
+   *    任何请求方（包括模型）都提供不了。`media` 只是"这条任务允许的形态里这次想用哪种"。
+   * ⚠️ 这两行**不是**"任务可用"的标记：两个能力都**不在** `TASK_CAPABILITY_IDS` 里，
+   *    所以角色自行选择工具与任务执行环都规划不到它们。
+   *    它们在表里是 `auditToolCatalog()` 的完整性要求（"无遗漏 / 无漂移"）——
+   *    与上面的 `qq.private.message` 完全同一条理由。
+   * ⚠️ 参数闭集与 `qq-group-capability.ts` 的 `QQ_GROUP_SEND_ARG_KEYS` /
+   *    `QQ_GROUP_LIST_ARG_KEYS` 必须**逐字相同**（门断言这条）；这里写**字面量**而不是
+   *    引用那个常量：本文件是 kernel 的纯表，`auditToolCatalog()` 拿它当比对基准，
+   *    表跟着常量跑会让"表 → 声明"的漂移看不见。
+   */
+  'qq.group.message': ['text', 'media'],
+  /* `qq.group.list`：只读机器人**实际所在**群（消歧用），**一个参数都不接受** */
+  'qq.group.list': [],
 }
 
 /** 会被环改写成"暂存引用"的字段（**不允许**留在最终 args 里） */

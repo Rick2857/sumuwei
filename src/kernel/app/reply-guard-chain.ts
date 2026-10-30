@@ -7,7 +7,7 @@
  * 五道守卫的**顺序**是一条真实契约，而且是被事故换来的：
  *
  * ```text
- *   记忆 → 承诺 → 动作 → 外部证据 → 搜索判定
+ *   记忆 → 动作 → 外部证据 → 搜索判定
  * ```
  *
  * `main.ts` 按这个顺序串联它们（每一道只认自己那一类口吻，词表互不共用）。
@@ -18,22 +18,22 @@
  * 因此本模块是**唯一**实现：两处调用点（生产 / 验收 host）不再各写一遍。
  *
  * ⚠️ 依赖方向：本模块在 `src/kernel/app/` 下，只 import kernel 内的纯策略
- * （`memory/response-truth`、`goal/claim-guard`、`action/claim-guard`、
+ * （`memory/response-truth`、`action/claim-guard`、
  * `action/external-evidence-reply`、`action/search-need-reply`），
  * 不碰基础设施、数据库或模型。
  *
- * ⚠️ **本模块不做**的事：不调模型、不写账本、不改任何一道守卫的语义。
- * 它只是把五道守卫按既定顺序串起来，并把它们的读数翻译成 trace 的三态报告。
+ * 2026-10-26 用户裁定：目标、承诺、提醒回复的词面校验已删除（ADR-153）。
+ * 本模块不调模型、不写账本；这些领域的措辞由生成模型结合真实执行上下文决定。
  */
 
 import { KernelError } from '../contracts/ids.ts'
-import { truthfulReminderReply, reminderPlanReplyMatches, reminderReplyConfirmsChannel, reminderReplyChangesChannel, claimsUnexecutedReminder, UNEXECUTED_REMINDER_REPLY, type ReminderTurnResult } from './reminder-turn.ts'
+import type { ReminderTurnResult } from './reminder-turn.ts'
+
 import type { ReplyGuardReport } from '../contracts/reply-guard.ts'
 import type { ExternalEvidenceTurnReality } from '../contracts/external-evidence.ts'
 import type { ExplicitMemoryTurnResult } from './memory/explicit-turn.ts'
 import type { ActionTurnResult } from '../action/action-turn.ts'
 import { applyResponseTruthPolicy } from './memory/response-truth.ts'
-import { applyCommitmentClaimGuard, applySettlementConfirmationGuard, commitmentWriteFacts } from './goal/claim-guard.ts'
 import { applyActionClaimGuard } from '../action/claim-guard.ts'
 import {
   applyExternalEvidenceReplyPolicy,
@@ -93,7 +93,7 @@ export interface ReplyGuardChainInput {
 }
 
 export interface ReplyGuardChainOutcome {
-  /** 提醒纠错单列，避免把它读成承诺域写入/纠错。 */
+  /** 提醒执行结局；保留接口形状，已删除措辞纠错。 */
   reminder?: { corrected: boolean; outcome: string }
   /** **检查后**的正文 —— 写账本、写 memories、回给用户、播出，全部用这一个 */
   replyText: string
@@ -154,9 +154,9 @@ export interface ReplyGuardChainOutcome {
 }
 
 /**
- * 按 `main.ts` 的**既定顺序**串联五道守卫。
+ * 按 `main.ts` 的既定顺序串联保留的守卫。
  *
- * 失败关闭：五道守卫里的任何一道抛错都**直接抛出**（不吞、不降级）。
+ * 失败关闭：保留的守卫里任何一道抛错都直接抛出（不吞、不降级）。
  * 吞掉它等于放一句**没被检查**的话出去 —— 那正是本模块要阻止的事。
  */
 export function runReplyGuardChain(input: ReplyGuardChainInput): ReplyGuardChainOutcome {
@@ -166,6 +166,11 @@ export function runReplyGuardChain(input: ReplyGuardChainInput): ReplyGuardChain
       'reply_guard_chain_without_text',
       '守卫链必须拿到一段待检查的正文：没有正文就没有可检查的东西'
     )
+  }
+
+  // Reserved model protocol is neither speech nor execution authority; never send or run it.
+  if (/<[｜|]{1,2}DSML[｜|]{1,2}\s*(?:calls|invoke|function_calls)\b/i.test(input.replyText)) {
+    throw new KernelError('validation_error', 'reply_contains_tool_protocol', 'reply_contains_tool_protocol')
   }
 
   // ① 记忆写入真相
@@ -178,55 +183,15 @@ export function runReplyGuardChain(input: ReplyGuardChainInput): ReplyGuardChain
       : { userAskedToRemember: input.userAskedToRemember }),
   })
 
-  // ② 目标 / 承诺真相（键是程序事实：目标回合的写入读数 + 记忆写入结论）
-  let commitmentTruth = applyCommitmentClaimGuard({
-    ...commitmentWriteFacts(input.goalWriteReality),
-    anythingWritten:
-      input.memoryWriteResult?.kind === 'written' ||
-      input.memoryWriteResult?.kind === 'already_applied' ||
-      (input.goalWriteReality?.eventsCommitted ?? 0) > 0 ||
-      (input.reminderResult !== undefined && (['scheduled', 'updated', 'existing'].includes(input.reminderResult.kind)
-        || (input.reminderResult.kind === 'planned' && input.reminderResult.items.some(item => ['created', 'updated', 'cancelled'].includes(item.status))))),
-    replyText: memoryTruth.replyText,
-  })
-  const reminder = input.reminderResult
-  let reminderCorrected = false
-  if (input.goalFact?.outcome === 'failed' && /记|目标|约定|说清|再说一遍|没.*交代/u.test(commitmentTruth.replyText)) {
-    const timeout = input.goalFact.rejectionCodes?.includes('timeout') === true
-    commitmentTruth = { ...commitmentTruth, corrected: true, replyText: `这轮目标处理${timeout ? '超时' : '失败'}，尚未确认新增记录成功。已经交代的内容不需要重复。` }
-  }
-  const settledCount = input.goalFact?.outcome === 'query' ? input.goalFact.settledGoalCount ?? 0
-    : input.goalFact?.outcome === 'accepted' && input.goalFact.operation === 'report_complete' &&
-      (input.goalWriteReality?.eventsCommitted ?? 0) > 0
-      ? input.goalWriteReality!.acceptedEventTypes.filter(type => type === 'GOAL_COMPLETED').length : 0
-  const settlement = applySettlementConfirmationGuard(commitmentTruth.replyText, settledCount)
-  if (settlement.corrected) commitmentTruth = { ...commitmentTruth, corrected: true, replyText: settlement.replyText,
-    markers: [...commitmentTruth.markers, 'settlement_reconfirmation'] }
-  let checkedRecordText = commitmentTruth.replyText
-  if (reminder?.kind === 'none' && claimsUnexecutedReminder(checkedRecordText)) {
-    checkedRecordText = UNEXECUTED_REMINDER_REPLY
-    reminderCorrected = true
-  }
-  if (reminder !== undefined && reminder.kind !== 'none') {
-    const success = 'text' in reminder
-    // 通知结果优先于泛化的“没写记录”；正文仍允许角色自然措辞。
-    if ((reminder.kind === 'planned' && input.partialReply !== true && !reminderPlanReplyMatches(reminder, commitmentTruth.replyText))
-      || (!success && reminder.kind !== 'planned' && (claimsUnexecutedReminder(commitmentTruth.replyText) || /已(?:经)?设置|记下了|记这条|已取消|取消了|已改期|改好了/u.test(commitmentTruth.replyText)))
-      || /没(?:真)?记|没找到.*记忆|没有.*记录|再说一遍|提醒什么|说清|默认.*哪|没有.*提醒能力|已经(?:发送|发消息)|发了.{0,8}消息/u.test(commitmentTruth.replyText)
-      || (success && (reminderReplyChangesChannel(reminder, commitmentTruth.replyText)
-        || (input.partialReply !== true && (!reminderReplyConfirmsChannel(reminder, commitmentTruth.replyText)
-          || !commitmentTruth.replyText.includes(reminder.text.replace(/^记得/u, '').replace(/[。！!？?]$/u, ''))))))) {
-      checkedRecordText = truthfulReminderReply(reminder)
-      reminderCorrected = true
-    }
-  }
+  // 目标、承诺和提醒措辞由模型结合实际执行事实决定，不以关键词改写回复。
+
 
   // ③ 动作真相（键是执行结果）
   const actionTruth = applyActionClaimGuard({
     results: input.actionResults
       ?.map((result) => result.result)
       .filter((result) => result !== undefined),
-    replyText: checkedRecordText,
+    replyText: memoryTruth.replyText,
   })
 
   // ④ 外部证据真相（剥离自造引用标签 + 查到就追加确定性附录）
@@ -270,12 +235,11 @@ export function runReplyGuardChain(input: ReplyGuardChainInput): ReplyGuardChain
 
   return {
     replyText: needReply.replyText,
-    ...(reminder !== undefined && (reminder.kind !== 'none' || reminderCorrected) ? { reminder: { corrected: reminderCorrected, outcome: reminder.kind } } : {}),
+    ...(input.reminderResult !== undefined && input.reminderResult.kind !== 'none' ? { reminder: { corrected: false, outcome: input.reminderResult.kind } } : {}),
     reports: buildGuardReports({
       memoryTruthCorrected: memoryTruth.corrected,
       memoryMarkers: memoryTruth.markers,
       hasMemoryWriteResult: input.memoryWriteResult !== undefined,
-      commitmentTruthCorrected: commitmentTruth.corrected,
       actionTruthCorrected: actionTruth.corrected,
       actionMarkers: actionTruth.markers,
       hasConcreteActionResults,
@@ -288,7 +252,7 @@ export function runReplyGuardChain(input: ReplyGuardChainInput): ReplyGuardChain
     }),
     corrected: {
       memoryTruth: memoryTruth.corrected,
-      commitmentTruth: commitmentTruth.corrected,
+      commitmentTruth: false,
       actionTruth: actionTruth.corrected,
       evidenceTruth:
         evidenceTruth.markers.length > 0 || evidenceTruth.strippedCitationLabels.length > 0,
@@ -296,7 +260,7 @@ export function runReplyGuardChain(input: ReplyGuardChainInput): ReplyGuardChain
     },
     markers: {
       memoryTruth: memoryTruth.markers,
-      commitmentTruth: commitmentTruth.markers,
+      commitmentTruth: [],
       actionTruth: actionTruth.markers,
       evidenceTruth: evidenceTruth.markers,
       strippedCitationLabels: evidenceTruth.strippedCitationLabels,
@@ -326,8 +290,7 @@ export function runReplyGuardChain(input: ReplyGuardChainInput): ReplyGuardChain
  * trace 三态（`ADR-055 D-55g`）。
  *
  * ⚠️ 受控词汇表只有**四个名字**（`memory_truth / action_truth / evidence_truth /
- * search_need`）：承诺守卫确实在文本链上运行，但它**没有**自己的名字 ——
- * 这是既有契约，本模块**不**擅自扩它（扩 trace 白名单是另一件事）。
+ * search_need`）。目标/承诺和提醒的措辞校验已按 ADR-153 删除。
  *
  * ⚠️ `reasons` 只放**枚举标签与标记词**（短词，不含正文）。
  */
@@ -335,7 +298,6 @@ function buildGuardReports(input: {
   hasMemoryWriteResult: boolean
   memoryTruthCorrected: boolean
   memoryMarkers: readonly string[]
-  commitmentTruthCorrected: boolean
   actionTruthCorrected: boolean
   actionMarkers: readonly string[]
   hasConcreteActionResults: boolean

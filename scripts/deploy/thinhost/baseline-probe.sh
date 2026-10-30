@@ -2,7 +2,7 @@
 # 只读基线探针（不重启服务、不写库、不改配置）。
 # 输出 PSS/RSS、fd 数、线程数、/proc 状态。全部来自 /proc 与 smaps_rollup。
 set -u
-cd /home/aiagent/project-lg || exit 1
+cd /opt/project-lg || exit 1
 
 echo "### host"
 date -Is

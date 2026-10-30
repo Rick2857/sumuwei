@@ -312,7 +312,7 @@ switch (command) {
      *    `CHARACTER_DB_BACKEND=postgres` ⇒ 直接跑会撞上这条，**与本机撞的是同一条**
      *    （实测 2026-10-20：仿真与本机都在 `verify-phase-c.ts` 上
      *    `postgres_isolation_not_provided`；仓库已把它登记为**既有基线**，
-     *    公开副本的执行边界见 docs/PUBLIC-VERIFICATION.md）。
+     *    见 docs/Tech-Debt-Register.md:2600 与 docs/post-lv2/Lv25-Retirement-2026-10-20.md:32）。
      *
      * ⚠️ **`DOTENV_CONFIG_PATH` 也不够**：`src/db/index.ts` 会在开库前
      *    **自己重读 `<cwd>/.env`**（仓库注释里明写过这件事）。

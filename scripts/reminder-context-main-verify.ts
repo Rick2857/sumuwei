@@ -4,11 +4,12 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { EntryShell, startCoexistHost } from './coexist/harness.ts'
 import { isolateDatabase } from '../src/dev/sandbox.ts'
-import { openRawPGlite } from '../src/infrastructure/persistence/production-db-safety.ts'
+import pg from 'pg'
 import type { ReminderResolutionInput } from '../src/kernel/app/reminder-turn.ts'
 
 const live = process.argv.includes('--live')
 if (live) assert.equal(process.env.DSH_TEST_MODEL_WRAPPER, '1', '真模型必须经过 with-test-model')
+assert.ok(process.env.LG_TEST_PG_URL, 'run through serversim:pgtest with an isolated PostgreSQL database')
 
 const sandbox = isolateDatabase('reminder-context-main', { keep: true })
 const calls: { instruction: string; input: string }[] = []
@@ -71,13 +72,17 @@ try {
     const turn = await client.submit(`reminder-${index}`, message)
     turns.push(turn)
     assert.equal(turn.outcome, 'replied')
-    assert.ok(!/没记|说清|再说一遍|发消息还是|你来找我/u.test(String(turn.replyText)), JSON.stringify(turn))
-    if (index !== 3 && index !== 4) assert.ok(/拔[^。！？\n]{0,12}(?:插头|充电器)/u.test(String(turn.replyText)), JSON.stringify(turn))
+    if (live) {
+      assert.ok(!/没记|说清|再说一遍|发消息还是|你来找我/u.test(String(turn.replyText)), JSON.stringify(turn))
+      if (index !== 3 && index !== 4) assert.ok(/拔[^。！？\n]{0,12}(?:插头|充电器)/u.test(String(turn.replyText)), JSON.stringify(turn))
+    } else {
+      assert.equal(turn.replyText, '这条我没记。提醒什么？', 'the entry must preserve model output; execution is checked separately')
+    }
     console.log(`第${index + 1}轮：${String(turn.replyText)}`)
   }
   client.close(); client = undefined
   assert.equal(await host.stop(), 0)
-  const db = await openRawPGlite(sandbox.dir)
+  const db = new pg.Pool({ connectionString: process.env.LG_TEST_PG_URL })
   try {
     const reminders = (await db.query('select id, text, scheduled_at, plan_version, source_refs from notification_intents order by created_at')).rows as { text: string; scheduled_at: number; plan_version: number; source_refs: string[] }[]
     const events = (await db.query("select id, created_at, content from conversation_events where actor_type = 'user' order by sequence")).rows as { id: string; created_at: number; content: string }[]
@@ -92,7 +97,7 @@ try {
       assert.equal(calls.filter(call => call.instruction.includes('提醒处理结果')).length, 6, '六轮主回复均得到通知事实')
     }
     ledger = { reminders, events, goals }
-  } finally { await db.close() }
+  } finally { await db.end() }
   passed = true
 } finally {
   client?.close()

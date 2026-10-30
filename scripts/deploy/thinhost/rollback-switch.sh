@@ -1,7 +1,7 @@
 #!/bin/bash
 # 回滚薄宿主开关，让服务先用 ElizaOS 起来（QQ 恢复优先于修接线）。
 set -u
-ENVF=/home/aiagent/project-lg/.env
+ENVF=/opt/project-lg/.env
 
 echo "=== ① 移除开关行 ==="
 if grep -q '^CHARACTER_THIN_HOST=' "$ENVF"; then

@@ -3,7 +3,10 @@ import { createInterface } from 'node:readline'
 import { connect, type Socket } from 'node:net'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import type { BridgeWireResponse } from '../../kernel/app/bridge/turn-bridge.ts'
+import type {
+  BridgeGroupTaskDispatchInstruction,
+  BridgeWireResponse,
+} from '../../kernel/app/bridge/turn-bridge.ts'
 import { ENTRY_PROTOCOL_VERSION } from './entry-handshake.ts'
 /**
  * 连接状态（2026-10-17 · 远程执行缺口 3/4「重连」）。
@@ -141,6 +144,38 @@ export class LgStdioClient {
         reason?: string
       }>)
     | undefined
+  /**
+   * ADR-156 / P3-G：**群任务派发**的处理器（由外壳装上）。
+   *
+   * ```text
+   * 装上 ⇒ 核心发来的 `DELIVER_GROUP_TASK` 交给它发送，回执（三态）原样写回核心
+   * 不装 ⇒ 那一条**如实回报 `failed_confirmed` + `group_task_delivery_handler_absent`**
+   *        （失败关闭：宁可报"没发"，也**不许**假装发过 —— 核心会按回执结算额度）
+   * ```
+   * ⚠️ 与 {@link qqDeliveryHandler} **同形但不同线**：那条的关联键是 `deliveryId`，
+   *    这条的关联键是 `deliveryKey`（= 发送实例 id）。两者的回执 kind 也不同
+   *    （`REPORT_QQ_DELIVERY` / `REPORT_GROUP_TASK_DELIVERY`）。
+   */
+  private groupTaskDeliveryHandler:
+    | ((groupTask: BridgeGroupTaskDispatchInstruction) => Promise<{
+        status: 'api_accepted' | 'failed_confirmed' | 'delivery_unknown'
+        messageId?: string
+        reason?: string
+      }>)
+    | undefined
+  /**
+   * ADR-156 / P3-I：**只读群列表**的处理器（由外壳装上）。
+   *
+   * ```text
+   * 装上 ⇒ 核心发来的 `LIST_GROUPS` 交给它读（真实实现只有一个 `get_group_list`），列表原样写回核心
+   * 不装 ⇒ 回 `group_task_group_list_handler_absent`（**不许**回空数组冒充成功）
+   * ```
+   * ⚠️ 它与 {@link groupTaskDeliveryHandler} 的**方向相同、语义相反**：那条会**发消息**，
+   *    这条**一条消息都不发**（只读 `get_group_list`，不占发送队列、不做放行决定）。
+   */
+  private groupListHandler:
+    | (() => Promise<readonly { readonly groupId: string; readonly groupName: string }[]>)
+    | undefined
 
   constructor(
     root: string,
@@ -255,6 +290,8 @@ export class LgStdioClient {
      *    所以不能走下面的 `pending.get(requestId)`（那是 `deliveryId`，永远查不到）。
      */
     if (response?.kind === 'DELIVER_QQ_TEXT') {
+      // REPORT_QQ_DELIVERY acknowledgements share this kind, but carry no outbound command.
+      if (response.qqDelivery !== undefined) return
       void this.handleQqDelivery(response).catch(() => undefined)
       return
     }
@@ -276,6 +313,44 @@ export class LgStdioClient {
       })
       return
     }
+    /*
+     * ADR-156 / P3-G：**我方回执的应答**（`REPORT_GROUP_TASK_DELIVERY` 被受理之后的回包）。
+     *
+     * ⚠️ 它是**独立 kind**（`GROUP_TASK_DELIVERY_RESULT`），刻意**不**与出站派发指令共用
+     *    `DELIVER_GROUP_TASK`：共用的话外壳必须读载荷才知道"这是指令还是应答"，
+     *    误读一次就是**多往群里发一条**。所以这里连载荷都不用看，直接忽略。
+     */
+    if (response?.kind === 'GROUP_TASK_DELIVERY_RESULT') return
+    /*
+     * ADR-156 / P3-G：**核心派发来的一条群任务消息**（与上面的主动投递同类：不是某轮的结果）。
+     *
+     * ```text
+     * requestId = deliveryKey（= 发送实例 id），**不是**轮次 id
+     *   ⇒ 走下面的 `pending.get(requestId)` 永远查不到，必须在早退**之前**建档
+     * 它**必须**有回执（`REPORT_GROUP_TASK_DELIVERY`）：没有回执 ⇒ 核心按"结果未知"结算
+     * ```
+     */
+    if (response?.kind === 'DELIVER_GROUP_TASK') {
+      void this.handleGroupTaskDelivery(response).catch(() => undefined)
+      return
+    }
+    /*
+     * ADR-156 / P3-I：**核心发来的只读群列表查询**（与上面两条同类：不是某轮的结果）。
+     *
+     * ⚠️ `requestId` 是这次查询的关联键（`qq-group-list:<n>`），**不是**轮次 id
+     *    ⇒ 走下面的 `pending.get(requestId)` 永远查不到，必须在早退**之前**建档。
+     */
+    if (response?.kind === 'LIST_GROUPS') {
+      void this.handleListGroups(response).catch(() => undefined)
+      return
+    }
+    /*
+     * ADR-156 / P3-I：**我方群列表回执的应答**（核心收到 `LIST_GROUPS_RESULT` 之后的回包）。
+     *
+     * ⚠️ 与 `GROUP_TASK_DELIVERY_RESULT` 同一条处理：**不读载荷**，直接忽略。
+     *    "回执到底送到了没有"由这一句回答，而不是靠超时去猜。
+     */
+    if (response?.kind === 'LIST_GROUPS_RESULT') return
     if (response?.kind !== 'TURN_RESULT' && response?.kind !== 'GROUP_REPLY_DECISION') return
     const pending = this.pending.get(response.requestId)
     if (!pending) return
@@ -429,6 +504,165 @@ export class LgStdioClient {
     })
   }
 
+  /**
+   * 装上**群任务派发**处理器（ADR-156 / P3-G · `DELIVER_GROUP_TASK`）。
+   *
+   * ⚠️ 不装 = 那条指令如实回报 `failed_confirmed` + `group_task_delivery_handler_absent`
+   *    （**不**回一条"成功"）—— 这正是"没有这个能力就说没有"的同一条纪律：
+   *    核心按回执结算额度，一条假的 `api_accepted` 会让额度账少记一条真实消息。
+   */
+  setGroupTaskDeliveryHandler(
+    handler: (groupTask: BridgeGroupTaskDispatchInstruction) => Promise<{
+      status: 'api_accepted' | 'failed_confirmed' | 'delivery_unknown'
+      messageId?: string
+      reason?: string
+    }>
+  ): void {
+    this.groupTaskDeliveryHandler = handler
+  }
+
+  /**
+   * 把一条群任务派发**落地**，并把回执写回核心（ADR-156 / P3-G · 契约 §3.1）。
+   *
+   * ```text
+   * 装上处理器       ⇒ 交给它发送，回执 = 它给的三态（**不改判**）
+   * 没装处理器       ⇒ failed_confirmed + `group_task_delivery_handler_absent`
+   * 没有可用关联键   ⇒ **连回执都不回**（见下）
+   * 处理器抛错       ⇒ delivery_unknown + 具名 reason（发出去没有，外壳不知道）
+   * ```
+   *
+   * ⚠️ **失败关闭的方向**：宁可报"没发"（`failed_confirmed`），也**不许**假装发过。
+   *    反方向的谎（把成功报成失败）代价只有一次重派尝试；本方向的谎会让核心
+   *    把一条**根本没发出去的**消息记成"平台已接受"。
+   * ⚠️ **没有关联键就不回**：回执要按 `deliveryKey` 对号，编一个键等于让核心把它
+   *    当成另一次派发（那边会报 `group_task_report_unknown_key`，比沉默更误导）。
+   */
+  private async handleGroupTaskDelivery(response: BridgeWireResponse): Promise<void> {
+    const groupTask = response.groupTask
+    const rawKey = groupTask?.deliveryKey
+    /*
+     * 关联键：优先取指令自己的 `deliveryKey`；它缺席时退回 `requestId`
+     * （协议里两者**逐字同值**，退回只是为了让一条形状略残的指令仍能被如实回报）。
+     */
+    const deliveryKey = typeof rawKey === 'string' && rawKey.trim() !== ''
+      ? rawKey
+      : typeof response.requestId === 'string' && response.requestId.trim() !== ''
+        ? response.requestId
+        : ''
+    if (deliveryKey === '') return
+    const handler = this.groupTaskDeliveryHandler
+    if (handler === undefined || groupTask === undefined) {
+      /* 有键但没人接 / 没有指令 ⇒ 如实报"没发"（绝不回一条假的成功） */
+      this.writeLine({
+        kind: 'REPORT_GROUP_TASK_DELIVERY',
+        requestId: deliveryKey,
+        deliveryKey,
+        status: 'failed_confirmed',
+        reason: 'group_task_delivery_handler_absent',
+      })
+      return
+    }
+    let reading: { status: 'api_accepted' | 'failed_confirmed' | 'delivery_unknown'; messageId?: string; reason?: string }
+    try {
+      reading = await handler(groupTask)
+    } catch (error) {
+      /*
+       * ⚠️ 处理器抛错 ⇒ **结果未知**，不是"失败"：异常可能发生在发送**之后**
+       *    （回读回执时炸了）。报失败会诱导核心重派 —— 那可能让群里出现两条。
+       */
+      reading = {
+        status: 'delivery_unknown',
+        reason: error instanceof Error ? error.message : 'group_task_delivery_threw',
+      }
+    }
+    let status: 'api_accepted' | 'failed_confirmed' | 'delivery_unknown' =
+      reading.status === 'api_accepted' || reading.status === 'failed_confirmed' || reading.status === 'delivery_unknown'
+        ? reading.status
+        : 'delivery_unknown'
+    let reason = reading.reason
+    let messageId = reading.messageId
+    /*
+     * 闭集外的状态 ⇒ 如实降级成"结果未知"（`report_unknown_status` 那条回执会被桥拒掉，
+     * 而桥拒掉之后核心只能等超时 —— 两端都要多绕一圈才能得到同一个结论）。
+     */
+    if (status === 'api_accepted' && (typeof messageId !== 'string' || messageId.trim() === '')) {
+      /* "平台接受了但没有回执 id" 在既有口径里就是**结果不明**（不是失败） */
+      status = 'delivery_unknown'
+      reason = reason ?? 'group_task_delivery_unconfirmed'
+      messageId = undefined
+    }
+    this.writeLine({
+      kind: 'REPORT_GROUP_TASK_DELIVERY',
+      requestId: deliveryKey,
+      deliveryKey,
+      status,
+      /* ⚠️ 只有接受才带平台回执 id（桥那一侧会拒"非接受却带回执 id"） */
+      ...(status === 'api_accepted' && messageId !== undefined ? { platformMessageId: messageId } : {}),
+      ...(typeof reason === 'string' && reason !== '' ? { reason } : {}),
+    })
+  }
+
+  /**
+   * 装上**只读群列表**处理器（ADR-156 / P3-I · `LIST_GROUPS`）。
+   *
+   * ⚠️ 生产外壳（`scripts/qq/chat.ts`）装的是 `async () => await client.listGroups()`：
+   *    那一条只发一个 `get_group_list`，**不发消息、不占发送队列、不做放行决定**。
+   * ⚠️ 不装 = 这条能力如实缺席（回 `group_task_group_list_handler_absent`）——
+   *    **绝不**回一个空数组冒充"机器人不在任何群"。
+   */
+  setGroupListHandler(
+    handler: () => Promise<readonly { readonly groupId: string; readonly groupName: string }[]>
+  ): void {
+    this.groupListHandler = handler
+  }
+
+  /**
+   * 把核心的一条 `LIST_GROUPS` **落地**，并把群列表（或具名失败码）写回核心。
+   *
+   * ```text
+   * 装上处理器       ⇒ 读一次群列表，原样回 `groups`
+   * 没装处理器       ⇒ 回 `group_task_group_list_handler_absent`（**不许**回空数组）
+   * 没有关联键       ⇒ **连回执都不回**（回执要按 requestId 对号；编一个键比沉默更误导）
+   * 处理器抛错       ⇒ 回该错误名（`onebot_not_connected` / `qq_group_list_too_large:201` …）
+   *                    不是具名码时回落 `group_task_group_list_unavailable`
+   * ```
+   *
+   * ⚠️ **失败关闭的方向**：宁可报"读不到"，也**不许**用空数组把它伪装成
+   *    "机器人一个群都不在" —— 那会让核心的群目标消歧得出 `group_task_group_not_found`
+   *    （一个**假的**事实），而主人会被告知"没有这个群"。
+   */
+  private async handleListGroups(response: BridgeWireResponse): Promise<void> {
+    const requestId = typeof response.requestId === 'string' ? response.requestId : ''
+    if (requestId.trim() === '') return
+    const handler = this.groupListHandler
+    if (handler === undefined) {
+      this.writeLine({
+        kind: 'LIST_GROUPS_RESULT',
+        requestId,
+        code: 'group_task_group_list_handler_absent',
+      })
+      return
+    }
+    try {
+      const groups = await handler()
+      /* 形状兜底：只留两个字段（核心侧还会再过一遍闭集校验，这里是第一道） */
+      this.writeLine({
+        kind: 'LIST_GROUPS_RESULT',
+        requestId,
+        groups: groups.map((entry) => ({ groupId: entry.groupId, groupName: entry.groupName })),
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : ''
+      /*
+       * 具名码透传（外壳/OneBot 那侧的失败码本身就是具名的，见 `listGroups()`）；
+       * 不是具名码（比如一个自由文本异常）⇒ 回落成桥那边的通用具名码，**不**把
+       * 任意文本当 reason 写进协议（协议里只放码）。
+       */
+      const code = /^[a-z0-9_:]{1,64}$/.test(message) ? message : 'group_task_group_list_unavailable'
+      this.writeLine({ kind: 'LIST_GROUPS_RESULT', requestId, code })
+    }
+  }
+
   private fail(code: string): void {
     /*
      * ⚠️ 2026-10-17（`D-C8` 门抓到的第二半）：`ready` 必须**跟着失败一起**拒。
@@ -506,7 +740,9 @@ export class LgStdioClient {
     return ids.length
   }
 
-  submit(request: { requestId: string; userText: string; images?: readonly import('../../kernel/contracts/image-input.ts').ImageInput[] }): Promise<BridgeWireResponse> {
+  submit(request: { requestId: string; userText: string; images?: readonly import('../../kernel/contracts/image-input.ts').ImageInput[]
+    platformFacts?: import('../../kernel/app/bridge/turn-bridge.ts').BridgeInboundPlatformFacts
+  }): Promise<BridgeWireResponse> {
     if (this.failure) return Promise.reject(this.failure)
     if (this.pending.has(request.requestId)) return Promise.reject(new Error('lg_bridge_duplicate_request'))
     return new Promise((done, reject) => {

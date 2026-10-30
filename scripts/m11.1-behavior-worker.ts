@@ -30,7 +30,6 @@ import { DEFAULT_CONTEXT_BUDGET } from '../src/kernel/recall/selector.ts'
 import { callModelText } from '../src/infrastructure/runtime/adapters.ts'
 import { applyResponseTruthPolicy } from '../src/kernel/app/memory/response-truth.ts'
 import { applyActionClaimGuard } from '../src/kernel/action/claim-guard.ts'
-import { applyCommitmentClaimGuard, commitmentWriteFacts } from '../src/kernel/app/goal/claim-guard.ts'
 import { applyExternalEvidenceReplyPolicy, searchFactOf } from '../src/kernel/action/external-evidence-reply.ts'
 import { applySearchNeedReplyPolicy, searchNeedDiagnosticsOf } from '../src/kernel/action/search-need-reply.ts'
 import { openM111ModelBatch } from './m11.1-model-batch.ts'
@@ -131,22 +130,7 @@ async function main() {
         const response = control ? { text: '（离线运行器控制回复，不用于行为评分）', durationMs: 0 } : await callModelText(h.runtime, prompt)
         finish?.('returned'); modelReturned = true
         const memoryTruth = applyResponseTruthPolicy({ result: turn.memoryWriteResult, replyText: response.text })
-        /*
-         * `LV2-D11` ②：**自主行为这一条回复链也接同一道守卫**。
-         * 这条链**没有目标回合**（`compileTurn` 不传 `runGoalTurn`）⇒ `goalWriteReality` 为空
-         * ⇒ `commitmentWritten = false`、`anythingWritten` 只由记忆写入决定 ——
-         * 于是"她主动说『记下了 / 说定了』而什么都没写"同样会被替换成如实句。
-         * ⚠️ 不接它，同一个缺陷会在**自主**那条路上留着（与 lv2-harness 同一条教训）。
-         */
-        const commitmentTruth = applyCommitmentClaimGuard({
-          ...commitmentWriteFacts(turn.goalWriteReality),
-          anythingWritten:
-            turn.memoryWriteResult?.kind === 'written' ||
-            turn.memoryWriteResult?.kind === 'already_applied' ||
-            (turn.goalWriteReality?.eventsCommitted ?? 0) > 0,
-          replyText: memoryTruth.replyText,
-        })
-        const actionTruth = applyActionClaimGuard({ results: turn.actionResults?.flatMap(row => row.result ? [row.result] : []), replyText: commitmentTruth.replyText })
+        const actionTruth = applyActionClaimGuard({ results: turn.actionResults?.flatMap(row => row.result ? [row.result] : []), replyText: memoryTruth.replyText })
         const search = searchFactOf(turn.actionResults)
         const evidenceTruth = applyExternalEvidenceReplyPolicy({ ...(search ? { search } : {}),
           ...(turn.externalEvidenceInContext ? { reality: turn.externalEvidenceInContext } : {}), replyText: actionTruth.replyText })

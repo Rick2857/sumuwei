@@ -1,7 +1,7 @@
 #!/bin/bash
 # 启用薄宿主并取配对读数（与替换前同一口径：PSS 曲线 90s + 空闲 CPU 采样）。
 set -u
-ENVF=/home/aiagent/project-lg/.env
+ENVF=/opt/project-lg/.env
 CORE='project-lg/src/main.ts'
 STAMP=$(date +%Y%m%dT%H%M%S)
 BK="/var/backups/thinhost-env-$STAMP"

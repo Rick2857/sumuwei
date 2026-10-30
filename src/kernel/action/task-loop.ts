@@ -59,7 +59,7 @@ import {
   selectExternalEvidenceContext,
   type ExternalEvidence,
 } from '../contracts/external-evidence.ts'
-import type { TaskAuthorization, TaskAuthorizationPort, TaskCloseReason } from './task-authorization.ts'
+import { applyReadRoots, pathWithinReadRoots, type TaskAuthorization, type TaskAuthorizationPort, type TaskCloseReason } from './task-authorization.ts'
 import {
   compareForecastStep,
   forecastDependenciesSatisfied,
@@ -69,6 +69,7 @@ import {
 } from './action-forecast.ts'
 import {
   verifyPlanRulesStillUsable,
+  type PlanRuleDependency,
   type RuleSnapshotPort,
 } from '../contracts/cognitive-collaboration.ts'
 import type { ActionForecast } from '../contracts/world-model.ts'
@@ -141,6 +142,39 @@ export interface TaskLoopOptions {
    * ⚠️ 不给 ⇒ 不做这个复核（**既有行为逐字不变**）。
    */
   ruleSnapshot?: RuleSnapshotPort
+  /**
+   * **P3-4：本轮已加载技能所声明的规则依赖**（可选；缺省不传 ⇒ 旧入口行为逐字不变）。
+   *
+   * ⚠️ 给了它（且给了 `ruleSnapshot`）⇒ 任务环在**每一步执行前**复核"这些依赖的规则
+   *    还合格吗"。规则在加载之后、动作之前失效（被撤回 / 挂起 / 换了版本）⇒
+   *    这一步**不执行**（`droppedReason: 'skill_rule_unusable'`），计划就此停下。
+   *
+   * ⚠️ 它**不**自己判断"哪些规则适用"：依赖由技能声明、资格由 P1/P2 判据算，
+   *    任务环只做"执行前复核"这一件事。
+   */
+  skillRuleDependencies?: readonly PlanRuleDependency[]
+  /**
+   * **P3-5b · G5：任务局部读根**（可选；缺省不传 ⇒ 旧入口与普通文件任务行为逐字不变）。
+   *
+   * ⚠️ 触发条件：这一步**真的成功加载了** `skillId`（受管目录里的 personal-library）⇒
+   *    程序把 `roots` 挂到**本次任务授权**上（只许收窄、不许扩大），
+   *    之后**每一步读动作执行前**都按读根判：落在根外 ⇒ 这一步**不执行**
+   *    （`droppedReason: 'read_outside_task_roots'`），计划停下。
+   *
+   * ⚠️ 为什么是"任务局部的读根"而不是"全局限制 `local.file.read`"：
+   *    产品里同一个能力也被普通文件任务用；全局收窄会**改掉无关任务的行为**。
+   *    这里只约束"受管 personal-library 参与的那一次任务"。
+   * ⚠️ 读根来自**装配层**（真实资料根），模型给的路径绕不过去：闸在任务环，不在规划器闭包。
+   */
+  readRootScope?: {
+    /** 参与后收窄读根的那个技能 id（当前 = `personal-library`）。 */
+    readonly skillId: string
+    /** 允许读取的根（真实路径）。 */
+    readonly roots: readonly string[]
+    /** 范围来源（诊断/审计用，例如 `main:p3-managed-personal-library`）。 */
+    readonly source: string
+  }
+
   gateway: ActionGateway
   registry: CapabilityRegistry
   authorizations: TaskAuthorizationPort
@@ -809,6 +843,61 @@ export async function runTask(
           }
         }
       }
+      /*
+       * ------------------------------------------------------------------
+       * **P3-5b · G5：任务局部读根闸**（可选；缺省 `authorization.readRoots === undefined`
+       * ⇒ 整段不跑，旧入口与普通文件任务行为逐字不变）
+       * ------------------------------------------------------------------
+       * ```text
+       * 只有**受管 personal-library 真的参与过这个任务**之后，装配层才会把它挂上；
+       * 挂上之后：读类动作（local.file.read / sandbox.file.read / document.read）
+       * 的路径参数落在读根之外 ⇒ **这一步不执行**（不是在执行后标记，而是执行前拒绝）。
+       * ```
+       * ⚠️ 闸在任务环 ⇒ 换路径、换规划、换计划都绕不过去；模型看不到第二个权威。
+       */
+      const taskReadRoots = authorization.readRoots
+      if (taskReadRoots !== undefined) {
+        const targetPath = typeof step.args.path === 'string' ? step.args.path : undefined
+        const readCapabilities = new Set(['local.file.read', 'sandbox.file.read', 'document.read'])
+        if (readCapabilities.has(step.capability) && targetPath !== undefined &&
+          !pathWithinReadRoots(targetPath, taskReadRoots.roots)) {
+          steps.push({ capability: step.capability, operation: step.operation, droppedReason: 'read_outside_task_roots' })
+          failureSummary.push(`${step.capability}.${step.operation}=read_outside_task_roots`)
+          batchFailed = true
+          break
+        }
+      }
+      /*
+       * ------------------------------------------------------------------
+       * **P3-4 技能规则依赖闸**（可选；缺省不挂 ⇒ 旧入口行为逐字不变）
+       * ------------------------------------------------------------------
+       * 本轮已加载的技能声明了规则依赖 ⇒ 它后续的**每一步**执行前都复核
+       * "这些规则**现在**还合格吗"。规则在加载之后、动作之前失效
+       * （被撤回 / 挂起 / 换了版本）⇒ 这一步**不执行**（具名拒用），计划停下。
+       *
+       * ⚠️ 与上面的 `simulation` / `forecast` 两处**不重叠**：那两处判的是"模型预测的依赖"，
+       *    这里判的是"**技能声明的**依赖"。三类来源各有各的具名拒绝原因。
+       */
+      if (options.skillRuleDependencies !== undefined && options.skillRuleDependencies.length > 0) {
+        /*
+         * ⚠️ 声明了依赖却**没有读面** ⇒ 失败关闭（与下面 `simulation_rule_unusable` 闸同口径）。
+         *    装配漏传 `ruleSnapshot` 不能让"依赖不合格就停"这条安全属性**无声消失**。
+         */
+        const verdict = options.ruleSnapshot === undefined
+          ? undefined
+          : await verifyPlanRulesStillUsable({
+              dependencies: options.skillRuleDependencies,
+              snapshot: options.ruleSnapshot,
+            }).catch(() => undefined)
+        if (verdict === undefined || !verdict.ok) {
+          steps.push({ capability: step.capability, operation: step.operation, droppedReason: 'skill_rule_unusable' })
+          failureSummary.push(`${step.capability}.${step.operation}=skill_rule_unusable`)
+          batchFailed = true
+          break
+        }
+      }
+
+
       // Selection depends on this rule even for a write without its own readback forecast.
       if (planned.simulation !== undefined && options.ruleSnapshot !== undefined) {
         const verdict = await verifyPlanRulesStillUsable({ snapshot: options.ruleSnapshot,
@@ -1044,6 +1133,28 @@ export async function runTask(
       }
       results.push({ request, result, rule: 'task_plan_step' })
       /*
+       * ------------------------------------------------------------------
+       * **P3-5b · G5：受管技能参与 ⇒ 把读根挂到本次任务授权上**
+       * ------------------------------------------------------------------
+       * 条件全部为真才挂：装配层给了 `readRootScope`、这一步**真的成功加载**了那个技能、
+       * 且这一次加载的**回执**指向受管发布引用（`workflow-skill:<id>@<v>#<指纹>`）。
+       * 挂载是**任务局部**的：之后的读动作才受约束，之前已完成的动作不受追溯影响；
+       * 缺省不给 `readRootScope` ⇒ 整段不跑（旧路径逐字不变）。
+       */
+      if (options.readRootScope !== undefined &&
+        request.capability === 'workflow.skill' && request.operation === 'load' &&
+        result.status === 'success' && request.arguments.skill === options.readRootScope.skillId) {
+        const managedRef = (result.evidence ?? []).some((evidence) =>
+          typeof evidence.ref === 'string' && evidence.ref.startsWith(`workflow-skill:${options.readRootScope!.skillId}@`))
+        if (managedRef) {
+          applyReadRoots(authorization, {
+            roots: options.readRootScope.roots,
+            source: options.readRootScope.source,
+          })
+        }
+      }
+      /*
+
        * F2 准备读：把**这一次真实成功的读**记成受信回执（路径 + 内容指纹）。
        * ⚠️ 写动作**不**产生回执；失败的读**不**产生回执；指纹来自 Gateway 产出的效果。
        */

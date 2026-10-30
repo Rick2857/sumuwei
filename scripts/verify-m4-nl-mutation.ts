@@ -476,6 +476,7 @@ const runDeterminismOnce = async (label: string): Promise<DeterminismReading> =>
   }
 }
 
+
 const scenarioL307a = async (): Promise<void> => {
   report.section('L3-07a 确定性（第一次：独立库 A）')
   const reading = await runDeterminismOnce('determinism-a')

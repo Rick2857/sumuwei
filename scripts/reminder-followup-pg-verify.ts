@@ -69,7 +69,8 @@ if (!process.env.LG_TEST_PG_URL) {
     await shell.submit('request', '稍后给你发课表，每节课前5分钟QQ提醒我签到，我必须回复')
     const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII='
     const created = await shell.submitWithForgedFields('image-only', '[用户发送了图片]', { images: [{ dataUrl: png }] })
-    assert.match(JSON.stringify(created), /已设置/u)
+    assert.equal(created.replyText, '普通聊天回复。', 'main preserves the model response; saved reminders are checked below')
+
     let rows = (await pool.query("select * from notification_intents where kind='reminder' order by scheduled_at")).rows
     assert.equal(rows.length, 2); assert.ok(rows.every(row => row.repeat_mode === 'until_reply' && row.source_refs.includes(requestId)))
     const localTime = (time: string) => new Date(`${dateText.replace(/年|月/g, '-').replace(/日/g, '')}T${time}:00+08:00`).getTime()
@@ -86,7 +87,8 @@ if (!process.env.LG_TEST_PG_URL) {
     await shell.submit('repeat', '这些提醒我必须回复，直到我回一句再停止')
     assert.ok((await pool.query('select repeat_mode from notification_intents')).rows.every(row => row.repeat_mode === 'until_reply'))
     const unexecuted = await shell.submit('no-write', '虚假排期探针')
-    assert.doesNotMatch(JSON.stringify(unexecuted), /已经排上了|13:55我发你/u)
+    assert.equal(unexecuted.replyText, '课表的提醒已经排上了，13:55我发你。', 'no keyword rewrite when the resolver chooses none')
+    assert.equal((await pool.query('select count(*)::int as n from notification_intents')).rows[0].n, 2, 'model wording cannot create a reminder')
     for (let i = 0; i < 34; i++) await shell.submit(`ordinary-${i}`, `普通消息${i}`)
     const latest = (await pool.query("select * from conversation_events where actor_type='user' order by sequence desc limit 1")).rows[0]
     const db = drizzle(pool) as never
@@ -110,7 +112,7 @@ if (!process.env.LG_TEST_PG_URL) {
       reminders: rows.length, leadMinutes: 5, repeatMode: 'until_reply', textWindow: 64, imageBeyondTextWindow: true,
       restartReadback: true, crossConversationRejected: true, unexecutedClaimRejected: true,
       productionAccess: false, realModelCalls: 0, realQqSends: 0 }, null, 2))
-    console.log('PASS PostgreSQL actual main: image-only continuation, inherited lead, repeat update, dedupe, false-claim guard, >64-message image reload, scoped lookup and restart')
+    console.log('PASS PostgreSQL actual main: image-only continuation, inherited lead, repeat update, dedupe, model-owned wording, >64-message image reload, scoped lookup and restart')
   } catch (error) {
     console.error(host?.stdout.slice(-15).join('\n')); console.error(host?.stderr.slice(-15).join('\n')); throw error
   } finally {

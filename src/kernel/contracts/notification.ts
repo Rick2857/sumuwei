@@ -32,9 +32,9 @@ import { KernelError, type CharacterId, type Timestamp } from './ids.ts'
 // ---------------------------------------------------------------------------
 
 /** 触发种类（`D03`）：**两类同等优先**，但选择权限不同 */
-export type NotificationKind = 'reminder' | 'care'
+export type NotificationKind = 'reminder' | 'care' | 'relay'
 
-export const NOTIFICATION_KINDS: readonly NotificationKind[] = ['reminder', 'care']
+export const NOTIFICATION_KINDS: readonly NotificationKind[] = ['reminder', 'care', 'relay']
 
 /**
  * 意图的状态。
@@ -613,6 +613,7 @@ export const PROACTIVE_REMINDER_PROCESSOR = 'qq-proactive-reminder'
 export const PROACTIVE_CARE_PROCESSOR = 'qq-proactive-care'
 
 export function processorForKind(kind: NotificationKind): string {
+  if (kind === 'relay') return 'qq-relay-task'
   return kind === 'reminder' ? PROACTIVE_REMINDER_PROCESSOR : PROACTIVE_CARE_PROCESSOR
 }
 

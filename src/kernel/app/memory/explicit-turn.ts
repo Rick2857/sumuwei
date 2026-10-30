@@ -56,6 +56,7 @@ import type {
   ExplicitMemoryService,
 } from './explicit-service.ts'
 import type { EntityRef, ConversationEventId } from '../../contracts/index.ts'
+import type { SemanticMemoryCommand } from '../semantic-entry.ts'
 
 // ---------------------------------------------------------------------------
 // 形状
@@ -80,6 +81,7 @@ export interface ExplicitMemoryTurnEvent {
 }
 
 export interface ExplicitMemoryTurnRequest {
+  semanticCommand?: SemanticMemoryCommand
   /** 记忆的拥有者（那条记忆存在于谁的记忆里） */
   owner: EntityRef
   /** 这句话讲的是谁 */
@@ -181,8 +183,11 @@ export function createExplicitMemoryTurnPort(
        */
       if (request.event.actorType !== 'user') return undefined
 
-      const recent = await options.readIntentContext?.(request)
-      const intent = await detectExplicitIntentFromEvent(detector, request.event, recent)
+      const recent = request.semanticCommand ? undefined : await options.readIntentContext?.(request)
+      const intent = request.semanticCommand ? { kind: request.semanticCommand.kind, payload: request.semanticCommand.payload,
+        sourceText: request.event.content, detectedBy: 'classifier' as const, matched: 'unified-semantic-entry' }
+        : await detectExplicitIntentFromEvent(detector, request.event, recent)
+
       if (intent === undefined) return undefined
 
       const outcome = await options.service.handle({
@@ -203,6 +208,7 @@ export function createExplicitMemoryTurnPort(
          * （显式服务没人调用、生产内核没注册 MEMORY_*、后台抽取没有消费者）。
          */
         hints: targetHintsFrom(intent),
+        ...(request.semanticCommand?.targetId ? { targetMemoryId: request.semanticCommand.targetId } : {}),
       })
 
       return translate(outcome, request.event.content)

@@ -66,6 +66,7 @@ export type TraceStepKind =
    */
   | 'observation_adapt'
   | 'identity_load'
+  | 'semantic_entry'
   | 'context_compile'
   | 'model_generate'
   | 'output_validate'

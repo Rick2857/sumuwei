@@ -1,4 +1,5 @@
 import type { CapabilityDefinition } from './capability-registry.ts'
+import { createProjectKnowledgeDefinitions } from './project-knowledge-capabilities.ts'
 
 export const WORKFLOW_SKILL = 'workflow.skill'
 export const WORKFLOW_SKILL_PERMISSION = 'workflow:skill'
@@ -18,6 +19,7 @@ export interface WorkflowSkillDefinition {
 
 export function createLearningCapabilityDefinitions(): readonly CapabilityDefinition[] {
   return [
+    ...createProjectKnowledgeDefinitions(),
     {
       id: PERSONAL_LIBRARY_SEARCH,
       version: 'library.search@1',

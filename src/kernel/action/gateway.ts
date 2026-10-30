@@ -29,6 +29,7 @@ import { KernelError } from '../contracts/ids.ts'
 import type { ActionRequest, ActionTarget, RiskLevel } from './action-request.ts'
 import type { ActionEffect, ActionEvidence } from './action-request.ts'
 import type { ActionResult, ActionStatus } from './action-result.ts'
+import type { GatewayCapabilityFacts, ObservedCapabilityResult } from './capability-facts.ts'
 import type { CapabilityRegistry, OperationDefinition } from './capability-registry.ts'
 import type { ActionFailure } from './errors.ts'
 import { ActionFailureError, actionFailure, normalizeAdapterError } from './errors.ts'
@@ -173,6 +174,8 @@ export interface ActionInvocationContext {
 }
 
 export interface ActionGateway {
+  /** Read-only current instance facts; optional for existing injected/test gateways. */
+  readCapabilityFacts?(): GatewayCapabilityFacts
   execute(
     characterId: CharacterId,
     request: ActionRequest,
@@ -881,8 +884,20 @@ export function createActionGateway(options: ActionGatewayOptions): ActionGatewa
     }
   }
 
+  const lastResults = new Map<string, ObservedCapabilityResult>()
   return {
-    execute,
+    async execute(characterId, request, invocation) {
+      const result = await execute(characterId, request, invocation)
+      if (options.registry.has(result.capability)) lastResults.set(result.capability, {
+        actionId: String(result.actionId), operation: result.operation, status: result.status,
+        accepted: result.accepted, executed: result.executed, idempotentReplay: result.idempotentReplay === true,
+        observedAt: now(),
+      })
+      return result
+    },
+    readCapabilityFacts: () => ({ adapterIds: [...adapterByCapability.keys()],
+      grantedPermissions: [...options.grantedPermissions], maxRiskLevel: options.maxRiskLevel, dryRun: options.dryRun === true,
+      lastResults: Object.fromEntries([...lastResults].map(([id, result]) => [id, { ...result }])) }),
     evaluate,
     /*
      * 第二批：**转发**给同一个 `options.resolveTarget`（不是第二份实现）。

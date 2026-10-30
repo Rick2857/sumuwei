@@ -172,15 +172,41 @@ export interface BridgeSessionLike {
    * ⚠️ 用类型 import 而不是值 import（本文件对整个契约层都是类型依赖）。
    */
   turnScope?: import('../../kernel/contracts/scope.ts').ScopeContext,
-  groupContext?: readonly import('../../kernel/app/bridge/turn-bridge.ts').BridgeGroupContextLine[]): Promise<string>
+  groupContext?: readonly import('../../kernel/app/bridge/turn-bridge.ts').BridgeGroupContextLine[],
+  /**
+   * ★ ADR-156 / P3-H：本轮入站的**受信幂等键**（`qq:<bot>:group:<group>:<message>`）——
+   * **附加式**参数，只为让群任务接管轮拿到"这条回复属于哪一条入站"。
+   *
+   * ```text
+   * 为什么必须逐轮传、不能做成会话字段：
+   *   同一会话（= 同一人 + 同一群）里可以**并发**进来两条入站；做成常驻字段
+   *   就会让第二条的 requestId 盖掉第一条 ⇒ 两条入站的额度关联串在一起。
+   *   ⇒ 只在本轮有效，轮次一结束就没有任何地方还留着它。
+   * ⚠️ 旧调用点**不传** ⇒ `undefined` ⇒ 派生函数失败关闭 ⇒ `inboundMessageId` 保持 `null`
+   *    ⇒ **逐字旧行为**（per-inbound 维度按 0 计，与本批之前完全一样）。
+   * ⚠️ 它**不是**授权，也**不能**当消息 id 用：核心只把它**校验后**当关联键（见
+   *    `deriveInboundMessageId`）。引用目标仍由外壳自持（本批不动）。
+   * ```
+   */
+  turnRequestId?: string): Promise<string>
   lastTurnIdentity():
     | {
         replyId: string
         traceId: string
         domainEventIds: readonly string[]
+        knowledgeAppendix?: string
         expression?: import('../../kernel/contracts/expressive-speech.ts').SpeechExpression
         /** post-Lv2 / P1：QQ 媒介选择（开关关 / 非 QQ ⇒ 缺席 ⇒ 旧行为） */
         media?: import('../../kernel/contracts/qq-media-reply.ts').QqMediaSelection
+        /** ADR-156 / P3-B：群任务接管轮的任务身份（可选；缺席 ⇒ 外壳按旧静态名单） */
+        groupTaskReply?: import('../../kernel/app/bridge/turn-bridge.ts').BridgeSubmitResult['groupTaskReply']
+        /**
+         * ADR-156 / P3-G：接管轮的回复**已经走派发通道发出**时的平台三态（可选）。
+         *
+         * ⚠️ 出现 ⇒ 桥会把 `replyText` 从 `TURN_RESULT` 里去掉（单一发送出口）。
+         * ⚠️ 缺席 ⇒ 旧路径：外壳照旧从 `replyText` 发送（逐字旧行为）。
+         */
+        groupTaskDispatch?: import('../../kernel/app/bridge/turn-bridge.ts').BridgeSubmitResult['groupTaskDispatch']
         /** post-Lv2 / P2：语音回复的伴随来源附录（可选） */
         mediaAppendix?: string
         streamStatus?: import('../../kernel/app/bridge/turn-bridge.ts').BridgeSubmitResult['streamStatus']
@@ -348,7 +374,7 @@ export function sessionHost(
           },
           ...(registry !== undefined ? { signal: registry.signalFor(input.requestId),
             onModelStart: () => registry.markModelStarted(input.requestId) } : {}),
-        }, input.images, turnScope, input.groupContext)
+        }, input.images, turnScope, input.groupContext, input.requestId)
       } finally { registry?.release(input.requestId) }
       const identity = selectedSession.lastTurnIdentity()
       if (identity === undefined) {
@@ -387,9 +413,21 @@ export function sessionHost(
         replyId: identity.replyId,
         traceId: identity.traceId,
         domainEventIds: identity.domainEventIds,
+        ...(identity.knowledgeAppendix ? { knowledgeAppendix: identity.knowledgeAppendix } : {}),
         ...(identity.expression !== undefined ? { expression: identity.expression } : {}),
         /* post-Lv2 / P1：媒介选择随 host 结果交给桥（缺席 ⇒ 旧行为逐字不变） */
         ...(identity.media !== undefined ? { media: identity.media } : {}),
+        /*
+         * ADR-156 / P3-B：群任务接管轮的任务身份随 host 结果交给桥（再回给 QQ 外壳）。
+         * ⚠️ 缺席 ⇒ 外壳按旧静态群名单检查 ⇒ 旧行为逐字不变。
+         */
+        ...(identity.groupTaskReply !== undefined ? { groupTaskReply: identity.groupTaskReply } : {}),
+        /*
+         * ADR-156 / P3-G：这一轮的正文**已经走派发通道发出** ⇒ 把平台三态交给桥。
+         * ⚠️ 桥见到它就不再放 `replyText`（单一发送出口）；
+         *    缺席 ⇒ 本字段不出现 ⇒ 旧路径逐字不变。
+         */
+        ...(identity.groupTaskDispatch !== undefined ? { groupTaskDispatch: identity.groupTaskDispatch } : {}),
         /* post-Lv2 / P2：语音回复的伴随附录随 host 结果交给桥 */
         ...(identity.mediaAppendix !== undefined ? { mediaAppendix: identity.mediaAppendix } : {}),
         /*

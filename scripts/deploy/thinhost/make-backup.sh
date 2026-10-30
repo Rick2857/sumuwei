@@ -2,7 +2,7 @@
 # 建立**可回滚**基线（root 运行，写 /var/backups —— artifacts/deploy 属 root，aiagent 写不了）。
 # ⚠️ 上一轮 deploy 的备份失败但替换已发生 ⇒ 这一步是补建，不是走过场。
 set -u
-REPO=/home/aiagent/project-lg
+REPO=/opt/project-lg
 STAMP=$(date +%Y%m%dT%H%M%S)
 BK="/var/backups/thinhost-$STAMP"
 

@@ -68,7 +68,6 @@ import { TurnGateway } from '../src/kernel/app/turn-gateway.ts'
 import { DEFAULT_CONTEXT_BUDGET } from '../src/kernel/recall/selector.ts'
 import { applyResponseTruthPolicy } from '../src/kernel/app/memory/response-truth.ts'
 import { applyActionClaimGuard } from '../src/kernel/action/claim-guard.ts'
-import { applyCommitmentClaimGuard, commitmentWriteFacts } from '../src/kernel/app/goal/claim-guard.ts'
 import { applyExternalEvidenceReplyPolicy, searchFactOf } from '../src/kernel/action/external-evidence-reply.ts'
 import { applySearchNeedReplyPolicy, searchNeedDiagnosticsOf } from '../src/kernel/action/search-need-reply.ts'
 import { createOpenAiGoalUnderstandingProvider } from '../src/infrastructure/model/openai-goal-understanding.ts'
@@ -734,7 +733,7 @@ export async function createLv2CaseEnvironment(input: {
     let reply = ''
     let modelDurationMs = 0
     let completed = false
-    let commitmentClaimCorrected = false
+    const commitmentClaimCorrected = false
     let slowPathReading: Lv2SlowPathReading | undefined
     try {
       let response: { text: string; durationMs: number }
@@ -745,22 +744,9 @@ export async function createLv2CaseEnvironment(input: {
         response = await callModelText(h.runtime, prompt)
       }
       const memoryTruth = applyResponseTruthPolicy({ result: turn.memoryWriteResult, replyText: response.text })
-      /*
-       * `LV2-D11` ②：**目标/承诺守卫也在链上**（与 `main.ts` 同序：记忆 → 承诺 → 动作 → 证据）。
-       * ⚠️ 不在夹具里接它，下一代读数就**测不到**这个修复（夹具与生产不同的老坑）。
-       */
-      const commitmentTruth = applyCommitmentClaimGuard({
-        ...commitmentWriteFacts(turn.goalWriteReality),
-        anythingWritten:
-          turn.memoryWriteResult?.kind === 'written' ||
-          turn.memoryWriteResult?.kind === 'already_applied' ||
-          (turn.goalWriteReality?.eventsCommitted ?? 0) > 0,
-        replyText: memoryTruth.replyText,
-      })
-      commitmentClaimCorrected = commitmentTruth.corrected
       const actionTruth = applyActionClaimGuard({
         results: turn.actionResults?.flatMap((row) => (row.result ? [row.result] : [])) ?? [],
-        replyText: commitmentTruth.replyText,
+        replyText: memoryTruth.replyText,
       })
       const search = searchFactOf(turn.actionResults)
       const evidenceTruth = applyExternalEvidenceReplyPolicy({

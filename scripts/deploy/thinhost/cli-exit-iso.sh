@@ -17,7 +17,7 @@ docker exec "$C" psql -U "$SU" -d postgres -tAc "CREATE DATABASE $DB;" >/dev/nul
 echo "created isolated db: $DB"
 trap 'docker exec "$C" psql -U "$SU" -d postgres -tAc "DROP DATABASE IF EXISTS $DB;" >/dev/null 2>&1; echo "dropped $DB"' EXIT
 
-cd /home/aiagent/project-lg || exit 1
+cd /opt/project-lg || exit 1
 export CI=1
 export CHARACTER_DB_BACKEND=postgres
 export LG_PG_EXPECT_DATABASE=$DB
@@ -30,7 +30,7 @@ export PROJECT_LG_SANDBOX="$DB"
 #    薄宿主按设计**不在启动期执行 DDL**（`thin_host_refuses_startup_ddl`），
 #    所以顺序必须是"先建表 → 再用薄宿主跑 CLI"。
 echo "--- step 1: build schema with legacy host ---"
-/usr/bin/node --import file:///home/aiagent/project-lg/node_modules/tsx/dist/loader.mjs \
+/usr/bin/node --import file:///opt/project-lg/node_modules/tsx/dist/loader.mjs \
   scripts/thinhost-ddl-decoupling-measure.ts --phase=warm > /tmp/cli-exit-warm.log 2>&1
 echo "warm exit=$?  (tables:)"
 docker exec "$C" psql -U "$SU" -d "$DB" -tAc \
@@ -40,7 +40,7 @@ echo
 echo "--- step 2: run CLI exit gate (thin host) ---"
 
 OUT=/tmp/cli-exit-iso.log
-/usr/bin/node --import file:///home/aiagent/project-lg/node_modules/tsx/dist/loader.mjs \
+/usr/bin/node --import file:///opt/project-lg/node_modules/tsx/dist/loader.mjs \
   scripts/verify-cli-exit-latency.ts > "$OUT" 2>&1
 RC=$?
 grep -a -E '(✅|❌|CLI 退出延迟门)' "$OUT"

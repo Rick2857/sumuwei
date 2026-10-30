@@ -6,6 +6,7 @@ export interface QqPrivateConfig {
   token: string
   multiUserEnabled?: boolean
   allowedGroupIds?: readonly string[]
+  groupBurstMs?: number
 }
 
 export function qqId(value: unknown): string | undefined {
@@ -25,10 +26,14 @@ export function readQqPrivateConfig(env: NodeJS.ProcessEnv): QqPrivateConfig {
   const token = env.QQ_ONEBOT_ACCESS_TOKEN ?? ''
   if (!/^[a-zA-Z0-9_-]{24,}$/.test(token)) throw new Error('QQ_ONEBOT_ACCESS_TOKEN requires at least 24 safe characters')
   const multiUserEnabled = env.QQ_MULTI_USER_ENABLED === 'true'
+  const groupBurstMs = Number(env.QQ_GROUP_BURST_MS ?? 300)
+  if (!Number.isInteger(groupBurstMs) || groupBurstMs < 0 || groupBurstMs > 1000) {
+    throw new Error('QQ_GROUP_BURST_MS must be an integer from 0 to 1000')
+  }
   const allowedGroupIds = (env.QQ_ALLOWED_GROUP_IDS ?? '').split(/[,\s/]+/).filter(Boolean)
   if (allowedGroupIds.some(id => qqId(id) === undefined) || (multiUserEnabled && allowedGroupIds.length === 0)) {
     throw new Error('QQ multi-user mode requires valid QQ_ALLOWED_GROUP_IDS')
   }
-  return { ownerId, botId, wsUrl: url.href, token,
+  return { ownerId, botId, wsUrl: url.href, token, groupBurstMs,
     ...(multiUserEnabled ? { multiUserEnabled, allowedGroupIds: [...new Set(allowedGroupIds)] } : {}) }
 }

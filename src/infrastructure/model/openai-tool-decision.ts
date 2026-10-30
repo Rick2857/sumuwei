@@ -186,7 +186,8 @@ export function createOpenAiToolDecisionPort(
             temperature: 0,
             response_format: { type: 'json_object' },
             messages: [
-              { role: 'system', content: buildToolDecisionInstruction() },
+              { role: 'system', content: buildToolDecisionInstruction() + (input.allowedCapabilities.some(id => id === 'project.search' || id === 'self.capabilities')
+                ? '\n项目自查模式：为了准确回答项目机制或当前能力问题，可以自行调用目录中已授权的 project.search / self.capabilities；这类只读查询不受上述“询问一律直接回答”的限制。是否需要查由你根据问题判断，不能把旧自述当当前接口事实。' : '') },
               { role: 'user', content: buildToolDecisionUserMessage(input) },
             ],
           }),

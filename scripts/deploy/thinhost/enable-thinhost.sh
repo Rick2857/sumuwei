@@ -2,7 +2,7 @@
 # 启用薄宿主：追加 CHARACTER_THIN_HOST=on 到 .env，重启，取配对读数。
 # 纪律：先备份 .env（**失败即中止**），只追加不改其它行，回滚 = 删掉那一行。
 set -u
-REPO=/home/aiagent/project-lg
+REPO=/opt/project-lg
 ENVF="$REPO/.env"
 STAMP=$(date +%Y%m%dT%H%M%S)
 BK="/var/backups/thinhost-env-$STAMP"

@@ -38,7 +38,8 @@ export const WORLD_MODEL_CONTRACT_VERSION = 'world-model-contract@1'
 /**
  * 领域闭集。
  *
- * 此契约限定工具任务和反思；可选故事功能使用独立契约。
+ * ⚠️ `story` **不在**这里：S8 方向已于 2026-10-20 取消（ADR-147）。
+ *    加它回来 = 让一个已退役的方向看起来还有落点。
  */
 export const WORLD_MODEL_DOMAINS = ['tool_task', 'reflection'] as const
 export type WorldModelDomain = (typeof WORLD_MODEL_DOMAINS)[number]

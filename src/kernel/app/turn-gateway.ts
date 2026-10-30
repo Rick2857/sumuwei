@@ -23,6 +23,7 @@
  */
 
 import { createWorkflowSkillProvider } from '../context/workflow-skill-section.ts'
+import { createProjectKnowledgeProvider } from '../context/project-knowledge-section.ts'
 import { renderDesktopCapabilityFacts, type DesktopCapabilityAvailability } from '../action/desktop-capability.ts'
 import { IMAGE_INPUT_LIMITS, type CheckedImageInput } from '../contracts/image-input.ts'
 import {
@@ -86,6 +87,8 @@ import { createChatChannelProvider } from '../context/chat-channel-section.ts'
 import { createQqMediaReplyProvider } from '../context/qq-media-reply-section.ts'
 import type { ChatChannel } from '../contracts/chat-channel.ts'
 import { reminderFactText, type ReminderTurnResult } from './reminder-turn.ts'
+import { semanticDomainSelected, semanticEntryFact, type SemanticDomain, type SemanticEntryInput, type SemanticEntryResult, type SemanticToolContext } from './semantic-entry.ts'
+import { relayFactText, type RelayResult } from './relay-turn.ts'
 /* M9.1 / ADR-072 D16：撤销集结果形状（compute 回调的返回契约） */
 import type { WithdrawnSetResult } from '../contracts/withdrawn-evidence.ts'
 import { DEFAULT_CONTEXT_BUDGET, type ContextBudget } from '../recall/selector.ts'
@@ -326,10 +329,22 @@ export async function runDiagnosticProcessor(input: {
 // ---------------------------------------------------------------------------
 
 export interface TurnGatewayOptions {
+  projectSelfKnowledge?: { project: boolean; self: boolean }
   /** 与工具目录同源的桌面开关和运行时状态；不传时保持既有 prompt。 */
   desktopCapabilities?: DesktopCapabilityAvailability
   /** Trusted packaged procedures; only successful workflow.skill loads select them. */
   workflowSkills?: readonly import('../action/learning-capabilities.ts').WorkflowSkillDefinition[]
+  /**
+   * P3（`Cognitive-Capability-P3-Execution-Plan-2026-10-28.md`）：
+   * 受信技能 section 的**目录管理版**工厂。**不传 ⇒ 与 P3 之前逐字相同**
+   * （走 `workflowSkills` 的旧 provider）。
+   *
+   * ⚠️ 为什么是工厂而不是 provider 实例：section 必须由**本轮真实动作结果**
+   *    决定（哪一次 load 成功、回执是哪个版本），而 compileTurn 才知道那份结果。
+   */
+  workflowSkillProvider?: (
+    outcomes: readonly ActionTurnResult[]
+  ) => import('../contracts/context.ts').ContextSectionProvider
   kernel: KernelHandle
   definition: CharacterDefinition
   /**
@@ -406,6 +421,9 @@ export interface TurnGatewayOptions {
    * 开关读了 env 却没 gate 任何东西，服务写完了却没人调。
    */
   memoryWriter?: ExplicitMemoryTurnPort
+  semanticEntry?: (input: { event: ConversationEvent; imageRefs: readonly string[]; tools?: SemanticToolContext;
+    materials?: SemanticEntryInput['materials']; priorDomains?: readonly SemanticDomain[];
+    conversationContext?: SemanticEntryInput['conversationContext'] }) => Promise<SemanticEntryResult>
   /** M4：显式记忆总开关（缺省 false；装配层从 flags 传入） */
   memoryExplicitEnabled?: boolean
   /**
@@ -485,6 +503,9 @@ export interface TelemetryMirror {
 }
 
 export interface IncomingTurn {
+  semanticEntry?: SemanticEntryResult
+  conversationContext?: SemanticEntryInput['conversationContext']
+  relayResult?: RelayResult
   reminderResult?: ReminderTurnResult
   goalFact?: import('../context/goal-sections.ts').GoalFactView
   userEvent?: ConversationEvent
@@ -727,6 +748,26 @@ export interface CompileTurnInput {
   loadImageHistory?: () => Promise<ConversationLine[]>
   runReminderTurn?: (recent: readonly ConversationLine[], withdrawn?: Pick<WithdrawnSetResult, 'ok' | 'withdrawnEventIds'>,
     materials?: readonly import('./reminder/plan.ts').ReminderMaterial[]) => Promise<ReminderTurnResult>
+  runRelayTurn?: (recent: readonly ConversationLine[], withdrawn?: Pick<WithdrawnSetResult, 'ok' | 'withdrawnEventIds'>) => Promise<RelayResult>
+  loadRelayDeliveryContext?: () => Promise<{ text: string; sourceRefs: string[] } | undefined>
+  /**
+   * ADR-156：群任务域。跑完把**真实结局**（含发送派发读数）渲染成事实文本。
+   *
+   * ⚠️ 返回值里的 `factText` 是唯一被注入的内容：调用方拼好"平台接受≠看到"的口径，
+   *    Gateway 不自己改写任务事实。
+   */
+  runGroupTaskTurn?: (recent: readonly ConversationLine[], withdrawn?: Pick<WithdrawnSetResult, 'ok' | 'withdrawnEventIds'>,
+    draft?: import('../contracts/qq-group-task.ts').GroupTaskDraft) =>
+    Promise<{ result: import('../contracts/qq-group-task.ts').GroupTaskTurnResult; factText: string }>
+  loadGroupTaskContext?: () => Promise<{ text: string; sourceRefs: string[] } | undefined>
+  /**
+   * ADR-156 / P3-A：**群任务接管轮**的任务上下文（注入"本轮由任务接管、默认规则退后"）。
+   *
+   * ⚠️ 与 `loadGroupTaskContext`（主人私聊里的"最近群任务"记录）是**两件事**：
+   *    这一条只在**群入站被任务路由接管**的那一轮出现。
+   * ⚠️ 缺席 ⇒ 这一轮不是任务接管轮 ⇒ 逐字旧行为。
+   */
+  loadGroupTaskInboundContext?: () => Promise<{ text: string; sourceRefs: string[] } | undefined>
   loadReminderDeliveryContext?: (withdrawn?: Pick<WithdrawnSetResult, 'ok' | 'withdrawnEventIds'>) =>
     Promise<{ text: string; sourceRefs: string[] } | undefined>
   turn: IncomingTurn
@@ -877,6 +918,7 @@ export interface CompileTurnInput {
    *    **没有正文**（`GoalTraceReadings` 的类型里本来就没有正文字段）。
    */
   runGoalTurn?: ((info: {
+    readonly semanticDraft?: import('../contracts/goal-proposal.ts').GoalProposalDraft
     /** 本轮原话（唯一的文本来源） */
     readonly currentInput: string
     /** 本轮那条已落库的用户事件（可为空串：合成轮次没有事件） */
@@ -1062,7 +1104,7 @@ export class TurnGateway {
    */
   async beginTurn(
     userText: string,
-    decisionContext?: { decisionLines: readonly string[] },
+    decisionContext?: { decisionLines: readonly string[]; conversationContext?: SemanticEntryInput['conversationContext'] },
     imageRefs?: readonly string[]
   ): Promise<IncomingTurn> {
     const conversationSequence = this.options.conversationSequence()
@@ -1203,16 +1245,29 @@ export class TurnGateway {
      *      在记忆写入上"静默失败"就是"她撒谎"。
      *   3. 结果挂到 `IncomingTurn` 上，由 `compileTurn` 渲染成 section
      */
+    let semanticEntry: SemanticEntryResult | undefined
+    if (!this.options.dryRun && this.options.semanticEntry && userEvent) {
+      try { semanticEntry = await this.options.semanticEntry({ event: userEvent, imageRefs: imageRefs ?? [],
+        ...(decisionContext?.conversationContext === undefined ? {} : { conversationContext: decisionContext.conversationContext }),
+        tools: this.options.actionWriter?.semanticContext?.(String(this.options.recorder.conversationId)) }) }
+      catch { semanticEntry = { kind: 'failed', code: 'context_unavailable' } }
+      await this.appendStep(traceId, { kind: 'semantic_entry', label: '统一语义操作入口', status: semanticEntry.kind === 'failed' ? 'failed' : 'ok',
+        startedAt: Date.now(), finishedAt: Date.now(), attributes: { outcome: semanticEntry.kind,
+          domains: semanticEntry.kind === 'planned' ? Object.keys(semanticEntry.plan).join(',') : '',
+          ...(semanticEntry.kind === 'failed' ? { code: semanticEntry.code } : {}) } })
+    }
     let memoryWriteResult: ExplicitMemoryTurnResult | undefined
     if (
       !this.options.dryRun &&
       this.options.memoryWriter !== undefined &&
       this.options.memoryExplicitEnabled !== false &&
+      semanticDomainSelected(semanticEntry, 'memory') &&
       userEvent !== undefined
     ) {
       const writeStartedAt = Date.now()
       try {
         memoryWriteResult = await this.options.memoryWriter.handleTurn({
+          ...(semanticEntry?.kind === 'planned' && semanticEntry.plan.memory ? { semanticCommand: semanticEntry.plan.memory } : {}),
           owner: entityRef('character', this.options.kernel.characterId),
           speaker: entityRef('user', this.options.userId ?? String(userEvent.actorId ?? 'user')),
           event: {
@@ -1336,11 +1391,13 @@ export class TurnGateway {
       !this.options.dryRun &&
       this.options.actionWriter !== undefined &&
       this.options.actionEnabled !== false &&
+      semanticDomainSelected(semanticEntry, 'tools') &&
       userEvent !== undefined
     ) {
       const actionStartedAt = Date.now()
       try {
         const outcome = await this.options.actionWriter.handleTurn({
+          ...(semanticEntry?.kind === 'planned' ? { semanticDecision: semanticEntry.plan.tools } : {}),
           characterId: this.options.kernel.characterId,
           traceId,
           text: String(userEvent.content ?? ''),
@@ -1474,6 +1531,8 @@ export class TurnGateway {
 
     return {
       userEvent,
+      ...(semanticEntry ? { semanticEntry } : {}),
+      ...(decisionContext?.conversationContext === undefined ? {} : { conversationContext: decisionContext.conversationContext }),
       assistantSequence,
       conversationSequence,
       traceId,
@@ -1651,6 +1710,7 @@ export class TurnGateway {
      * 是两种不同的承诺，合起来会让模型无法只承认其中一件。
      */
     const extraProviders = input.expressiveSpeech ? [createExpressiveSpeechProvider()] : []
+    if (this.options.projectSelfKnowledge) extraProviders.push(createProjectKnowledgeProvider(this.options.projectSelfKnowledge))
     if (input.qqMediaReply !== undefined && input.qqMediaReply.voiceAvailable) extraProviders.push(createQqMediaReplyProvider(input.qqMediaReply.delivery))
     if (input.chatChannel) extraProviders.push(createChatChannelProvider(input.chatChannel))
     if (input.turn.clarificationQuestion !== undefined) {
@@ -1703,7 +1763,87 @@ export class TurnGateway {
       items: input.turn.turnContent ?? [],
       budgetTokens: contextBudget.turnContentTokens,
     })
-    const reminder = await input.runReminderTurn?.(recentLines, withdrawnForRecall, [
+    // A successful read can reveal scheduling facts absent at the initial entry.
+    // Reuse the same interpreter once, offering only domains not already proposed.
+    let semanticContinuation: SemanticEntryResult | undefined
+    if (input.turn.semanticEntry?.kind === 'planned' && input.turn.semanticEntry.plan.tools
+      && turnContentSelection.selected.length && this.options.semanticEntry && input.turn.userEvent) {
+      const priorDomains = Object.keys(input.turn.semanticEntry.plan) as SemanticDomain[]
+      try { semanticContinuation = await this.options.semanticEntry({ event: input.turn.userEvent, imageRefs: [], priorDomains,
+        ...(input.turn.conversationContext === undefined ? {} : { conversationContext: input.turn.conversationContext }),
+        materials: turnContentSelection.selected.map(({ item }) => ({ id: item.contentId, text: item.text,
+          createdAt: input.turn.userEvent!.createdAt, truncated: item.scope.truncated })) }) }
+      catch { semanticContinuation = { kind: 'failed', code: 'context_unavailable' } }
+      if (semanticContinuation.kind === 'planned') Object.assign(input.turn.semanticEntry.plan, semanticContinuation.plan)
+      await this.appendStep(input.turn.traceId, { kind: 'semantic_entry', label: '读取内容后继续统一理解',
+        status: semanticContinuation.kind === 'failed' ? 'failed' : 'ok', startedAt: Date.now(), finishedAt: Date.now(),
+        attributes: { outcome: semanticContinuation.kind, phase: 'after_read',
+          domains: semanticContinuation.kind === 'planned' ? Object.keys(semanticContinuation.plan).join(',') : '' } })
+    }
+    if (input.turn.semanticEntry) extraProviders.push({ name: 'semantic-entry', async provide() {
+      return [{ id: 'semantic-entry', kind: 'instruction', priority: 98, droppable: false,
+        content: semanticEntryFact(input.turn.semanticEntry!) + (semanticContinuation ? `\n读取内容后的理解：\n${semanticEntryFact(semanticContinuation)}` : ''), sourceRefs: [String(input.turn.userEvent?.id ?? '')] }]
+    } })
+    const relay = semanticDomainSelected(input.turn.semanticEntry, 'relay') ? await input.runRelayTurn?.(recentLines, withdrawnForRecall) : undefined
+    input.turn.relayResult = relay
+    const relayContent = relayFactText(relay)
+    if (relayContent) extraProviders.push({ name: 'relay-result', async provide() {
+      return [{ id: 'relay-result', kind: 'instruction', priority: 98, content: relayContent, droppable: false,
+        sourceRefs: [String(input.turn.userEvent?.id ?? '')] }]
+    } })
+    let relayDelivery: { text: string; sourceRefs: string[] } | undefined
+    try { relayDelivery = await input.loadRelayDeliveryContext?.() }
+    catch { relayDelivery = { text: '转告任务记录暂时无法读取，不能猜测投递状态。', sourceRefs: [] } }
+    if (relayDelivery) extraProviders.push({ name: 'relay-delivery', async provide() {
+      return [{ id: 'relay-delivery', kind: 'instruction', priority: 98, content: relayDelivery!.text,
+        droppable: false, sourceRefs: relayDelivery!.sourceRefs }]
+    } })
+    /*
+     * ADR-156：群任务域（建/改/停/查 + 单次发送的**真实结局**）。
+     *
+     * ```text
+     * 语义入口**选中了** group_task 域        ⇒ 用它给的草稿（`plan.group_task`）
+     * 语义入口没选中、但装配层挂了这个钩子    ⇒ 让钩子自己用**专用决策解析器**判一次
+     * （语义入口关着时同理：`semanticDomainSelected` 对 undefined 返回 true）
+     * ```
+     * ⚠️ 钩子只由装配层在"开关开 + 主人私聊 QQ 入口"时挂 ⇒ 关着时这条链**不存在**，
+     *    不存在"每轮多问一次模型"的开销。
+     * ⚠️ `factText` 由运行时拼好（含"平台接受≠群成员看到"的口径），这里只注入。
+     */
+    const selectedGroupTaskDraft = input.turn.semanticEntry?.kind === 'planned'
+      ? input.turn.semanticEntry.plan.group_task : undefined
+    const groupTaskAskable = input.runGroupTaskTurn !== undefined
+      && (semanticDomainSelected(input.turn.semanticEntry, 'group_task') || selectedGroupTaskDraft === undefined)
+    const groupTask = groupTaskAskable
+      ? await input.runGroupTaskTurn?.(recentLines, withdrawnForRecall, selectedGroupTaskDraft)
+      : undefined
+    const groupTaskContent = groupTask?.factText ?? ''
+    if (groupTaskContent !== '') extraProviders.push({ name: 'group-task-result', async provide() {
+      return [{ id: 'group-task-result', kind: 'instruction', priority: 98, content: groupTaskContent,
+        droppable: false, sourceRefs: [String(input.turn.userEvent?.id ?? '')] }]
+    } })
+    let groupTaskContext: { text: string; sourceRefs: string[] } | undefined
+    try { groupTaskContext = await input.loadGroupTaskContext?.() }
+    catch { groupTaskContext = { text: '群任务记录暂时无法读取，不能猜测发送状态。', sourceRefs: [] } }
+    if (groupTaskContext) extraProviders.push({ name: 'group-task-context', async provide() {
+      return [{ id: 'group-task-context', kind: 'instruction', priority: 98, content: groupTaskContext!.text,
+        droppable: false, sourceRefs: groupTaskContext!.sourceRefs }]
+    } })
+    /*
+     * ADR-156 / P3-A：**群任务接管轮**（默认规则退后的那一轮）。
+     *
+     * ⚠️ 只在装配层说"这一轮被任务接管"时才有；缺席 ⇒ 这一轮照旧是普通轮。
+     * ⚠️ `droppable: false`：被接管时**不许**把"本轮归任务管"这条从上下文里裁掉。
+     */
+    let groupTaskInboundContext: { text: string; sourceRefs: string[] } | undefined
+    try { groupTaskInboundContext = await input.loadGroupTaskInboundContext?.() }
+    catch { groupTaskInboundContext = { text: '群任务上下文暂时无法读取，不要凭猜测接管这一轮。', sourceRefs: [] } }
+    if (groupTaskInboundContext) extraProviders.push({ name: 'group-task-inbound', async provide() {
+      return [{ id: 'group-task-inbound', kind: 'instruction', priority: 98, content: groupTaskInboundContext!.text,
+        droppable: false, sourceRefs: groupTaskInboundContext!.sourceRefs }]
+    } })
+    const relayHandled = relay !== undefined && relay.kind !== 'none' && relay.kind !== 'failed'
+    const reminder = !semanticDomainSelected(input.turn.semanticEntry, 'reminder') || (relayHandled && !input.turn.semanticEntry) ? undefined : await input.runReminderTurn?.(recentLines, withdrawnForRecall, [
       ...imageContext.filter(item => withdrawnForRecall?.ok !== false && !withdrawnForRecall?.withdrawnEventIds.includes(item.eventId))
         .map(item => ({ id: item.image.sourceRef, text: item.text, createdAt: item.createdAt, dataUrl: item.image.dataUrl })),
       ...turnContentSelection.selected.map(({ item }) => ({ id: item.contentId, text: item.text,
@@ -1723,7 +1863,8 @@ export class TurnGateway {
         content: reminderDelivery!.text, sourceRefs: reminderDelivery!.sourceRefs }]
     } })
     // 已由通知域处理的请求不再交目标域/约定桥重复解释。
-    const runGoalTurn = reminder !== undefined && reminder.kind !== 'none' ? undefined : input.runGoalTurn
+    const runGoalTurn = !semanticDomainSelected(input.turn.semanticEntry, 'goal') || (!input.turn.semanticEntry
+      && (relayHandled || (reminder !== undefined && reminder.kind !== 'none'))) ? undefined : input.runGoalTurn
     /*
      * M5.5.1 WP6：**此刻的挂钟时间**走的是编译器自己的 `clockEpochMs` 选项
      * （见下面 `buildContextCompilerV2` 那一段），**不在这里 push provider**。
@@ -1745,6 +1886,8 @@ export class TurnGateway {
      */
     const proposalEvidence = runGoalTurn === undefined ? undefined : lastAssistantEvidenceOf(recentLines)
     const goalInfo = {
+      ...(input.turn.semanticEntry?.kind === 'planned' && input.turn.semanticEntry.plan.goal
+        ? { semanticDraft: input.turn.semanticEntry.plan.goal } : {}),
       currentInput: turnContext.currentInput,
       sourceEventId: String(input.turn.userEvent?.id ?? ''),
       recentConversation: recentLines.filter(line => line.actorType === 'user' || line.actorType === 'character')
@@ -1964,7 +2107,13 @@ export class TurnGateway {
       )
     }
     if (hasActionResults(input.turn.actionResults)) {
-      if (this.options.workflowSkills !== undefined) {
+      /*
+       * P3：装配层传给"目录管理版"工厂时优先用它；不传 ⇒ 旧的固定包 provider。
+       * 两条分支的 section 形状对 v1 逐字节相同（见 `createManagedWorkflowSkillProvider`）。
+       */
+      if (this.options.workflowSkillProvider !== undefined) {
+        extraProviders.push(this.options.workflowSkillProvider(input.turn.actionResults!))
+      } else if (this.options.workflowSkills !== undefined) {
         extraProviders.push(createWorkflowSkillProvider(this.options.workflowSkills, input.turn.actionResults))
       }
       extraProviders.push(

@@ -1476,18 +1476,10 @@ export const M96_GATES: readonly GateSpec[] = [
   },
 ]
 
-/** S8（storyline 认知）的离线门。**真模型档**（`postlv2:s8:semantic:eval`）与**真库档**（`*:activation-readback:db`）**不在其中**。 */
+/** Post-Lv2 gates; ADR-147 replaces the retired S8 lane with a no-runtime regression gate. */
 export const PL2_GATES: readonly GateSpec[] = [
   ...([
-  ['postlv2:s8:store:verify', 'scripts/postlv2-s8-store-verify.ts'],
-  ['postlv2:s8:contracts:verify', 'scripts/postlv2-s8-contracts-verify.ts'],
-  ['postlv2:s8:roots:verify', 'scripts/postlv2-s8-roots-verify.ts'],
-  ['postlv2:s8:state:verify', 'scripts/postlv2-s8-state-verify.ts'],
-  ['postlv2:s8:reflection:verify', 'scripts/postlv2-s8-reflection-verify.ts'],
-  ['postlv2:s8:lifecycle:verify', 'scripts/postlv2-s8-lifecycle-verify.ts'],
-  ['postlv2:s8:measurement:verify', 'scripts/postlv2-s8-measurement-verify.ts'],
-  ['postlv2:s8:production:verify', 'scripts/postlv2-s8-production-verify.ts'],
-  ['postlv2:s8:withdraw:verify', 'scripts/postlv2-s8-withdraw-verify.ts'],
+  ['postlv2:story:retirement:verify', 'scripts/postlv2-story-retirement-verify.ts'],
   ['postlv2:db:verify', 'scripts/postlv2-db-verify.ts'],
 ] as [string, string][]).map(([id, entry]) => ({
   id,
@@ -1497,7 +1489,7 @@ export const PL2_GATES: readonly GateSpec[] = [
   tags: ['post-lv2'],
   resources: { parallel: 'serial' as const, evidenceWrites: ['artifacts/post-lv2'] },
   why:
-    '隔离库（`isolateDatabase()` 一次性 %TEMP% 沙箱）+ 零模型；证据写在共享里程碑根 ⇒ 按 manifest 纪律保守声明 serial。' +
+    'Lv2.5 退役检查只读源码与离线固定件；数据库快照门只读已有证据。' +
     '⚠️ `postlv2:db:verify` 只读**已落盘**的 artifact 快照（不打开真实库）。',
   })),
   /*
@@ -1741,12 +1733,14 @@ export const PL2_GATES: readonly GateSpec[] = [
   },
   {
     id: 'postlv2:qq-voice-main:verify',
-    title: 'QQ voice: real main with isolated PostgreSQL and channel boundaries',
+    title: 'QQ 语音：真实 main、隔离 PG 与跨入口边界',
+
     argv: tsx('scripts/postlv2-qq-voice-main-verify.ts'),
     entry: 'scripts/postlv2-qq-voice-main-verify.ts',
     tags: ['post-lv2', 'qq'],
     resources: { parallel: 'serial' as const },
-    why: 'Requires serversim:pgtest; local model/OneBot/TTS fixtures, no real QQ delivery.',
+    why: '须用 serversim:pgtest 新建空白库；本地假模型/OneBot/HTTP TTS、真实 main；不连接真实 QQ。',
+
   },
   {
     id: 'qq:group:coexist:verify',
@@ -2201,13 +2195,101 @@ export const PL2_CONTROL_GATES: readonly GateSpec[] = ([
   ],
   ['postlv2:oss-mechanisms:verify', 'scripts/postlv2-oss-mechanisms-verify.ts', 'AIRI / LiveKit / Pipecat / MaiBot 机制功能', '实际 Web Audio 播放器受控时钟、标准库 Python 桥、隔离库与 TurnGateway；零真实模型，不作性能或人格收益验收。'],
   ['postlv2:image:verify', 'scripts/postlv2-image-input-verify.ts', '图片输入离线整链', '隔离库、loopback 模型/QQ 夹具，不发真消息，不依赖外部资产。'],
-  ['postlv2:qq-voice-reply:verify', 'scripts/postlv2-qq-voice-reply-verify.ts', 'QQ reply media protocol and routing', 'Local OneBot/TTS fixtures; no database, real models or messages.'],
-  ['postlv2:qq-voice-delivery:verify', 'scripts/postlv2-qq-voice-delivery-verify.ts', 'QQ voice journal and failure matrix', 'Temporary journal and HTTP fixtures; no real TTS or QQ calls.'],
+  [
+    'postlv2:qq-voice-reply:verify',
+    'scripts/postlv2-qq-voice-reply-verify.ts',
+    'QQ 出站媒介选择（P1）：同轮文字/语音 · 封套失败关闭 · 桥贯通 · record/文本兜底',
+    '**零真实模型 / 零真实 QQ / 不打开数据库**；QQ 侧是本地 `ws` OneBot 夹具，TTS 是**假端口**。' +
+      '覆盖：封套真值表（完整/坏 JSON/缺字段/多字段/坏版本/坏 mode/空正文/超长/前后夹字/嵌套）· ' +
+      '开关关与非 QQ 的逐字等价（wire 无 `media` 键）· 桥与传输贯通 · ' +
+      'WAV/PCM16/4 MiB/60 s 边界 · text 零合成 · voice→record · 无端口/合成失败/非 WAV/超长回落文字 · ' +
+      '平台拒绝→一次文字兜底 · 无回执 id/断线→`delivery_unknown` 不重发 · 群聊 record。' +
+      '⚠️ **不证明**真实音色听感、固定 LLBot/PMHQ 镜像的 record 转换、真实模型是否自主选择（P3）。',
+  ],
+  [
+    'postlv2:qq-voice-delivery:verify',
+    'scripts/postlv2-qq-voice-delivery-verify.ts',
+    'QQ 语音投递与失败矩阵（P2）：持久化投递日志 · 重启未知/重复拒绝 · 真实 TTS 执行器机制',
+    '**零真实模型 / 零真实 QQ / 零真实 TTS 账号 / 不打开数据库**；OneBot 与 TTS 都是本机假服务，' +
+      '日志写临时目录。覆盖：日志真值表（重复键/append-only/坏行即不可读/不可写/重启 `reserved`⇒unknown/陈旧锁）· ' +
+      '外壳 12 个失败矩阵分支（含附录单独发/单独记、日志坏⇒语音回落文字、无日志=P1 行为）· ' +
+      'HTTP TTS 形状/JSON base64/500/HTML/重定向/超长/超时/配置失败关闭 · 生产外壳装载条件结构锁。' +
+      '⚠️ **不证明**真实提供方与音色、真实 QQ 送达、`record`→SILK（P3/P0 剩余项）。',
+  ],
+  /*
+   * 2026-10-28 / ADR-156：主人授权 QQ 群任务（P0 契约 · P1 存储 · P2 单次群发送）。
+   * ⚠️ 三道门分属两种环境：契约门与发送门**不碰库**，存储门**要**隔离 PostgreSQL。
+   */
+  [
+    'postlv2:qq-group-task-contract:verify',
+    'scripts/postlv2-qq-group-task-contract-verify.ts',
+    'QQ 群任务 P0 契约：静态准入例外 · 入站路由 · 额度预留/复核 · 语音回落 · 条数口径 · 草稿闭集 · 迁移表',
+    '**纯函数 / 不打开数据库 / 不出网**；零真实模型 / 零真实 QQ。覆盖三组正负例：' +
+      '① 静态准入三者（任务优先于旧名单 / 旧名单 / 都拒）与"任务生效豁免 @"；' +
+      '② 路由 default / task_candidate / suppress（成员·窗口·指定消息·额度·间隔·paused·双任务冲突·终态）；' +
+      '③ 额度 12 个拒绝码逐条可达 + 预留/复核同源；④ 只语音失败零文字兜底 / either+回落恰 1 条 / unknown 零兜底；' +
+      '⑤ 语音·附录·兜底各自计数且最坏情形按互斥形态取大；⑥ 草稿多余键/缺键/7 天窗口/长期授权/成员号形状全拒。' +
+      '⚠️ 本门是**测试材料**，**不证明**真实群送达、模型类别判断、迁移 0027 上生产。',
+  ],
+  [
+    'postlv2:qq-group-task-store:verify',
+    'scripts/postlv2-qq-group-task-store-verify.ts',
+    'QQ 群任务 P1 持久层：迁移 0027 · 版本 CAS · 原子额度预留（并发唯一）· 结算/未知/重启恢复 · append-only 事件',
+    '**隔离 PostgreSQL**（`lg_test_*` 前缀，跑完即删）。覆盖：建单幂等 · 每群唯一非终态 reply_window · ' +
+      '授权来源只有 `owner_qq_private` · 修改 CAS 冲突与升版本保留已用次数 · 非法状态迁移 · 停止作废 queued 且读回在途 · ' +
+      '**并发抢最后一条额度只有一个 granted** · api_accepted 幂等增额 · failed_confirmed 不退额 · ' +
+      'unknown 增额并暂停任务 · 重启 `in_flight`⇒`unknown` / `queued`⇒`failed_confirmed` 不重播 · 事件只增不改 · 坏行抛具名错。' +
+      '⚠️ **不证明**生产迁移、真实并发压力、真实 QQ 送达。',
+  ],
+  [
+    'postlv2:qq-group-send:verify',
+    'scripts/postlv2-qq-group-send-verify.ts',
+    'QQ 群发送 P2：任务授权窄路径（旧名单拒绝而任务可达）· 群号不可由载荷提供 · 语音失败矩阵 · 旧私聊路径逐字不变',
+    '**零真实 QQ / 零真实 TTS / 零真实模型 / 不打开数据库**；OneBot 是本地 `ws` 夹具，合成端口是**假端口**。' +
+      '核心两条：⑧ 静态名单外的群 + 有效任务 ⇒ 假 OneBot **真收到** `send_group_msg` 且群号/正文逐字正确；' +
+      '⑨ 同群无任务 ⇒ `qq_target_no_longer_authorized` 且 0 条。另覆盖：能力登记与权限闭集 · 参数闭集与 24 项群号/收件人黑名单 · ' +
+      '无授权/过期/版本变/目标不符 ⇒ 不发 · 只语音失败零兜底 · either+回落恰 1 条 · unknown 零兜底 · 消息计数 · `groupReplies` 记账。' +
+      '⚠️ **不证明**真机 QQ 送达、真实 TTS/record→SILK、ActionGateway 接线与生产装配。',
+  ],
+  [
+    'postlv2:qq-group-resolve:verify',
+    'scripts/postlv2-qq-group-resolve-verify.ts',
+    'QQ 群目标消歧 P2.1-A：`get_group_list` 只读归一化 + 纯消歧（resolved/ambiguous/not_found/invalid）· 群号从不来自载荷',
+    '**零真实 QQ / 零真实模型 / 不打开数据库**；群列表是本地夹具，真值表逐条断言。覆盖：' +
+      '① 群号命中 / 唯一群名命中 / 前后空白与全角空格归一化；② 同名两群 ⇒ `ambiguous`（**不猜**，附候选）；' +
+      '③ 群号与群名互相矛盾 ⇒ `group_hint_conflict`；④ 群号形状非法 / 群名超 64 码点 / 空线索 ⇒ 具名 invalid 码；' +
+      '⑤ 群号不在真实列表 ⇒ `group_task_group_not_found`；⑥ 只读路径负控：整轮 0 个写能力、0 条 `send_group_msg`。' +
+      '⚠️ **不证明**真实 OneBot `get_group_list` 的可用性、真实模型对同名群的判断（P3）。',
+  ],
+  [
+    'postlv2:qq-group-facts:verify',
+    'scripts/postlv2-qq-group-facts-verify.ts',
+    'QQ 群任务 P2.1-C：工具键表 · 能力事实（当前能不能发）· 群任务决策解析器闭集与失败码',
+    '**零真实模型 / 不出网 / 不打开数据库**；`fetchImpl` 是假端点，解析器按闭集真值表驱动。覆盖：' +
+      '① `TASK_ARG_KEYS` / `TOOL_GATE_KEYS` 登记（`qq.group.message`+`qq.group.list` 与开关键）；' +
+      '② 能力事实：开关关/开两态、`QQ_GROUP_TRANSPORT_SUPPORTED`、缺 `groupTasks` 入参时输出**逐字节相同**；' +
+      '③ 解析器 6 个失败码（不可用/调用失败/超时/截断/坏输出/缺配置）+ 合法草稿闭集；④ 系统提示含 `GROUP_TASK_INSTRUCTION` 且不泄露群号。' +
+      '⚠️ **不证明**真实模型的语义理解与同名群消歧（P3）。',
+  ],
+  [
+    'postlv2:qq-group-main:verify',
+    'scripts/postlv2-qq-group-main-verify.ts',
+    'QQ 群任务组合验收 P2.1-D：**真 main** + 真 bridge/外壳 + 假 OneBot + 假模型 + 隔离 PostgreSQL 的完整单次发送链',
+    '**隔离 PostgreSQL**（`lg_test_*`）+ **本机 loopback**：真 `src/main.ts` 进程、真 NDJSON 外壳、假 OneBot `ws`、假模型 HTTP。' +
+      '覆盖 10 项：01 开关缺省关（未装配/0 发送/0 任务/无 `qq:group_send`）· ' +
+      '02 建单→预留→Gateway→客户端→假 OneBot **真收到** `send_group_msg`（群号/正文逐字）→ 实例 `api_accepted` + `platform_message_id` → ' +
+      '任务 `completed`；**最终回复 prompt 里带本轮事实**（划窗断言：created + "平台接受" + 否定语境 + 无"已送达"）；' +
+      '03 同名两群 ⇒ 模型判 clarify（0 发送/0 任务）+ 程序侧 `not_found`/`hint_conflict` 两种拒法 + **不串轮**；' +
+      '04 旧静态名单拒绝该群而任务可达（对照组旧群仍放行）· 09 旧私聊/群聊回复照旧且**不带群任务事实**（跨会话/跨群不泄漏）· ' +
+      '10 重启恢复 `in_flight`⇒`unknown` / `queued`⇒`failed_confirmed` 不重播；05–08 第二道复核（撤销/升版本/过期/**额度被其它实例占满**）。' +
+      '⚠️ **不证明**真实 QQ 送达、群成员是否看到/听到、真实模型语义判断、真实 TTS、迁移 27 上生产、跨进程群任务派发。',
+  ],
   ['learning:contracts:verify', 'scripts/learning-skills-verify.ts', '学习技能离线契约', '--offline 使用临时资料库与论文 worker 夹具；外部资产指纹独立验收。'],
   ['postlv2:orchestration:verify', 'scripts/postlv2-orchestration-verify.ts', '首份提案与重规划协议', '实际模型适配器 + fetch 夹具；不打开数据库、不调用真实模型。'],
   ['postlv2:affected:verify', 'scripts/postlv2-affected-verify.ts', '受影响门选择覆盖与升级正负控', '纯规划函数和已登记离线门；不执行资产或真实链。'],
   ['postlv2:automatic-memory:recovery:verify', 'scripts/postlv2-automatic-memory-recovery-verify.ts', '自动记忆健康与受控恢复', '真实消费者、隔离库、假提取器；无外部 Python 或真实模型。'],
   [
+
     'postlv2:gate-selection:verify',
     'scripts/postlv2-gate-selection-verify.ts',
     '选档器自证（身份优先 · mtime 永不参与 · 并列判定不同即失败关闭）—— `TD-23` / `AUD-20261005-02`',
@@ -2716,6 +2798,125 @@ export const EBL_GATES: readonly GateSpec[] = [
     why: '独立 PostgreSQL，真实 TurnGateway/Memory/M9，离线回复；不激活生产。' },
 ]
 
+/*
+ * P3（`docs/architecture/Cognitive-Capability-P3-Execution-Plan-2026-10-28.md`）：
+ * **统一技能域**的机制门。单独一组 + 单独 lane 的纪律与 M9 / desktop-control 相同：
+ * `offline` lane 的公开声明是"与 `pnpm m4.5:ci` 逐条等价"，新门不能悄悄改变那个等价关系。
+ *
+ * ⚠️ 本门**有意需要**一个隔离 PostgreSQL（迁移 25 的发布状态 / 使用记录落在这三张表上）：
+ *    `runPreparedPgGate` 会自建一次性容器（simhost 内则用 pgtest 实例里的空白 `lg_test_*` 库）。
+ *    ⇒ `parallel: 'serial'`（不与别的 PG 门抢容器端口）。
+ * ⚠️ 它证明的是**机制**：零真实模型请求、固定动作序列；**不**构成收益读数，
+ *    也不主张"模型会自主选择这个技能"（那是 P3-5 的真实模型试点）。
+ */
+export const P3_GATES: readonly GateSpec[] = [
+  {
+    id: 'p3:skill-usage:verify',
+    title: 'P3 技能版本/发布状态/真实使用追溯与负控',
+    argv: tsx('scripts/cognitive/p3-skill-usage-chain-verify.ts'),
+    entry: 'scripts/cognitive/p3-skill-usage-chain-verify.ts',
+    resources: { parallel: 'serial', evidenceWrites: ['artifacts/local/p3-skill-usage'] },
+    why:
+      '隔离 PostgreSQL（自建一次性容器；迁移 25：发布状态/事件/使用记录）+ 真实 ActionTurn/Gateway/' +
+      'ContextCompiler + 真适配器 + 合成资料根。覆盖：目录指纹/发布状态/依赖求交、' +
+      '选中→加载→说明入模→资料入模→结果五段分离、挂起后消费阻断、预算裁剪、' +
+      '假回执/假完成/越界读/取消、旧技能与旧 section 逐字节等价、TASK_ARG_KEYS 结构锁。' +
+      '**零真实模型请求**；固定动作序列 ⇒ 只证机制。',
+  },
+  {
+    id: 'p3:skill-revision:verify',
+    title: 'P3 技能候选修订/开发回归/冻结留出/实验发布/回退/退役（零真实模型 · 受信发布者唯一写者）',
+    argv: tsx('scripts/cognitive/p3-skill-revision-verify.ts'),
+    entry: 'scripts/cognitive/p3-skill-revision-verify.ts',
+    resources: { parallel: 'serial', evidenceWrites: ['artifacts/local/p3-skill-revision'] },
+    why:
+      '隔离 PostgreSQL（迁移 26：修订校验包/判定）+ 真实 ActionTurn/Gateway/ContextCompiler + 真实目录资产。' +
+      '覆盖：预登记提案摘要/触发缺陷引用/提议者闭集、开发回归集与**冻结留出集**（specDigest 绑定）、' +
+      '指令清单核验、四种伪造校验包（摘要/生产者/换材料/自相矛盾）一律拒绝、' +
+      '原子晋升（候选→发布 + 切当前 + 校验包 + 事件 + 接受判定）、发布后真实链消费新版本、' +
+      '能力/边界扩张拒绝、开发回归失败/留出集失败/留出集复用（不许调参过关）/父版本非当前/无提案 的闭集拒绝码、' +
+      '重试可达、重复发布拒绝、回退（旧版本仍服务旧任务）与退役（不得退役当前版本）、判定历史可查询、' +
+      '以及"发布者/存储不被 kernel/适配器/生产入口导入"的结构锁。' +
+      '**零真实模型请求**；固定动作序列 + 合成材料 ⇒ 只证机制，不构成收益读数（真实模型生成属 P3-5）。',
+  },
+  {
+    id: 'p3:skill-rule-dependency:verify',
+    title: 'P3-4 技能→P2 规则资格的可选依赖联验（真实 EBL 只读读面 + 真实任务环 · 零真实模型）',
+    argv: tsx('scripts/cognitive/p3-skill-rule-dependency-verify.ts'),
+    entry: 'scripts/cognitive/p3-skill-rule-dependency-verify.ts',
+    resources: { parallel: 'serial', evidenceWrites: ['artifacts/local/p3-skill-rule-dependency'] },
+    why:
+      '隔离 PostgreSQL（真实 EBL 投影/事件，无新迁移）+ 真实 Action Gateway + 真实任务环 + 夹具里的受限测试技能（不进产品目录）。' +
+      '覆盖：依赖声明闭集解析、旁挂文件缺失/损坏、**真实 validated 规则**的读面消费、错误范围/未知/挂起/替代/退役/待验证/' +
+      '版本冲突/读面失败全部不被当作合格依赖、加载成功捕获基线、**加载后规则失效 ⇒ 后续依赖动作在真实任务环里被拒**' +
+      '（`skill_rule_unusable`，无副作用，EBL 状态保持 withdrawn）、无依赖技能不受影响、' +
+      '"P3 不复制 EBL 资格系统 / 技能路径不回灌规则证据 / 生产入口未接线"三条结构锁。' +
+      '**零真实模型请求**；真实状态只构造 validated + withdrawn，pending/suspended/superseded/retired 由纯判据覆盖（记录里标边界）。',
+  },
+  {
+    id: 'p3:scorer:verify',
+    title: 'P3-5 判分器量具自证（纯函数 · 零请求 · 证明判分不是恒真）',
+    argv: tsx('scripts/cognitive/p3-5-scorer-verify.ts'),
+    entry: 'scripts/cognitive/p3-5-scorer-verify.ts',
+    resources: { parallel: 'serial', evidenceWrites: [] },
+    why:
+      'P3-5a 真实模型试点的**判分层**自证：目标达成 / 来源支持 / 虚构读取引用 / 权限违规 / 误加载 / 两臂对照' +
+      '的判定全部用**自造夹具**离线验证，并含"改坏夹具 ⇒ 判定必须随之改变"的量具自证；' +
+      '普通聊天任务**不参与**目标达成（口径见 evaluation.json metrics[M2]）。' +
+      '**零网络、零模型请求、零数据库**；真实模型跑批由 p3-5-live-runner 单独执行（需预算批准 + 单独运行授权）。',
+  },
+  {
+    id: 'p3:5:runner:verify',
+    title: 'P3-5b 运行守卫零请求回归（真实规划器 + 假 transport；端点注入 / 空答复 / 写面预检）',
+    argv: tsx('scripts/cognitive/p3-5-runner-guards-verify.ts'),
+    entry: 'scripts/cognitive/p3-5-runner-guards-verify.ts',
+    resources: { parallel: 'serial', evidenceWrites: [] },
+    why:
+      '回归 2026-10-28 真跑出来的三个故障，**零真实模型请求、零网络、零数据库**：' +
+      '① 端点注入——把基线环境污染成仿真桩（`OPENAI_BASE_URL=http://127.0.0.1:18080/v1`）后，' +
+      '用**真实规划器 + 假 transport** 断言实际请求的 URL/model/apiKey/`reasoning_effort=low`/`temperature=0` ' +
+      '仍是冻结端点，且桩端点会被判 `endpoint_invalid` 并在发出前拒绝；' +
+      '② 空答复——答复被预算拒收或为空时**不提交** `completeTurn`、记 `answerMissing`/`aborted`、' +
+      '成本照记，且冻结判分器判定 `unknown`（不误算达成，含"有正文即达成"的反例防真空断言）；' +
+      '③ 写面预检——账目/请求账本/任务账本在**首次请求之前**以实际运行用户探测可追加，' +
+      '不可写则具名 `ledger_unwritable` / `journal_unwritable` 失败关闭。' +
+      '本门只证"故障不再复发"，不重跑试点、不构成收益读数。',
+  },
+  {
+    id: 'p3:5:score:verify',
+    title: 'P3-5b 评分复现（正式判分驱动 · 原产物零网络复算 · 排除规则证据分级）',
+    argv: tsx('scripts/cognitive/p3-5-score-repro-verify.ts'),
+    entry: 'scripts/cognitive/p3-5-score-repro-verify.ts',
+    resources: { parallel: 'serial', evidenceWrites: [] },
+    why:
+      '把判分从一次性 `tmp/` 驱动固化为正式脚本 `scripts/cognitive/p3-5-score-run.ts`，' +
+      '并用**原始产物零网络复算**断言可复现：与归档 `score.json` 逐字段相同（只忽略 `generatedAt`）、' +
+      '归一化规则有版本与原文且确实生效（原始产物里的容器绝对路径 → 资料根相对路径）、' +
+      '判分器源码 sha256 被记录且与当前文件一致（口径一改门就红）、' +
+      '与冻结前 `tmp` 驱动在 7 个冻结相关字段上一致（结论没被换掉）、' +
+      '桩流量排除规则 v2 必须写"端点 + 调用角色 + 时延"且 **token 只作旁证**、无法确认的记录记 `unknown` 并**保留**在预算里、' +
+      '累计账目与批记录一致（131 请求 / 275 757 token）。`globalThis.fetch` 在本门内被替换成"一调用就抛"。',
+  },
+  {
+    id: 'p3:entry:wiring:verify',
+    title: 'P3-5b 入口接线（G1 独立核验接入口 · G5 任务局部读根 · 零真实模型请求）',
+    argv: tsx('scripts/cognitive/p3-entry-wiring-verify.ts'),
+    entry: 'scripts/cognitive/p3-entry-wiring-verify.ts',
+    resources: { parallel: 'serial', evidenceWrites: [] },
+    why:
+      '把 P3-6 准备表的两条阻塞缺口做成可回归的入口断言（**零真实模型请求**）：' +
+      'G1 —— 独立核验 `verifyPersonalLibraryAnswer` 接进真实入口后，' +
+      '没有受信 `requiredSourcePaths` ⇒ `unknown`、记账时点没有回复正文 ⇒ `unknown`、' +
+      '**"读过来源"绝不单独推出 `done`**、每个被选中技能必有一条结论（记账层不会回落到任务环自评）、' +
+      '自评只作标注过的事实记录；' +
+      'G5 —— 真实任务环 + 真实任务授权：受管 personal-library **真的加载成功**后把读根挂到**本次任务**，' +
+      '根外读**执行前拒绝**（`read_outside_task_roots`，执行器未被调用），legacy 回执不触发、' +
+      '未配 `readRootScope` 时旧路径逐字不变、读根只许收窄。' +
+      '另含结构锁：`src/main.ts` 确实把 `outcomes` 传给记账层、且读根只在三个开关同时打开时才挂。',
+  },
+]
+
+
 export const ALL_GATES: readonly GateSpec[] = [
   ...EBL_GATES,
   ...OFFLINE_GATES,
@@ -2736,9 +2937,31 @@ export const ALL_GATES: readonly GateSpec[] = [
   ...DESKTOP_CONTROL_GATES,
   ...SCRIPTS_GATES,
   ...PRODUCTIVITY_GATES,
+  ...P3_GATES,
 ]
 
 export const LANES: readonly Lane[] = [
+  { id: 'ebl', title: 'Epistemic Belief Lifecycle', gateIds: EBL_GATES.map(gate => gate.id),
+    note: '机制与隔离 PostgreSQL 两门；不代替语义、收益、人审或生产激活。' },
+  {
+    id: 'p3',
+    title: 'P3 统一技能域（版本 / 发布状态 / 真实使用追溯 / 候选修订 / P2 规则依赖联验 / 试点判分与守卫）',
+    gateIds: P3_GATES.map((gate) => gate.id),
+    note:
+      '七门，分两组。**三门 DB 门**：`p3:skill-usage:verify`（P3-1 版本目录/发布状态/真实使用追溯）、' +
+      '`p3:skill-revision:verify`（P3-3 候选修订→开发回归→冻结留出→实验发布/回退/退役）、' +
+      '`p3:skill-rule-dependency:verify`（P3-4 技能→P2 规则资格的可选依赖联验）——' +
+      '都是隔离 PostgreSQL + 真实 ActionTurn/Gateway/ContextCompiler + 合成材料，**零真实模型请求**。' +
+      '**三门零请求门**：`p3:scorer:verify`（P3-5 判分器量具自证）、' +
+      '`p3:5:runner:verify`（P3-5b 端点注入 / 空答复 / 写面预检回归）、' +
+      '`p3:5:score:verify`（P3-5b 评分复现 + 排除规则证据分级）、' +
+      '`p3:entry:wiring:verify`（P3-5b 入口接线：G1 独立核验 / G5 任务局部读根）——' +
+      '纯函数或临时目录，零网络、零模型、零数据库。' +
+      '**有意不并入 `offline` lane**（那条 lane 与 `pnpm m4.5:ci` 逐条等价，而三门 DB 门需要 Docker 起一次性 PG）。' +
+      '⚠️ 它们只证**机制**：固定动作序列 + 合成材料 ⇒ 不构成收益读数；' +
+      '真实模型试点（P3-5a）已单独执行并归档，**不重跑**；上线接线与迁移验收属 P3-6。' +
+      '调用：`pnpm gates:run --lane p3` 或 `pnpm p3:5:runner:verify` / `p3:5:score:verify` 等单门脚本。',
+  },
   { id: 'ebl', title: 'Epistemic Belief Lifecycle', gateIds: EBL_GATES.map(gate => gate.id),
     note: '机制与隔离 PostgreSQL 两门；不代替语义、收益、人审或生产激活。' },
   {
@@ -2877,6 +3100,7 @@ export const LANES: readonly Lane[] = [
   {
     id: 'postlv2',
     title: 'post-Lv2 当前离线门（Lv2.5 为可选功能）',
+
     gateIds: PL2_GATES.map((g) => g.id),
     note: '世界线接线/激活门退出当前集合，退役门承接；历史 S8 读数保留。数据库快照门只读已有证据。',
   },
@@ -2898,7 +3122,12 @@ export const LANES: readonly Lane[] = [
       '**`postlv2:coexist:verify`**（起两条 loopback + 核对真实库树摘要；用户核心在跑时会租约冲突）· ' +
       '**`postlv2:bridge:verify`**（起 ElizaOS 运行时，且脚本内有真实库判据）。' +
       '⚠️ `postlv2:sequence-continuity:verify` **故意慢**（7 次 `src/main.ts` 启动）⇒ 声明 `serial`；' +
-      '它的证据目录名固定 ⇒ 重跑覆盖同一份文件（见该门 `why`）。',
+      '它的证据目录名固定 ⇒ 重跑覆盖同一份文件（见该门 `why`）。' +
+      '⏩ **2026-10-28 追加 6 道**（ADR-156 主人授权 QQ 群任务 P0–P2 + P2.1 产品接线）：' +
+      '`postlv2:qq-group-task-contract:verify`（纯函数）· `postlv2:qq-group-task-store:verify`（**要隔离 PostgreSQL**，' +
+      '须走 `gates:run --lane postlv2-controls` 的 PG 包装器）· `postlv2:qq-group-send:verify`（本机 ws 假 OneBot）· ' +
+      '`postlv2:qq-group-resolve:verify`（群目标消歧纯函数 + 只读负控）· `postlv2:qq-group-facts:verify`（工具键/能力事实/解析器）· ' +
+      '`postlv2:qq-group-main:verify`（**真 main + 真外壳 + 假 OneBot + 假模型 + 隔离 PG 的组合验收**，也要 PG 包装器）。',
   },
   {
     id: 'lv2',

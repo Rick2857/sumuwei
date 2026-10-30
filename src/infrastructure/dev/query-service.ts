@@ -106,6 +106,8 @@ import { classifyRecordedAxisB } from '../../kernel/contracts/source-authority.t
 import type { StoredAttributionReadback } from '../../kernel/contracts/attribution.ts'
 import { ACTION_STATUSES } from '../../kernel/action/action-result.ts'
 import { createDefaultCapabilityRegistry } from '../../kernel/action/capability-registry.ts'
+import { currentCapabilityFacts } from '../project-knowledge/self-capabilities.ts'
+import type { CurrentCapabilityView } from '../../kernel/action/capability-facts.ts'
 import { foldExecutionRecord } from '../../kernel/action/execution-record.ts'
 import type { ActionLedgerEvent, ExecutionRecordView } from '../../kernel/action/execution-ledger.ts'
 import {
@@ -138,6 +140,7 @@ import {
  *    在这里再读一遍就是第二个来源。
  */
 export interface DeveloperQueryServiceOptions {
+  currentCapabilityFacts?: () => CurrentCapabilityView
   db: RawDb
   characterId: CharacterId
   /** Memory Space 的 owner（必须是角色；与 `MemoryRecord.owner` 同源） */
@@ -359,13 +362,16 @@ export function createDeveloperQueryService(
         id: definition.id,
         authority: 'kernel/action/capability-registry.ts',
         availability: AVAILABLE,
-        note: `${definition.operations.length} operations / risk=${definition.riskLevel}`,
+        note: `${definition.operations.length} operations / risk=${definition.riskLevel}; registration only; runtime facts are reported separately in currentFacts`,
       }))
 
     return {
       schemaVersion: DEVELOPER_QUERY_SCHEMA_VERSION,
       query,
       runtime: [...actionCapabilities, ...runtimeCapabilities],
+      currentFacts: options.currentCapabilityFacts?.() ?? currentCapabilityFacts({
+        registry: createDefaultCapabilityRegistry(), runtimeId: options.runtimeId, entry: 'developer', now: now(),
+      }),
     }
   }
 

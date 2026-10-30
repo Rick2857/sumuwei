@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
 import { readReminderRequest } from '../src/kernel/contracts/notification-intake.ts'
 import { readReminderDraft, runReminderTurn, type ReminderResolution, type PendingReminder } from '../src/kernel/app/reminder-turn.ts'
-import { runReplyGuardChain } from '../src/kernel/app/reply-guard-chain.ts'
 import { createOpenAiReminderResolver } from '../src/infrastructure/model/openai-reminder-text.ts'
 
 const now = Date.parse('2026-10-15T12:00:00+08:00')
@@ -54,7 +53,8 @@ assert.equal(batch.kind, 'planned'); assert.equal(writes.length, 2)
 assert.equal(pending[0]!.dueAt, Date.parse('2026-10-20T08:55:00+08:00'))
 assert.equal(pending[1]!.dueAt, Date.parse('2026-10-21T14:55:00+08:00'))
 assert.equal((await call()).kind, 'planned'); assert.equal(writes.length, 2, '重复提案不得重复创建')
-assert.match(runReplyGuardChain({ replyText: '已经全部发送了。', reminderResult: batch }).replyText, /英语课签到.*已设置[\s\S]*准备开会.*已设置/u)
+assert.ok(batch.kind === 'planned' && batch.items.every(item => item.status === 'created'), 'actual saved results remain authoritative')
+
 measured += 6
 resolution = { ok: true, draft: { kind: 'batch', items: [
   { operation: 'create', sourceId: 'table', timeText: '2026年10月20日 09:00', leadMinutes: 5, text: '另一个提醒' },
@@ -111,7 +111,8 @@ const partial = await runReminderTurn({ current, recent: [source], pending: [], 
 })
 assert.equal(attempts, 2)
 assert.ok(partial.kind === 'planned' && partial.items[0]?.status === 'created' && partial.items[1]?.status === 'failed')
-assert.match(runReplyGuardChain({ replyText: '全部成功。', reminderResult: partial }).replyText, /未处理成功/u); measured++
+assert.match(partial.message, /未处理成功/u); measured++
+
 
 let transmitted: Record<string, any> = {}
 const resolver = createOpenAiReminderResolver({ env: { OPENAI_API_KEY: 'fixture', OPENAI_SMALL_MODEL: 'small', OPENAI_LARGE_MODEL: 'vision' },

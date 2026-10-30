@@ -141,6 +141,7 @@ export interface ExplicitMemoryRequest {
    * （见 `target-resolver.ts` 的 `scoreByHints` 说明）。
    */
   targetCanonicalKey?: string
+  targetMemoryId?: string
   /** 目标提示词（由 `targetHintsFrom()` 产出） */
   hints?: readonly string[]
 }
@@ -251,6 +252,7 @@ export interface ExplicitMemoryServiceDeps {
   resolveTarget: (input: {
     owner: EntityRef
     text: string
+    explicitId?: MemoryId
     canonicalKey?: string
     subject?: EntityRef
     hints?: readonly string[]
@@ -689,6 +691,7 @@ async function resolveFor(
     ...(request.targetCanonicalKey !== undefined
       ? { canonicalKey: request.targetCanonicalKey }
       : {}),
+    ...(request.targetMemoryId ? { explicitId: request.targetMemoryId as MemoryId } : {}),
     subject: request.speaker,
     ...(request.hints !== undefined ? { hints: request.hints } : {}),
   })

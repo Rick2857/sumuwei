@@ -11,6 +11,7 @@ import { conversationEventsInRange, findEventRefs, latestCharacterEventSequence 
 import { applyAcceptedEvents } from '../persistence/event-store.ts'
 import { createNativeMemoryStore } from '../persistence/memory-store.ts'
 import { scopeForConversation, scopeMemoryCandidate, withReadScope, withoutReadScope } from '../persistence/read-scope.ts'
+import { semanticMemoryDisposition } from '../persistence/semantic-entry-memory.ts'
 import { advanceWatermark, enqueueJob, finishJob, getWatermark, hasProcessedOperation, markJobRunning } from '../persistence/job-store.ts'
 import { AUTOMATIC_MEMORY_PROCESSOR, AUTOMATIC_MEMORY_VERSION, LangMemWorkerFailure } from '../model/langmem-memory-extractor.ts'
 import { AUTOMATIC_MEMORY_FAILURE_LIMIT, automaticMemoryRetryCounts, automaticMemorySourceKey } from './automatic-memory-control.ts'
@@ -99,6 +100,7 @@ export class AutomaticMemoryConsumer {
   constructor(private readonly input: {
     db: RawDb; characterId: CharacterId; speaker: EntityRef; registry: DomainEventRegistry
     ownerUserId?: string
+    semanticEntryEnabled?: boolean
     extractor: MemoryExtractor; onReading: (reading: AutomaticMemoryReading) => void
   }) {}
 
@@ -171,7 +173,8 @@ export class AutomaticMemoryConsumer {
     await markJobRunning(db, job.id)
     try {
       const owner = entityRef('character', String(characterId))
-      const extraction = event.type === 'user_message' && event.actorId === String(speaker.id)
+      const disposition = this.input.semanticEntryEnabled ? await semanticMemoryDisposition(db, characterId, String(event.id)) : 'legacy'
+      const extraction = disposition !== 'skip' && event.type === 'user_message' && event.actorId === String(speaker.id)
         ? await extractor.process({ owner, speaker, views: [processorEventViewOf(event)] },
           { processorName: extractor.name, processorVersion: extractor.version })
         : { candidates: [], rejected: [], extracted: false }

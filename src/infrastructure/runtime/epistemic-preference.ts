@@ -30,8 +30,9 @@ export async function eblOwnsPreferenceSource(db: RawDb, characterId: CharacterI
 
 export async function handleEblPreferenceTurn(db: RawDb, characterId: CharacterId, activeUserId: string,
   request: ExplicitMemoryTurnRequest): Promise<ExplicitMemoryTurnResult | undefined> {
-  const signal = readEblPreference(request.event.content)
-  if (!signal || !signal.explicit) return undefined
+  if (request.semanticCommand && !['remember', 'correct'].includes(request.semanticCommand.kind)) return undefined
+  const signal = readEblPreference(request.semanticCommand?.payload ?? request.event.content)
+  if (!signal || (!request.semanticCommand && !signal.explicit)) return undefined
   const failure = (reason: string): ExplicitMemoryTurnResult => ({ kind: 'not_written', intent: 'remember', reason,
     summary: '本轮讲解要求优先，但长期偏好没有写入。不要声称已经记住或更新。' })
   if (!db.transaction) return failure('ebl_transaction_required')
@@ -57,6 +58,7 @@ export async function handleEblPreferenceTurn(db: RawDb, characterId: CharacterI
     const store = createNativeMemoryStore(tx)
     const active = (await store.listByCanonicalKey(canonicalKey)).filter(item => ['active', 'disputed'].includes(item.status))
     if (active.length > 1) return failure('ebl_preference_ambiguous')
+    if (request.semanticCommand?.targetId && String(active[0]?.id) !== request.semanticCommand.targetId) return undefined
     const validator = createMemoryMutationValidator({ registry: createFullDomainEventRegistry(),
       sources: { findEvents: ids => findEventRefs(tx, ids as never) },
       processed: { hasProcessed: key => hasProcessedOperation(tx, key) },

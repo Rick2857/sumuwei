@@ -18,11 +18,14 @@ import { EntryShell, startCoexistHost, type CoexistHost } from './coexist/harnes
 import { isolateDatabase, cleanupSandbox } from '../src/dev/sandbox.ts'
 import { openRawPGlite } from '../src/infrastructure/persistence/production-db-safety.ts'
 import { maskWithdrawnLines, type ConversationLine } from '../src/kernel/context/sections.ts'
+import pg from 'pg'
+import { pgTestTargetFromEnv } from './gates/pg-target.ts'
 
 const live = process.argv.includes('--live')
 if (live && process.env.DSH_TEST_MODEL_WRAPPER !== '1') throw new Error('Use pnpm with-test-model pnpm postlv2:image:live')
 const root = resolve('.')
-const head = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
+let head = 'UNAVAILABLE_NO_GIT'
+try { head = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8', stdio: ['ignore','pipe','ignore'] }).trim() } catch { /* Source hashes below bind exported server trees. */ }
 const sourceHashes = Object.fromEntries([
   'src/main.ts', 'src/providers/openai-compatible.ts', 'src/kernel/app/turn-gateway.ts',
   'src/kernel/app/bridge/turn-bridge.ts', 'src/kernel/app/flags.ts', 'src/kernel/context/sections.ts',
@@ -38,7 +41,7 @@ function check(name: string, test: () => void) {
   try { test(); readings.push({ name, passed: true }); console.log(`PASS: ${name}`) }
   catch (error) { readings.push({ name, passed: false }); throw error }
 }
-const sandbox = isolateDatabase('image-input', { keep: true })
+const sandbox = isolateDatabase('image-input', { keep: true, ...pgTestTargetFromEnv() })
 const calls: { images: string[]; prompt: string }[] = [] // Memory only, never written to evidence.
 let failModel = false
 let complete = false
@@ -63,7 +66,7 @@ const testModelEnv = live ? Object.fromEntries(['OPENAI_API_KEY', 'OPENAI_BASE_U
   .map(key => [key, process.env[key]!])) : {}
 async function start(enabled = true) {
   host = await startCoexistHost({ dbDir: sandbox.dir, modelPort: (model.address() as { port: number }).port,
-    env: { ...testModelEnv, CHARACTER_IMAGE_INPUT_ENABLED: String(enabled),
+    env: { ...testModelEnv, CONVERSATION_LENGTH: '16', CHARACTER_IMAGE_INPUT_ENABLED: String(enabled),
       ...(process.argv.includes('--role') ? { CHARACTER_TOOL_DECISION_MODE: 'role' } : {}) } })
   try { await host.ready } catch (error) { console.error(host.stderr.slice(-15).join('\n')); await stop(false); throw error }
   qq = new EntryShell(host.qqPort, host.qqToken)
@@ -213,7 +216,10 @@ try {
     })
   }
   await stop()
-  const db = await openRawPGlite(sandbox.dir)
+  const db = process.env.LG_TEST_PG_URL
+    ? (() => { const pool = new pg.Pool({ connectionString: process.env.LG_TEST_PG_URL }); return {
+      query: (sql: string) => pool.query(sql), close: () => pool.end(),
+    } })() : await openRawPGlite(sandbox.dir)
   try {
     const rows = await db.query('SELECT metadata, content FROM conversation_events')
     check('ledger stores references, not base64 payload or model guesses', () => {
@@ -237,7 +243,11 @@ try {
       assert(calls.at(-1)!.prompt.includes('另有 1 张近期原图未提供'))
     })
     for (let n = 0; n < 10; n++) await turn(`window-${n}`, '普通文字聊天。')
-    check('images leave the active context with the recent conversation window', () => assert.deepEqual(calls.at(-1)!.images, []))
+    // QQ-Reminder-Followup-Repair-2026-10-20: eight same-room image events survive the text window.
+    check('bounded same-room image history survives the text window without inventing missing originals', () => {
+      assert.deepEqual(calls.at(-1)!.images, [one.dataUrl])
+      assert(calls.at(-1)!.prompt.includes('另有 1 张近期原图未提供'))
+    })
     await stop()
   }
   console.log(`Image input ${live ? 'live' : 'offline'}: ${readings.length} checks passed`)

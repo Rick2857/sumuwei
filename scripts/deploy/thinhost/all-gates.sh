@@ -7,9 +7,9 @@ C=lg-postgresql-production
 SU=lg_bootstrap
 PORT=55432
 PW=$(docker exec "$C" printenv POSTGRES_PASSWORD)
-cd /home/aiagent/project-lg || exit 1
+cd /opt/project-lg || exit 1
 NODE=/usr/bin/node
-LOADER=file:///home/aiagent/project-lg/node_modules/tsx/dist/loader.mjs
+LOADER=file:///opt/project-lg/node_modules/tsx/dist/loader.mjs
 FAILED=0
 
 # --- ③④ 不需要数据库 ---

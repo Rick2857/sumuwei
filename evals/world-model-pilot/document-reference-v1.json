@@ -2,8 +2,9 @@
   "version": "document-reference@1",
   "phase": "development",
   "review": {
-    "method": "development_reference_fixture",
-    "scope": "selected units only; public release makes no human validation or production claim"
+    "method": "agent_visual_pdfium_pages",
+    "humanReview": "PENDING",
+    "scope": "selected units only; not full-document ground truth or a benefit holdout"
   },
   "normalization": "nfkc-line-hyphen-whitespace-markdown@1",
   "documents": [

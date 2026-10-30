@@ -45,6 +45,7 @@ import type {
 } from './capability-registry.ts'
 import { TASK_ARG_KEYS, TASK_STAGED_ARG_KEYS } from './task-plan.ts'
 import { producesTurnContent } from './turn-content-capabilities.ts'
+import type { CurrentCapabilityView, CurrentCapabilityFact } from './capability-facts.ts'
 
 // ---------------------------------------------------------------------------
 // 谁治理它
@@ -60,6 +61,8 @@ export type ToolGateKey =
   | 'always'
   | 'workflowSkillsEnabled'
   | 'personalLibraryEnabled'
+  | 'projectKnowledgeEnabled'
+  | 'selfCapabilitiesEnabled'
   | 'arxivResearchEnabled'
   | 'mathCalculateEnabled'
   | 'documentReadEnabled'
@@ -91,6 +94,16 @@ export type ToolGateKey =
    *    （`on` 与 `shadow` 都算"开"：`shadow` 要**完整产生选择与审计**，只是不真的发）。
    */
   | 'qqProactiveMode'
+  /**
+   * post-Lv2 / ADR-156：主人授权群任务（`CHARACTER_QQ_GROUP_TASKS_ENABLED`，代码缺省 false）。
+   *
+   * ⚠️ 两个群能力（`qq.group.message` 写 / `qq.group.list` 读）**共用这一格**：
+   *    `qq.group.list` 是 `qq.group.message` 的**从属能力**（只用于把主人的群名提示
+   *    消歧成真实群号），不单独设开关 —— 单独设一格会让"群任务关着、群查询开着"
+   *    成为可达状态，而那个状态没有任何使用场景。
+   * ⚠️ 它的值仍然是**布尔**（本批没有 `shadow` 档，与 `qqProactiveMode` 的三档不同）。
+   */
+  | 'qqGroupTasksEnabled'
 
 /**
  * 能力 → 治理它的开关。
@@ -104,6 +117,8 @@ export type ToolGateKey =
 export const TOOL_GATE_KEYS: Readonly<Record<string, ToolGateKey>> = {
   'workflow.skill': 'workflowSkillsEnabled',
   'library.search': 'personalLibraryEnabled',
+  'project.search': 'projectKnowledgeEnabled',
+  'self.capabilities': 'selfCapabilitiesEnabled',
   'research.arxiv': 'arxivResearchEnabled',
   'system.echo': 'always',
   'sandbox.file.read': 'always',
@@ -137,6 +152,19 @@ export const TOOL_GATE_KEYS: Readonly<Record<string, ToolGateKey>> = {
    */
   'qq.private.message': 'qqProactiveMode',
   'local.reminder.message': 'qqProactiveMode',
+  /*
+   * post-Lv2 / ADR-156：主人授权群任务（**群任务 P2**）。
+   *
+   * ⚠️ 两个能力**共用同一个开关**：`qqGroupTasksEnabled`（`CHARACTER_QQ_GROUP_TASKS_ENABLED`，
+   *    代码缺省 false）。`qq.group.list` 是从属能力（精确消歧真实群号），
+   *    不单独设开关 —— 否则会出现"群任务没开、群查询开着"这种没有使用场景的可达状态。
+   * ⚠️ 与 `qq.private.message` 同一条纪律：**恒登记**但**不在** `TASK_CAPABILITY_IDS` 里
+   *    （角色自行选择工具与任务执行环都规划不到它们；群号不经模型参数）。
+   *    这两行仍然是**必须**的：`auditToolCatalog()` 要求每个已登记能力都有治理开关，
+   *    否则"它为什么不可用"查不出来。
+   */
+  'qq.group.message': 'qqGroupTasksEnabled',
+  'qq.group.list': 'qqGroupTasksEnabled',
 }
 
 /**
@@ -189,6 +217,7 @@ export type ToolConnectionState = 'not-applicable' | 'unknown' | 'connected' | '
  *    判据只有一处：`verifyDesktopRuntimeSync()`（读 dist-info 的 `Version:`）。
  */
 export const TOOL_CONNECTION_REQUIRED: readonly string[] = [
+  'project.search',
   'research.arxiv',
   'browser.read',
   'browser.operate',
@@ -209,6 +238,7 @@ export interface ToolOperationView {
 }
 
 export interface ToolCatalogEntry {
+  readonly currentFact?: CurrentCapabilityFact
   readonly capability: string
   readonly version: string
   readonly description: string
@@ -314,6 +344,8 @@ export function auditToolCatalog(registry: CapabilityRegistry): readonly ToolCat
 // ---------------------------------------------------------------------------
 
 export interface BuildToolCatalogOptions {
+  /** Same current-instance facts used by self.capabilities; absent preserves legacy catalogue. */
+  readonly currentFacts?: CurrentCapabilityView
   /**
    * "这个开关这次是开的吗"（**装配层给值**；缺省全 `false` = 什么都没开）。
    *
@@ -348,21 +380,24 @@ export function buildToolCatalog(
   return registry.list().map((definition) => {
     const gateKey = TOOL_GATE_KEYS[definition.id] ?? 'always'
     const alsoRequires = TOOL_GATE_ALSO_REQUIRES[definition.id] ?? []
-    const enabled =
+    const fact = options.currentFacts?.tools.find(item => item.id === definition.id)
+    const enabled = fact ? fact.taskCandidate === true :
       options.isCapabilityEnabled !== undefined
         ? options.isCapabilityEnabled(definition.id)
         : (gateKey === 'always' || isGateEnabled(gateKey)) &&
           alsoRequires.every((key) => isGateEnabled(key))
-    const authorized = definition.permissions.every((permission) => granted.has(permission))
+    const authorized = fact ? fact.permissionGranted === true
+      : definition.permissions.every((permission) => granted.has(permission))
     const requiresConnection = TOOL_CONNECTION_REQUIRED.includes(definition.id)
     const connection: ToolConnectionState = requiresConnection
-      ? (connections[definition.id] ?? 'unknown')
+      ? fact ? fact.connection.state : (connections[definition.id] ?? 'unknown')
       : 'not-applicable'
     const argKeys = TASK_ARG_KEYS[definition.id] ?? []
     const stagedArgKeys = argKeys.filter((key) => TOOL_ARG_KEYS_STAGED.includes(key))
 
     return {
       capability: definition.id,
+      ...(fact ? { currentFact: fact } : {}),
       version: definition.version,
       description: definition.description,
       sideEffectLevel: definition.sideEffectLevel,
@@ -402,6 +437,13 @@ export function toolAvailabilityLabel(entry: ToolCatalogEntry): string {
           ? '未连接'
           : '连接未知'
     )
+  }
+  if (entry.currentFact) {
+    const fact = entry.currentFact
+    parts.push(fact.assembled === 'unknown' ? '本地装配未知' : fact.assembled ? '本地适配器已装配' : '本地适配器未装配')
+    parts.push('本地依赖=' + fact.dependency.state)
+    parts.push(fact.lastObservedResult ? '上次本进程回执=' + fact.lastObservedResult.status
+      + (fact.lastObservedResult.executed ? '/已调用适配器' : '/未执行') : '本进程无执行回执')
   }
   return parts.join(' · ')
 }

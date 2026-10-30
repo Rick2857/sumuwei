@@ -1954,6 +1954,267 @@ const MIGRATION_0022: Migration = {
   ],
 }
 
+/**
+ * P3 —— 统一技能域：**发布状态 + 使用追溯**（2026-10-28）。
+ *
+ * ============================================================================
+ *  为什么需要这次迁移（而不是复用 trace / 动作账本）
+ * ============================================================================
+ * 盘点结论（P3-0，见 `docs/architecture/Cognitive-Capability-P3-Batch1-Contract-2026-10-28.md`）：
+ * ```text
+ * character_traces        有 context_section_ids / action_ids —— 能回答"哪一段进了上下文"，
+ *                         但**没有**技能版本身份、发布状态、来源引用、结果核验与停止原因；
+ * character_action_events 有加载回执 —— 但"加载过"不等于"说明入模"或"任务完成"。
+ * ```
+ * ⇒ 缺口是"版本 × 状态 × 使用 × 结果"这四种事实的**同一行**，因此最小迁移是
+ *   两张表：发布事实（含 append-only 事件）与使用记录。
+ *
+ * ⚠️ 纪律：
+ *  · 只在**隔离测试库**应用（产品 `--migrate` 才会在生产跑；本批不碰生产库）。
+ *  · 内容正文**不落这张表**：`workflow_skill_usage_records` 只存 id / 计数 /
+ *    闭集标志 / 状态，与 trace 的隐私原则一致（正文在 ConversationEvent / 当轮内存）。
+ *  · 每个技能最多一行 `is_current = true`（部分唯一索引，原子切换的机器保证）。
+ */
+const MIGRATION_0025: Migration = {
+  version: 25,
+  name: 'p3-workflow-skill-releases-and-usage',
+  statements: [
+    `create table if not exists workflow_skill_releases (
+      skill_id             text    not null,
+      version              integer not null check (version >= 1),
+      content_fingerprint  text    not null check (content_fingerprint ~ '^[0-9a-f]{64}$'),
+      release_digest       text    not null check (release_digest ~ '^[0-9a-f]{64}$'),
+      state                text    not null check (state in ('candidate','published','suspended','retired')),
+      is_current           boolean not null default false,
+      predecessor_version  integer,
+      catalog_digest       text    not null,
+      registered_at        bigint  not null,
+      updated_at           bigint  not null,
+      primary key (skill_id, version))`,
+    `create unique index if not exists workflow_skill_releases_current
+      on workflow_skill_releases (skill_id) where is_current`,
+    `create table if not exists workflow_skill_release_events (
+      event_id    text   primary key,
+      skill_id    text   not null,
+      version     integer not null,
+      from_state  text,
+      to_state    text   not null,
+      action      text   not null check (action in ('register','publish','suspend','retire','set_current')),
+      actor       text   not null,
+      reason      text   not null,
+      detail      jsonb  not null default '{}'::jsonb,
+      created_at  bigint not null)`,
+    `create index if not exists workflow_skill_release_events_recent
+      on workflow_skill_release_events (skill_id, created_at desc)`,
+    `create table if not exists workflow_skill_usage_records (
+      record_id                    text    primary key,
+      character_id                 text    not null,
+      trace_id                     text    not null,
+      task_id                      text,
+      skill_id                     text    not null,
+      version                      integer not null,
+      content_fingerprint          text    not null,
+      release_digest               text    not null,
+      managed                      boolean not null,
+      selected                     boolean not null,
+      load_succeeded               boolean not null,
+      load_receipt_fingerprint     text,
+      load_receipt_ref             text,
+      instruction_delivered        boolean not null,
+      instruction_section_id       text,
+      instruction_source_refs      jsonb   not null default '[]'::jsonb,
+      instruction_withheld_reason  text,
+      content_delivered            boolean not null,
+      delivered_content_ids        jsonb   not null default '[]'::jsonb,
+      read_paths                   jsonb   not null default '[]'::jsonb,
+      action_refs                  jsonb   not null default '[]'::jsonb,
+      outcome                      text    not null check (outcome in ('done','not_done','unknown')),
+      outcome_evidence             jsonb   not null default '{}'::jsonb,
+      stop_reason                  text,
+      state_at_commit              text    not null check (state_at_commit in ('candidate','published','suspended','retired','unavailable')),
+      flags                        jsonb   not null default '[]'::jsonb,
+      budget                       jsonb   not null default '{}'::jsonb,
+      created_at                   bigint  not null)`,
+    `create index if not exists workflow_skill_usage_trace
+      on workflow_skill_usage_records (character_id, trace_id)`,
+  ],
+}
+
+/**
+ * P3-3 —— **候选修订的验证包与裁定历史**（2026-10-28）。
+ *
+ * ============================================================================
+ *  为什么这两张表不进迁移 25
+ * ============================================================================
+ * 迁移 25 解的是"版本 × 状态 × 使用"；P3-3 新增的是**候选修订这条独立流水线**：
+ * ```text
+ * workflow_skill_revision_bundles    一次候选的验证包（开发回归 + 冻结留出，逐项结果）
+ * workflow_skill_revision_decisions  每一次接受/拒绝的**历史**（含拒绝码；留出失败可回查）
+ * ```
+ * ⚠️ 纪律：
+ *  · 角色/正文都不落库：包只存 setId / 摘要 / 计数 / 判定 / 产者；
+ *  · `bundle_digest` 是主键 ⇒ "同一份包被记录两次"不会产生两份真相；
+ *  · 每个候选版本**只接受一份**验证包（`unique (skill_id, version)`）——
+ *    要重试就必须换新的开发/验证安排并**新建候选版本**（这正是"不对同一留出集调到通过"的结构形态）；
+ *  · 裁定历史 append-only（没有 update/delete 路径）。
+ */
+const MIGRATION_0026: Migration = {
+  version: 26,
+  name: 'p3-skill-revision-bundles-and-decisions',
+  statements: [
+    `create table if not exists workflow_skill_revision_bundles (
+      bundle_digest         text    primary key check (bundle_digest ~ '^[0-9a-f]{64}$'),
+      skill_id              text    not null,
+      version               integer not null check (version >= 2),
+      parent_version        integer not null check (parent_version >= 1),
+      dev_set_id            text    not null,
+      dev_spec_digest       text    not null check (dev_spec_digest ~ '^[0-9a-f]{64}$'),
+      dev_verdict           text    not null check (dev_verdict in ('pass','fail')),
+      dev_checks            integer not null check (dev_checks > 0),
+      dev_failures          integer not null check (dev_failures >= 0),
+      dev_report_digest     text    not null check (dev_report_digest ~ '^[0-9a-f]{64}$'),
+      holdout_set_id        text    not null,
+      holdout_spec_digest   text    not null check (holdout_spec_digest ~ '^[0-9a-f]{64}$'),
+      holdout_verdict       text    not null check (holdout_verdict in ('pass','fail')),
+      holdout_checks        integer not null check (holdout_checks > 0),
+      holdout_failures      integer not null check (holdout_failures >= 0),
+      holdout_report_digest text    not null check (holdout_report_digest ~ '^[0-9a-f]{64}$'),
+      producer              text    not null,
+      recorded_by           text    not null,
+      recorded_at           bigint  not null,
+      constraint workflow_skill_revision_bundles_one_per_candidate unique (skill_id, version))`,
+    `create index if not exists workflow_skill_revision_bundles_recent
+      on workflow_skill_revision_bundles (skill_id, version, recorded_at desc)`,
+    `create table if not exists workflow_skill_revision_decisions (
+      decision_id      text   primary key,
+      skill_id         text   not null,
+      version          integer not null,
+      parent_version   integer,
+      bundle_digest    text,
+      decision         text   not null check (decision in ('accepted','rejected')),
+      reject_code      text,
+      holdout_set_id   text,
+      detail           jsonb  not null default '{}'::jsonb,
+      decided_by       text   not null,
+      decided_at       bigint not null)`,
+    `create index if not exists workflow_skill_revision_decisions_recent
+      on workflow_skill_revision_decisions (skill_id, version, decided_at desc)`,
+  ],
+}
+
+/**
+ * P1（ADR-156）—— **主人授权的 QQ 群任务**的持久层（2026-10-28）。
+ *
+ * ============================================================================
+ *  为什么是"任务行 + append-only 事件 + 发送实例账本"三张表
+ * ============================================================================
+ * ```text
+ * qq_group_tasks          当前状态（一条任务一行；`version` 是乐观并发的 CAS 版本）
+ * qq_group_task_events    发生过什么（append-only；没有 update/delete 路径）
+ * qq_group_send_instances 每一次**占用额度**的发送尝试（额度与结局的同一行）
+ * ```
+ * 三张表缺一不可：
+ * ```text
+ * 只有任务行      ⇒ 回答不了"额度为什么用完了 / 谁在什么时候停了它"；
+ * 只有事件        ⇒ 每次预留都要回放整条历史才能判额度（并发下必然超发）；
+ * 没有实例账本    ⇒ 重启后 `in_flight` 与 `queued` 无法分辨，只能猜或重播。
+ * ```
+ *
+ * ============================================================================
+ *  纪律（与本仓库既有表同一套）
+ * ============================================================================
+ *  · **闭集进 DDL**：`status` / `kind` / `media` / `auth_source` / 实例 `state`
+ *    都在 check 约束里；`jsonb` 只放闭集**之外**的资料（正文、话题原话、额度形状）。
+ *  · **授权来源只有一项**：`auth_source = 'owner_qq_private'` 是 DDL 级约束 ——
+ *    `GROUP_TASK_AUTH_SOURCES` 加第二项必须同时改这里，两层不可能悄悄分叉。
+ *  · **每群最多一条非终态 reply_window**：partial unique index
+ *    （`kind='reply_window' and status in ('active','paused','clarifying')`）。
+ *    终态任务不占名额 ⇒ 停掉/到期后可以建下一条。
+ *  · **失败不退额**：实例行没有"删除"路径，`reserved_messages` 一旦落库就是
+ *    该任务已消耗的对外消息数；`failed_confirmed` 只是结局，不是退还。
+ *  · **append-only**：事件表只有 INSERT；本文件不建 update/delete 触发器
+ *    （那会让"谁改过历史"变成另一个需要审计的面），纪律由 store 的唯一写入口保证。
+ *
+ * ⚠️ 本迁移**只在隔离测试库应用**（产品 `--migrate --apply` 才会在生产跑）。
+ *    本机生产副本 schema 22 / 仿真核心库 24 ⇒ 代码要 27，**不得直接部署**（P5 受控迁移）。
+ *
+ * ⚠️ 事件闭集的**已知口径**（与 `task-1` 规格的 9 项相比多一项，理由如下）：
+ *    冻结契约的迁移表允许 `active→completed`，而 `completed` 不是任何现有事件名
+ *    能如实表达的状态（记成 `expired`/`exhausted`/`stop` 都是**假记**）⇒
+ *    这里给第 10 项 `complete`。若契约侧决定不支持 completed 迁移，应同时删掉这一项。
+ */
+const MIGRATION_0027: Migration = {
+  version: 27,
+  name: 'qq-owner-authorized-group-tasks',
+  statements: [
+    `create table if not exists qq_group_tasks (
+      id                text    primary key,
+      contract_version  integer not null check (contract_version >= 1),
+      version           integer not null check (version >= 1),
+      status            text    not null check (status in ('clarifying','active','paused','completed','exhausted','expired','revoked')),
+      kind              text    not null check (kind in ('send_once','reply_window')),
+      bot_id            text    not null check (bot_id <> ''),
+      group_id          text    not null check (group_id <> ''),
+      content           jsonb   not null,
+      media             text    not null check (media in ('text','voice','either')),
+      text_fallback     boolean not null,
+      trigger           jsonb   not null,
+      term              jsonb   not null,
+      quota             jsonb   not null,
+      used_messages     integer not null default 0 check (used_messages >= 0),
+      last_send_at      bigint  check (last_send_at is null or last_send_at >= 0),
+      auth_source       text    not null check (auth_source = 'owner_qq_private'),
+      dedupe_key        text    not null check (dedupe_key <> ''),
+      created_at        bigint  not null check (created_at >= 0),
+      updated_at        bigint  not null check (updated_at >= 0),
+      revoked_at        bigint,
+      /* 只 'either' 允许文字兜底（只语音/只文字都不许） */
+      constraint qq_group_tasks_text_fallback_vocab check (media = 'either' or not text_fallback),
+      constraint qq_group_tasks_dedupe_unique unique (dedupe_key))`,
+    `create unique index if not exists qq_group_tasks_one_open_reply_window
+      on qq_group_tasks (bot_id, group_id)
+      where kind = 'reply_window' and status in ('active','paused','clarifying')`,
+    `create index if not exists qq_group_tasks_group_status
+      on qq_group_tasks (bot_id, group_id, status, created_at desc)`,
+    `create table if not exists qq_group_task_events (
+      event_id  text    primary key,
+      task_id   text    not null,
+      version   integer not null check (version >= 1),
+      event     text    not null check (event in ('create','modify','pause','resume','stop','send_reserved','send_settled','expired','exhausted','complete')),
+      detail    jsonb   not null default '{}'::jsonb,
+      at        bigint  not null check (at >= 0))`,
+    `create index if not exists qq_group_task_events_task
+      on qq_group_task_events (task_id, at, event_id)`,
+    `create table if not exists qq_group_send_instances (
+      id                  text    primary key,
+      task_id             text    not null,
+      task_version        integer not null check (task_version >= 1),
+      state               text    not null check (state in ('queued','in_flight','api_accepted','failed_confirmed','unknown')),
+      reserved_messages   integer not null check (reserved_messages between 1 and 3),
+      media               text    not null check (media in ('text','voice','either')),
+      group_id            text    not null check (group_id <> ''),
+      bot_id              text    not null check (bot_id <> ''),
+      inbound_message_id  text,
+      text_fingerprint    text,
+      platform_message_id text,
+      created_at          bigint  not null check (created_at >= 0),
+      settled_at          bigint,
+      /* 平台接受必须有平台消息 id（"接受了却不知道是哪条"是不可审计的） */
+      constraint qq_group_send_instances_accepted_has_id check (state <> 'api_accepted' or platform_message_id is not null),
+      /* 终态必须有结算时刻；未发出的两态不许有 */
+      constraint qq_group_send_instances_settled_vocab check (
+        (state in ('queued','in_flight')) = (settled_at is null)))`,
+    `create index if not exists qq_group_send_instances_task_state
+      on qq_group_send_instances (task_id, state)`,
+    `create index if not exists qq_group_send_instances_state
+      on qq_group_send_instances (state)`,
+    `create index if not exists qq_group_send_instances_task_inbound
+      on qq_group_send_instances (task_id, inbound_message_id)`,
+    `create index if not exists qq_group_send_instances_task_created
+      on qq_group_send_instances (task_id, created_at)`,
+  ],
+}
+
 /** 全部迁移，按版本升序。新增迁移**只许往后追加**。 */
 export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_0001,
@@ -1979,10 +2240,28 @@ export const MIGRATIONS: readonly Migration[] = [
   MIGRATION_0021,
   MIGRATION_0022,
   { version: 23, name: 'lg-runtime-compatibility-tables', statements: [...COMPATIBILITY_SCHEMA_DDL] },
+  { version: 24, name: 'owner-qq-relay-tasks', statements: [
+    `alter table notification_intents add column if not exists relay_metadata jsonb`,
+    `alter table notification_intents drop constraint notification_intents_kind_vocab`,
+    `alter table notification_intents add constraint notification_intents_kind_vocab check (kind in ('reminder','care','relay'))`,
+    `alter table notification_occurrences drop constraint notification_occurrences_kind_vocab`,
+    `alter table notification_occurrences add constraint notification_occurrences_kind_vocab check (kind in ('reminder','care','relay'))`,
+    `alter table notification_intents drop constraint notification_intents_reminder_has_text`,
+    `alter table notification_intents add constraint notification_intents_reminder_has_text check ((kind <> 'care') = (text is not null))`,
+    `alter table notification_intents drop constraint notification_intents_reminder_has_source`,
+    `alter table notification_intents add constraint notification_intents_reminder_has_source check ((kind <> 'care') = has_source)`,
+    `alter table notification_intents add constraint notification_intents_relay_binding check (
+      (kind = 'relay') = (relay_metadata is not null) and
+      (kind <> 'relay' or (delivery_channel = 'qq_private' and coalesce(repeat_mode,'once') = 'once')))`,
+    `create unique index if not exists notification_intents_relay_dedupe on notification_intents(dedupe_key) where kind = 'relay'`,
+  ] },
+  MIGRATION_0025,
+  MIGRATION_0026,
+  MIGRATION_0027,
 ]
 
 /*
- * ⚠️⚠️ **没有迁移 0024** —— W1-a 曾写过一个，2026-10-19 **撤销**，如实记录理由：
+ * 历史：W1-a 曾提出的冗余迁移 0024 于 2026-10-19 撤销；当前 0024 用于独立的转告任务扩展。
  *
  *   实测（`scripts/probe-migration-overlap.ts` + 门 `thinhost:lgmigration:verify`）：
  *   迁移 **0023**（`lg-runtime-compatibility-tables`）**已经完整覆盖**了

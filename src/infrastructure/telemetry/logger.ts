@@ -39,13 +39,21 @@
  *    上游签名是 `(obj, msg, ...args)`，本实现只取第一个实参并**如实字符串化**。
  */
 
-export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error' | 'diagnostic'
 
 export interface Logger {
   debug(message: unknown): void
   info(message: unknown): void
   warn(message: unknown): void
   error(message: unknown): void
+  /**
+   * ADR-156 / P3-E：**生产可见的诊断读数**（写 stderr）。
+   *
+   * ⚠️ 它**不是** warn/error 级别（不改变告警语义），只是换个出口：
+   *    生产核心的 stdout 是桥接协议管道（不转发），stderr 被外壳转发 ⇒
+   *    走 stderr 的读数在生产真的能被看到。
+   */
+  diagnostic(message: unknown): void
 }
 
 /** 单一出口 —— 将来要落 journal 时**只改这里** */
@@ -64,7 +72,12 @@ export interface LogSink {
  */
 const consoleSink: LogSink = {
   write: (level, line) => {
-    if (level === 'error' || level === 'warn') console.error(line)
+    /*
+     * ⚠️ `diagnostic` 也走 **stderr**（ADR-156 / P3-E）：它不是告警级别，
+     *    只是"换个出口"—— 生产核心的 stdout 是桥接协议管道（不转发），
+     *    而 stderr 被外壳转发到 journal ⇒ 走 stderr 的诊断在生产**真的能被看到**。
+     */
+    if (level === 'error' || level === 'warn' || level === 'diagnostic') console.error(line)
     else console.log(line)
   },
 }
@@ -137,4 +150,5 @@ export const logger: Logger = {
   info: (m) => emit('info', m),
   warn: (m) => emit('warn', m),
   error: (m) => emit('error', m),
+  diagnostic: (m) => emit('diagnostic', m),
 }

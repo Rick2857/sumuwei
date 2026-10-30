@@ -269,6 +269,7 @@ const SCENARIOS: Array<{ id: string; run: () => Promise<void>; extraDatabases?: 
         await s.seedClaim('education.institution', '示例工程科技大学', 'person_fact')
         const before = await s.state()
         const outcome = await s.runTurn('忘掉我在示例工程科技大学上学这件事')
+
         const after = await s.state()
         report.check(
           '正控：受支持的 forget **真的**产生了 retract',

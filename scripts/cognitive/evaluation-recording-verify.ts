@@ -55,14 +55,14 @@ const eventMeaning=(all:EvaluationRow[])=>all.filter(r=>r.kind==='ebl-event').ma
   verdict:r.verdict,independent:r.independent,forecast:(r.model as {forecastVerdict?:string}|null)?.forecastVerdict??null}))
 const report=(parity:unknown)=>{
   const text=JSON.stringify(rows)
-  check('no source body, paths, prompt or arbitrary error text enters telemetry',!text.includes('fixture_body')&&!text.includes('fixture_path')&&!text.includes('owned output fault'))
+  check('no source body, paths, prompt or arbitrary error text enters telemetry',!text.includes('private_body')&&!text.includes('hidden_path')&&!text.includes('owned output fault'))
   writeFileSync(resolve(output,`${arm}.json`),JSON.stringify({parity,rows,checks,failures:recorder.failures,attempts,modelCalls:0},null,2))
   if(enabled)writeFileSync(resolve(output,'records.jsonl'),rows.map(row=>JSON.stringify(row)).join('\n')+'\n')
 }
 if(selected.startsWith('page-')){
   const bed=await createDocumentReadingBed(`recording-${selected}`)
   try{
-    const path=bed.file('fixture_path','fixture_body'),text=`读取「${path}」第 1 页的正文`
+    const path=bed.file('hidden_path','private_body'),text=`读取「${path}」第 1 页的正文`
     const configure=createDocumentRecoveryPlanning({...bed.modelOptions,profile:true})
     const {gateway,authorizations,staging,resolveTarget}=bed.turnHarness
     let outcome:TaskRunOutcome|undefined
@@ -89,7 +89,7 @@ if(selected.startsWith('page-')){
     const goal=turn.actionResults![0]!.task!.goal!
     check('native page observer has zero hidden failures',outcome?.epistemicFailures===0)
     check('actual page retrieval is distinct from final delivery',goal.achieved&&goal.delivered===(selected==='page-visible'||selected==='page-before-compile'))
-    check('packet body matches actual final delivery',packet.text.includes('fixture_body')===goal.delivered)
+    check('packet body matches actual final delivery',packet.text.includes('private_body')===goal.delivered)
     if(enabled){
       const final=rows.filter(r=>r.kind==='final').at(-1)!
       check('final artifact preserves actual configured and delivered values',final.goalConfigured===true&&(final.goals as {delivered:boolean}[])[0]!.delivered===goal.delivered)
@@ -104,7 +104,7 @@ if(selected.startsWith('page-')){
   const bed=await createFilePlanningBed(`recording-${selected}`)
   try{
     const control=selected.replace(/-[01]$/,''),variant=selected.endsWith('-1')
-    const {h}=bed.turnHarness,path=`fixture_path_${variant?1:0}.txt`,content='fixture_body',goal={path,expectedFingerprint:contentFingerprint(content)}
+    const {h}=bed.turnHarness,path=`hidden_path_${variant?1:0}.txt`,content='private_body',goal={path,expectedFingerprint:contentFingerprint(content)}
     const plan=(value:string):TaskPlan=>({goal:'untrusted model wording',done:true,steps:[
       {capability:'sandbox.file.write',operation:'write',args:{path,content:value}},
       {capability:'sandbox.file.read',operation:'read',args:{path}}]})

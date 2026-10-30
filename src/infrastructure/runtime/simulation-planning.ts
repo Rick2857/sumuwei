@@ -436,7 +436,13 @@ export function createF2StrategyPlanner (options: WorldModelForecastOptions & {
         plans = raw.map(plan => validateTaskPlan(plan, { registry: options.registry, allowedCapabilities: input.allowedCapabilities }))
       } catch { return fail('candidates_evaluated', input, { fallback: 'goal_unproven' }, proposed.requestCount) }
       for (const plan of plans) {
-        if (plan.steps.length === 0 || plan.steps.length > 4 || plan.steps.length > input.remainingActions) {
+        /*
+         * ⚠️ **完成声明**（`done:true, steps:[]`）必须放行到任务环的完成校验：
+         *    由"真实写入 + 最终读回 == 权威源"判定是否达成，**不**凭声明或字节自证。
+         *    `steps:[]` 但 `done:false`、或步骤数超限 ⇒ 仍按非法候选拒绝。
+         */
+        const completionClaim = plan.steps.length === 0 && plan.done === true
+        if ((!completionClaim && plan.steps.length === 0) || plan.steps.length > 4 || plan.steps.length > input.remainingActions) {
           return fail('candidates_evaluated', input, { fallback: 'goal_unproven' }, proposed.requestCount)
         }
         for (const step of plan.steps) {

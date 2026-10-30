@@ -132,6 +132,24 @@ export interface TaskAuthorization {
    * 缺省 ⇒ 无额外限制（旧入口行为逐字不变）。
    */
   sourceScopedPaths?: TaskSourceScopedPaths
+  /**
+   * **任务局部读根**（P3-5b · G5 · 可选）。
+   *
+   * ⚠️ 只约束**这一份任务授权**里"读"类动作能碰的根；**不**改全局 `local.file.read` 的能力定义。
+   * ⚠️ 由装配层在"受管 personal-library 真的参与了这个任务"之后**挂上**（见
+   *    `task-loop.ts` 的 `readRootScope`），挂载只允许**收窄**（交集），不许扩大。
+   * ⚠️ 缺省 ⇒ 无额外限制（旧入口与普通文件任务行为逐字不变）。
+   */
+  readRoots?: TaskReadRoots
+}
+
+/** 任务局部读根（G5）：读出这些根之外的路径 ⇒ **执行前**拒绝这一步。 */
+export interface TaskReadRoots {
+  /** 允许读取的根（绝对路径；规范化后按路径前缀匹配）。 */
+  readonly roots: readonly string[]
+  /** 范围来源（装配层给的稳定标识；诊断/审计用）。 */
+  readonly source: string
+
 }
 
 export type TaskCloseReason =
@@ -372,6 +390,50 @@ export function applySourceScopedPaths(
   }
   return true
 }
+/**
+ * **挂载任务局部读根**（P3-5b · G5）。
+ *
+ * 语义（**只许收窄**）：
+ *  · 没挂过 ⇒ 挂上（按传入的根）；
+ *  · 已挂过 ⇒ 新根与旧根取**交集**（`roots = existing ∩ new`）——
+ *    重复挂载、换根、多挂一次，都**不可能**把范围放大；交集为空 ⇒ 等于"这个任务不许读任何文件"，仍然安全；
+ *  · 返回 `true` 表示本次挂载被接受（范围等于交集），`false` 表示没有挂上（传 `undefined`）。
+ *
+ * ⚠️ 只有**装配层**（本轮确实有受管 personal-library 参与时）与测试夹具该调它；
+ *    模型与计划字段没有路径能到这里。
+ */
+export function applyReadRoots(
+  task: TaskAuthorization,
+  scope: TaskReadRoots | undefined
+): boolean {
+  if (scope === undefined) return false
+  const normalizeRoot = (value: string): string => value.replace(/\\/g, '/').replace(/\/+$/, '')
+  const normalizeRoots = (roots: readonly string[]): string[] =>
+    [...new Set(roots.map(normalizeRoot).filter(root => root !== ''))].sort()
+  const incoming = normalizeRoots(scope.roots)
+  const existing = task.readRoots
+  if (existing === undefined) {
+    task.readRoots = { roots: incoming, source: scope.source }
+    return true
+  }
+  const narrowed = normalizeRoots(existing.roots).filter(root =>
+    incoming.some(candidate => root === candidate || root.startsWith(`${candidate}/`) || candidate.startsWith(`${root}/`))
+  )
+  task.readRoots = { roots: narrowed, source: existing.source }
+  return true
+}
+
+/** 路径是否落在任一读根内（前缀匹配；`..` 逃逸按字符串判，交给 Gateway 的路径解析先做规范化）。 */
+export function pathWithinReadRoots(path: string, roots: readonly string[]): boolean {
+  const normalized = path.replace(/\\/g, '/')
+  return roots.some((root) => {
+    const normalizedRoot = root.replace(/\\/g, '/').replace(/\/+$/, '')
+    if (normalizedRoot === '') return false
+    return normalized === normalizedRoot || normalized.startsWith(`${normalizedRoot}/`)
+  })
+}
+
+
 export function applyBoundedObservation(
   task: TaskAuthorization,
   scope: { readonly targetPath: string; readonly conditionPath: string; readonly maxReads: number } | undefined

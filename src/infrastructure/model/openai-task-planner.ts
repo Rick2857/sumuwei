@@ -65,6 +65,10 @@ export interface OpenAiTaskPlannerOptions {
   env?: NodeJS.ProcessEnv
   timeoutMs?: number
   maxTokens?: number
+  /** ⚠️ 仅校准用：覆盖默认系统提示（缺省 ⇒ 原行为逐字不变）。 */
+  systemPrompt?: string
+  /** ⚠️ 仅校准用：可选推理深度（'low' | 'medium' | 'high'）；缺省 ⇒ 请求体不含该字段。 */
+  reasoningEffort?: 'low' | 'medium' | 'high'
   /** 能力登记表（解析计划时要问"这个操作存在吗"） */
   registry: CapabilityRegistry
   /** Opt-in up to three alternatives; ordinary planner output remains unchanged. */
@@ -270,8 +274,10 @@ export function createOpenAiTaskPlanner(options: OpenAiTaskPlannerOptions): Task
           body: JSON.stringify({
             model,
             messages: options.candidateCount === 3
-              ? [{ role: 'system', content: '只输出 JSON：{"candidates":[plan,...]}，含1到3份完整候选，最佳放第一。每份 plan 恰好 goal 字符串、done 布尔、steps 数组，最多4步。每步恰好 capability、operation、args 三个字段；例如 {"capability":"sandbox.file.write","operation":"write","args":{"path":"example.txt","content":"原文"}}。只允许 sandbox.file.write/write，args 恰好 path/content；sandbox.file.read/read，args 恰好 path。路径逐字采用任务给定相对路径，正文逐字采用指定字符串解码后的内容。每份计划均须包含最终真实读回；不要声称已执行。只有已执行摘要证明目标已完成时，才给 steps=[]/done=true 的收尾计划。' }, buildTaskPlannerMessages(input)[1]!]
+              ? [{ role: 'system', content: options.systemPrompt ?? '只输出 JSON：{"candidates":[plan,...]}，含1到3份完整候选，最佳放第一。每份 plan 恰好 goal 字符串、done 布尔、steps 数组，最多4步。每步恰好 capability、operation、args 三个字段；例如 {"capability":"sandbox.file.write","operation":"write","args":{"path":"example.txt","content":"原文"}}。只允许 sandbox.file.write/write，args 恰好 path/content；sandbox.file.read/read，args 恰好 path。路径逐字采用任务给定相对路径，正文逐字采用指定字符串解码后的内容。每份计划均须包含最终真实读回；不要声称已执行。只有已执行摘要证明目标已完成时，才给 steps=[]/done=true 的收尾计划。' }, buildTaskPlannerMessages(input)[1]!]
               : buildTaskPlannerMessages(input),
+            ...(options.reasoningEffort === undefined ? {} : { reasoning_effort: options.reasoningEffort }),
+
             temperature: 0,
             max_tokens: maxTokens,
             stream: false,

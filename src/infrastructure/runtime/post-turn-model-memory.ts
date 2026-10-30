@@ -7,6 +7,8 @@ import { qualificationEstablishesUserFact, sourceQualificationOf } from '../../k
 import { processorEventViewOf } from '../../kernel/app/memory/extractor.ts'
 import { EBL_PREFERENCE_PREDICATE } from '../../kernel/app/epistemic-belief-lifecycle/human-policy.ts'
 import { eblOwnsPreferenceSource } from './epistemic-preference.ts'
+import { semanticMemoryDisposition } from '../persistence/semantic-entry-memory.ts'
+
 import { createMemoryMutationValidator } from '../../kernel/policies/memory-validator.ts'
 import { createLateWriteFence } from '../../kernel/app/reflection/late-write-fence.ts'
 import { exec, type RawDb } from '../persistence/db.ts'
@@ -217,6 +219,8 @@ export class PostTurnModelMemoryConsumer {
   constructor(private readonly input: {
     db: RawDb; characterId: CharacterId; speaker: EntityRef; registry: DomainEventRegistry
     ownerUserId?: string
+    semanticEntryEnabled?: boolean
+
     epistemicManagedStyle?: boolean
     invoke: (prompt: string) => Promise<string>; onReading: (reading: ModelMemoryReading) => void
   }) {}
@@ -288,9 +292,14 @@ export class PostTurnModelMemoryConsumer {
       const records = trustedUser ? (await createNativeMemoryStore(db).listBySubject(entityRef('character', String(characterId)), speaker)).slice(-50) : []
       const recent = trustedUser ? await exec(db, sql`select actor_type, content from conversation_events where conversation_id = ${String(event.conversationId)}
         and sequence < ${event.sequence} order by sequence desc limit 12`, 'memory reference context') : []
-      const plan = trustedUser ? parseModelMemoryPlan(await invoke(modelMemoryPrompt({ event, records,
+      const disposition = this.input.semanticEntryEnabled ? await semanticMemoryDisposition(db, characterId, String(event.id)) : 'legacy'
+      const plan = trustedUser && disposition !== 'skip' ? parseModelMemoryPlan(await invoke(modelMemoryPrompt({ event, records,
         recent: recent.reverse().map((row) => ({ actor: String(row.actor_type), text: String(row.content).slice(0, 500) })) })), event.content, records)
         : { destination: 'none' as const, decisions: [] }
+      if (disposition === 'automatic') {
+        plan.decisions = plan.decisions.filter(decision => decision.operation === 'create' && !decision.explicit)
+        plan.destination = plan.decisions.length ? 'long_term' : 'none'
+      }
       if (!db.transaction) throw new Error('model_memory_transaction_required')
       const createdIds: string[] = []
       const created = await db.transaction(async (tx) => {

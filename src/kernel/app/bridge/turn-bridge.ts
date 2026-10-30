@@ -34,6 +34,7 @@
  */
 
 import { KernelError } from '../../contracts/ids.ts'
+import { GROUP_TASK_VOICE_DISPATCH_TTL_MS } from '../../contracts/qq-group-task.ts'
 import {
   bindSpeechExpression,
   decodeExpressiveSpeech,
@@ -75,12 +76,49 @@ export type BridgeTurnOutcome =
   /** 走完了 LG 正式轮次，回复**已提交**（生成账已落） */
   | 'replied'
   /**
+   * **有意不回**（ADR-156 / P3-C）：程序判据决定这一轮**不产生回复**。
+   *
+   * ```text
+   * 与 'failed' 的区别 —— 这是**正常结果**，不是故障：
+   *   不调模型（判据在轮次之前）· 不写账本 · 不发任何消息 · 外壳**不**发"失败提示"
+   * 与 'rejected' 的区别 —— 请求**完全合法**，是"这一轮该沉默"，不是"门槛不让你进"
+   * ```
+   *
+   * ⚠️ `code` 必须落在 `BRIDGE_SILENT_CODES` 里（闭集），不能拿它夹带别的失败。
+   */
+  | 'no_reply'
+  /**
    * 桥拒绝了这个请求（形状非法 / 越界 / 序号过期）。
    * ⚠️ 这是**正常结果**，不是故障 —— 与 FC-03 的 `rejected` 同一个立场。
    */
   | 'rejected'
   /** 轮次中途失败（模型不可达、守卫链抛错……）。**已提交的部分不撤销**。 */
   | 'failed'
+
+/**
+ * "有意不回"的**具名理由闭集**（ADR-156 / P3-C；P3-H 加第四项）。
+ *
+ * ⚠️ 只放**程序判据**与**模型的显式拒答**：
+ *    - `group_task_inbound_suppressed`：入站被生效中的群任务抑制 / 任务范围不含这条消息
+ *    - `group_task_model_declined`：模型**显式**判定本轮不回（标记逐字全等，见 ADR-156 / P3-F）
+ *    - `qq_group_not_authorized`：这条群入站**既不属于任何生效任务、旧静态名单也不放行**
+ *      （⚠️ P3-H 加：它原来走 `failed` ⇒ 外壳记 `lg_turn_failed` 并**尝试**发一句失败提示
+ *       （被旧名单拦住）。用户裁定「不允许的群**静默忽略**，不尝试发送失败提示」
+ *       ⇒ 正确的表达就是"这一轮有意不回"，不是"失败"。见 CONTRACT §2.2 ②）
+ * ⚠️ 闭集外的码一律按**失败**处理（失败关闭，不假装沉默）。
+ */
+export const BRIDGE_SILENT_CODES = [
+  'group_task_inbound_suppressed',
+  'group_task_model_declined',
+  'qq_group_not_authorized',
+] as const
+
+export type BridgeSilentCode = (typeof BRIDGE_SILENT_CODES)[number]
+
+/** 这个理由码是不是"有意不回"（闭集判定；未知码 ⇒ `false` ⇒ 走失败路径） */
+export function isBridgeSilentCode(code: string): code is BridgeSilentCode {
+  return (BRIDGE_SILENT_CODES as readonly string[]).includes(code)
+}
 
 export interface BridgeSubmitRequest {
   images?: readonly ImageInput[]
@@ -126,6 +164,33 @@ export interface BridgeSubmitResult {
    */
   media?: QqMediaSelection
   /**
+   * ADR-156 / P3-B：这一轮是**群任务接管轮**时，核心把任务身份交给外壳。
+   *
+   * ```text
+   * 核心（有库）判：该群有生效回复任务 + 这条入站结构上满足 ⇒ task_candidate
+   * 外壳（无库）据此：把**这一条回复**发往该群时跳过旧静态群名单
+   * ```
+   *
+   * ⚠️ 它**不是**"允许往这个群发任意消息"：外壳仍要求群号与本条目标**逐字相同**，
+   *    且只在这一次回复的投递期间有效（投递完立刻清空）。
+   * ⚠️ 它只影响**回复**这一条：派发式群发送仍只走 `deliverGroupTaskMessage` 的窄路径。
+   * ⚠️ 缺席 ⇒ 外壳按旧静态名单检查 ⇒ 旧行为逐字不变。
+   */
+  groupTaskReply?: { groupId: string; taskId: string; taskVersion: number }
+  /**
+   * ADR-156 / P3-G：这一轮若是**群任务接管轮**且回复已经走**派发通道**，这里带平台回执读数。
+   *
+   * ```text
+   * 出现 ⇔ 接管轮的正文已经由 `DELIVER_GROUP_TASK` 交给外壳发送（**核心拿得到平台回执**）
+   *      ⇒ 本结果的 `replyText` **缺席**（单一发送出口，杜绝双发）
+   * 缺席 ⇔ 旧路径：外壳照旧从 `replyText` 发送（逐字旧行为）
+   * ```
+   *
+   * ⚠️ 外壳**必须**在看到它时**什么都不发**：正文已经由派发那条出口发过了；
+   *    再发一次就是"同一条回复两条消息"，再发一句"失败提示"就是 P3-C 修掉的那个缺陷。
+   */
+  groupTaskDispatch?: BridgeGroupTaskDeliveryReading
+  /**
    * post-Lv2 / P2：语音回复的**伴随来源附录**（程序追加，给眼睛看的）。
    *
    * ⚠️ 只在"语音真的发出"时有意义：语音正文不念 URL；附录作为**另一条文字**发出。
@@ -158,6 +223,7 @@ export interface BridgeSubmitResult {
   traceId?: string
   /** 这一轮实际提交的领域事件 id（**只报计数与 id，不带正文**） */
   domainEventIds?: readonly string[]
+  knowledgeAppendix?: string
   /**
    * 本轮回复守卫的观测三态（**只放枚举标签，不含正文**）。
    *
@@ -170,8 +236,9 @@ export interface BridgeSubmitResult {
    *
    * ⚠️ `'generated'` **不等于** `'played'`：桥只负责生成与提交，
    * 播放确认由客户端上报（`INV-PL2-10`）。桥**从不**声称"已经播出"。
+   * ⚠️ `'none'` 只在 `outcome === 'no_reply'` 出现：**有意不回**，没有任何东西被交付。
    */
-  delivery: 'generated' | 'rejected' | 'failed'
+  delivery: 'generated' | 'rejected' | 'failed' | 'none'
 }
 
 /**
@@ -388,6 +455,22 @@ export interface HostTurnResult {
    * ⚠️ host 只报"她选了什么"，**不**报合成/发送结果 —— 那是外壳与投递事实的事。
    */
   media?: QqMediaSelection
+  /**
+   * ADR-156 / P3-B：这一轮是**群任务接管轮**时，host 把任务身份交给外壳（可选）。
+   *
+   * ⚠️ 这是**程序事实**（持久层任务 + 路由判定），不是模型输出、也不是发送权限。
+   * ⚠️ 缺席 ⇒ 外壳按旧静态群名单检查 ⇒ 旧行为逐字不变。
+   */
+  groupTaskReply?: { groupId: string; taskId: string; taskVersion: number }
+  /**
+   * ADR-156 / P3-G：群任务接管轮的回复**已经通过派发通道发出**（可选）。
+   *
+   * ⚠️ 出现 ⇒ 桥**不**把 `replyText` 放回 `TURN_RESULT`（单一发送出口，记录 §7.7 末条）。
+   * ⚠️ 缺席 ⇒ 桥照旧把 `replyText` 放回（旧路径逐字不变）。
+   * ⚠️ 必须由 host 在**回复正文已过全部回复守卫**之后才填：它是对"已经发出去的正文"的读数，
+   *    不是发送许可。
+   */
+  groupTaskDispatch?: BridgeGroupTaskDeliveryReading
   /** post-Lv2 / P2：语音回复的伴随来源附录（可选；缺席 = 无附录） */
   mediaAppendix?: string
   /**
@@ -401,6 +484,7 @@ export interface HostTurnResult {
   replyId: string
   traceId: string
   domainEventIds: readonly string[]
+  knowledgeAppendix?: string
   /**
    * 本轮回复守卫的**观测三态**（可选；只放枚举标签与标记词，**不含正文**）。
    *
@@ -450,12 +534,36 @@ export interface TurnBridgeOptions {
   maxUserTextLength?: number
   /** 幂等缓存的容量上限（FIFO 淘汰；只缓存**结局**，不缓存 prompt） */
   idempotencyCacheSize?: number
+  /**
+   * ADR-156 / P3-G：一条群任务派发**等回执**的上限（毫秒；缺省 {@link DEFAULT_GROUP_TASK_DELIVERY_TIMEOUT_MS}）。
+   *
+   * ⚠️ 可注入是**门的要求**：门的"外壳不回执 ⇒ 结果未知"那条负控若走缺省 5 000 ms，
+   *    一轮门就要空等好几秒（多条就变成几十秒）。
+   */
+  groupTaskDeliveryTimeoutMs?: number
+  /**
+   * ADR-156 / P3-I：一次**只读群列表**查询等回执的上限（毫秒；缺省 {@link DEFAULT_GROUP_LIST_TIMEOUT_MS}）。
+   *
+   * ⚠️ 可注入同样是**门的要求**：门的"外壳不回群列表 ⇒ 具名超时"那条负控
+   *    若走缺省 5 000 ms，一条门就要空等好几秒。
+   */
+  groupListTimeoutMs?: number
   now?: () => number
 }
 
 /** 默认上限：一轮用户话 4000 字符（远超正常发言，低于"整段转写"） */
 export const DEFAULT_MAX_USER_TEXT_LENGTH = 4000
 const DEFAULT_IDEMPOTENCY_CACHE = 64
+
+/**
+ * ADR-156 / P3-G：一条群任务派发**等平台的**上限。
+ *
+ * ```text
+ * 为什么是 5 秒：外壳那条是"一次 `send_group_msg` 的往返"（真实链路实测通常在 1 秒内）。
+ * 超时 ⇒ 按**结果未知**结算（保守占额），**不重发、不切侧信道补发**。
+ * ```
+ */
+export const DEFAULT_GROUP_TASK_DELIVERY_TIMEOUT_MS = 5_000
 
 /**
  * 主动投递正文的**码点**上界（post-Lv2 / ADR-110 `D07`）。
@@ -580,6 +688,65 @@ export class TurnBridge {
     lastCode: null as string | null,
     lastDeliveryId: null as string | null,
   }
+  /**
+   * ADR-156 / P3-G：**在途的群任务派发**（`deliveryKey` → 等待项）。
+   *
+   * ```text
+   * 核心（装配层）先原子预留额度 ⇒ 调 `deliverGroupTask` ⇒ 这里挂一个等待项
+   *   ⇒ 写一条 `DELIVER_GROUP_TASK` 给外壳
+   *   ⇒ 外壳发完回 `REPORT_GROUP_TASK_DELIVERY` ⇒ `acceptGroupTaskDeliveryReport` resolve 它
+   *   ⇒ 超时（缺省 5 000 ms）⇒ 按**结果未知**resolve，**不重试**
+   * ```
+   *
+   * ⚠️ 同一 `deliveryKey` 重复调用**复用同一个 promise**（不写第二条指令）：
+   *    那条指令一旦发出去，重发就等于**在群里多发一条消息**（"重试"在这里是有害的）。
+   * ⚠️ 表只存**在途**的；回执到 / 超时都会删键 ⇒ 不会无限增长。
+   */
+  private readonly groupTaskPending = new Map<string, {
+    resolve: (reading: BridgeGroupTaskDelivery) => void
+    timer: ReturnType<typeof setTimeout>
+    promise: Promise<BridgeGroupTaskDelivery>
+  }>()
+  /** 派发读数（只计数与最后一个理由码；**不含**正文） */
+  private readonly groupTaskDispatchReadingState = {
+    written: 0,
+    refused: 0,
+    reported: 0,
+    timedOut: 0,
+    replayed: 0,
+    lastCode: null as string | null,
+  }
+  /** 一条群任务派发等回执的上限（毫秒；见 {@link TurnBridgeOptions.groupTaskDeliveryTimeoutMs}） */
+  private readonly groupTaskDeliveryTimeoutMs: number
+  private readonly groupTaskVoiceDeliveryTimeoutMs: number
+  /**
+   * ADR-156 / P3-I：**在途的群列表查询**（`requestId` → 等待项）。
+   *
+   * ```text
+   * 核心先写一条 `LIST_GROUPS` ⇒ 这里挂一个等待项 ⇒ 外壳只读 `get_group_list`
+   *   ⇒ 回 `LIST_GROUPS_RESULT` ⇒ `acceptGroupListResult` resolve 它
+   *   ⇒ 超时（缺省 5 000 ms）⇒ `{ ok:false, code:'group_task_group_list_timeout' }`
+   * ```
+   *
+   * ⚠️ 表只存**在途**的；回执到 / 超时都会删键 ⇒ 不会无限增长。
+   * ⚠️ 每条查询一个**唯一**关联键（进程内自增）：复用一个键会让两条查询互相顶掉。
+   */
+  private readonly groupListPending = new Map<string, {
+    resolve: (reading: BridgeGroupListReading) => void
+    timer: ReturnType<typeof setTimeout>
+  }>()
+  /** 群列表查询的关联键计数器（**只增不减**；进程内唯一即可） */
+  private groupListSeq = 0
+  /** 群列表查询读数（只计数与最后一个理由码；**不含群名/正文**） */
+  private readonly groupListReadingState = {
+    written: 0,
+    answered: 0,
+    timedOut: 0,
+    refused: 0,
+    lastCode: null as string | null,
+  }
+  /** 一次群列表查询等回执的上限（毫秒；见 {@link TurnBridgeOptions.groupListTimeoutMs}） */
+  private readonly groupListTimeoutMs: number
 
   constructor(options: TurnBridgeOptions) {
     if (!options.host) {
@@ -595,6 +762,9 @@ export class TurnBridge {
     this.host = options.host
     this.maxUserTextLength = options.maxUserTextLength ?? DEFAULT_MAX_USER_TEXT_LENGTH
     this.idempotencyCacheSize = options.idempotencyCacheSize ?? DEFAULT_IDEMPOTENCY_CACHE
+    this.groupTaskDeliveryTimeoutMs = options.groupTaskDeliveryTimeoutMs ?? DEFAULT_GROUP_TASK_DELIVERY_TIMEOUT_MS
+    this.groupTaskVoiceDeliveryTimeoutMs = options.groupTaskDeliveryTimeoutMs ?? GROUP_TASK_VOICE_DISPATCH_TTL_MS
+    this.groupListTimeoutMs = options.groupListTimeoutMs ?? DEFAULT_GROUP_LIST_TIMEOUT_MS
     this.now = options.now ?? Date.now
   }
 
@@ -691,15 +861,38 @@ export class TurnBridge {
         ...(outcome.streamStatus !== undefined ? { streamStatus: outcome.streamStatus } : {}),
         ...(outcome.streamStatus === 'interrupted' || outcome.streamStatus === 'cancelled'
           ? { code: `speech_stream_${outcome.streamStatus}` } : {}),
-        replyText: outcome.replyText,
+        /*
+         * ADR-156 / P3-G：**单一发送出口**。
+         *
+         * 接管轮的正文已经由 `deliverGroupTask` 交给外壳发过（并且拿到了平台回执读数），
+         * 所以这里**不再**把正文放回 `TURN_RESULT` —— 两条路同时带正文就是"可能重复发送"，
+         * 那是本批要消灭的头号风险（记录 §7.7 末条）。
+         * ⚠️ `replyId` / `traceId` / `domainEventIds` 照旧带上：账本那一侧的身份没有变，
+         *    变的只是"这条正文由谁发送"。
+         * ⚠️ host 仍然必须交出非空 `replyText`（上面的完整性检查不放宽）：它是对
+         *    "这一轮确实生成了一条过守卫的回复"的机器判据，与"由谁发送"是两件事。
+         */
+        ...(outcome.groupTaskDispatch === undefined ? { replyText: outcome.replyText } : {}),
         replyId: outcome.replyId,
         traceId: outcome.traceId,
         domainEventIds: [...outcome.domainEventIds],
+        ...(outcome.knowledgeAppendix ? { knowledgeAppendix: outcome.knowledgeAppendix } : {}),
         ...(outcome.guardStates !== undefined ? { guardStates: [...outcome.guardStates] } : {}),
         delivery: outcome.streamStatus === 'interrupted' || outcome.streamStatus === 'cancelled' ? 'failed' : 'generated',
         ...(outcome.expression !== undefined ? { expression: outcome.expression } : {}),
         /* post-Lv2 / P1：媒介选择原样运输（形状由契约保证；桥不重判她的选择） */
         ...(outcome.media !== undefined ? { media: outcome.media } : {}),
+        /*
+         * ADR-156 / P3-B：群任务接管轮的任务身份原样运输。
+         * ⚠️ 桥**不**重判它（核心已经按持久层任务判过）；它只决定"这条回复能不能
+         *    跳过外壳的旧静态群名单"，且外壳还要逐字比对群号。
+         */
+        ...(outcome.groupTaskReply !== undefined ? { groupTaskReply: outcome.groupTaskReply } : {}),
+        /*
+         * ADR-156 / P3-G：这一轮的正文**已经走派发通道发出** ⇒ 把平台三态一并交回外壳。
+         * ⚠️ 外壳见到它必须**什么都不发**（正文已发；再发失败提示 = P3-C 那个缺陷的镜像）。
+         */
+        ...(outcome.groupTaskDispatch !== undefined ? { groupTaskDispatch: outcome.groupTaskDispatch } : {}),
         /* post-Lv2 / P2：语音回复的伴随附录原样运输（程序追加；不进账本正文） */
         ...(outcome.mediaAppendix !== undefined ? { mediaAppendix: outcome.mediaAppendix } : {}),
         /* `P4` 后的时延修复：阶段耗时**原样**带出去（只是读数，不参与任何判据） */
@@ -726,6 +919,16 @@ export class TurnBridge {
        *   不含任何正文；再压成一行、截断到 400 字符。
        */
       if (error instanceof KernelError) {
+        /*
+         * ADR-156 / P3-C：**有意不回**不是失败。
+         *
+         * ⚠️ 判据闭集在 `BRIDGE_SILENT_CODES`：闭集**外**的码仍然走下面的失败路径
+         *    （失败关闭 —— 不认识的拒绝不许被当成"沉默"）。
+         */
+        if (isBridgeSilentCode(code)) {
+          console.error(`[bridge] 本轮有意不回 code=${code} · ${singleLine(error.message, 400)}`)
+          return { outcome: 'no_reply', code, delivery: 'none' }
+        }
         console.error(`[bridge] 轮次失败 code=${code} · ${singleLine(error.message, 400)}`)
       }
       return { outcome: 'failed', code, delivery: 'failed' }
@@ -765,8 +968,11 @@ export class TurnBridge {
         || request.groupContext.length > 20 || request.groupContext.some(line => !line ||
           typeof line.senderId !== 'string' || !(request.platformFacts?.transport === 'wechat'
             ? /^[a-zA-Z][a-zA-Z0-9_-]{2,100}$/ : /^[1-9]\d{4,19}$/).test(line.senderId) ||
-          typeof line.text !== 'string' || line.text.length > 1000 || !Number.isFinite(line.at))
-        || request.groupContext.reduce((sum, line) => sum + line.text.length, 0) > 6000) return 'invalid_group_context'
+          typeof line.text !== 'string' || line.text.length > 1000 || !Number.isFinite(line.at) ||
+          platformDisplayNameProblem(line.name) !== undefined || groupMessageContextProblem(line))
+        || request.groupContext.reduce((sum, line) => sum + line.text.length, 0) > 6000
+        || request.groupContext.filter(line => line.isCurrent).length > 1
+        || request.groupContext.some(line => line.isCurrent && line.senderId !== request.platformFacts?.senderUserId)) return 'invalid_group_context'
     }
     return imageInputShapeError(request.images)
   }
@@ -1351,6 +1557,200 @@ export class TurnBridge {
     return { written: true }
   }
 
+  // -------------------------------------------------------------------------
+  // ADR-156 / P3-G：**群任务派发**（核心 → 外壳，带平台回执）
+  // -------------------------------------------------------------------------
+
+  /**
+   * 把一条**已经过回复守卫**的群任务接管轮回复交给外壳去发，并**等平台回执**。
+   *
+   * ============================================================================
+   *  为什么它必须是"带回执的"（记录 §7.2 / §7.3）
+   * ============================================================================
+   * ```text
+   * 旧形态：接管轮的正文随 `TURN_RESULT.replyText` 回外壳、由外壳自己发
+   *   ⇒ 平台回执（`message_id`）**只有外壳知道**，核心一个字都拿不到
+   *   ⇒ 账本里没有实例行 ⇒ 任务额度对"接管轮"完全无效（实测 `used_messages=0`）
+   *   ⇒ "这条到底发没发出去"只能靠人眼看（V1 只能由主人确认）
+   * 新形态：核心先**原子预留**额度 → 用这条指令把正文交给外壳 → 外壳用**原有队列**发
+   *   → 外壳回 `REPORT_GROUP_TASK_DELIVERY` → 核心按**平台结果**结算
+   * ```
+   *
+   * ---------------------------------------------------------------------------
+   *  失败关闭（每条具名；前七类**都没有写出去**）
+   * ---------------------------------------------------------------------------
+   * ```text
+   * ① `deliveryKey` 空            ⇒ `group_task_dispatch_without_key`
+   * ② `groupId` 非法              ⇒ `group_task_dispatch_bad_group`
+   * ③ `taskId` 空                 ⇒ `group_task_dispatch_bad_task`
+   * ④ `taskVersion` 非 ≥1 安全整数 ⇒ `group_task_dispatch_bad_version`
+   * ⑤ 正文空 / 超上界             ⇒ `group_task_dispatch_without_text` / `_text_too_long`
+   * ⑥ `media` / `reservedMessages` / `expiresAt` / `quoteMessageId` / `textFallback` 形状错
+   * ⑦ 没有出站通道                ⇒ `delivery_unknown` + `output_channel_absent`（**不**假装发过）
+   * ```
+   *
+   * ⚠️ 形状拒绝一律回 `failed_confirmed`（**确定未发出** ≠ 结果未知）。
+   * ⚠️ 超时 ⇒ `delivery_unknown` + `group_task_delivery_timeout`，**不重试、不切侧信道补发**。
+   * ⚠️ 同一 `deliveryKey` 在途 ⇒ **复用同一个 promise**，不写第二条指令（重发 = 群里多一条消息）。
+   * ⚠️ 回执只由 {@link acceptGroupTaskDeliveryReport} 落地：**没有回执就没有"已接受"**。
+   */
+  async deliverGroupTask(
+    input: BridgeGroupTaskDispatchInstruction & { timeoutMs?: number }
+  ): Promise<BridgeGroupTaskDelivery> {
+    const deliveryKey = typeof input.deliveryKey === 'string' ? input.deliveryKey.trim() : ''
+    if (deliveryKey === '') return this.refuseGroupTaskDispatch('group_task_dispatch_without_key')
+    const groupId = typeof input.groupId === 'string' ? input.groupId.trim() : ''
+    if (!/^[1-9]\d{0,19}$/.test(groupId)) return this.refuseGroupTaskDispatch('group_task_dispatch_bad_group')
+    const taskId = typeof input.taskId === 'string' ? input.taskId.trim() : ''
+    if (taskId === '') return this.refuseGroupTaskDispatch('group_task_dispatch_bad_task')
+    if (typeof input.taskVersion !== 'number' || !Number.isSafeInteger(input.taskVersion) || input.taskVersion < 1) {
+      return this.refuseGroupTaskDispatch('group_task_dispatch_bad_version')
+    }
+    const text = typeof input.text === 'string' ? input.text : ''
+    if (text.trim() === '') return this.refuseGroupTaskDispatch('group_task_dispatch_without_text')
+    if ([...text].length > QQ_DELIVERY_TEXT_MAX_CODEPOINTS) {
+      return this.refuseGroupTaskDispatch('group_task_dispatch_text_too_long')
+    }
+    if (input.media !== 'text' && input.media !== 'voice') {
+      return this.refuseGroupTaskDispatch('group_task_dispatch_bad_media')
+    }
+    if (typeof input.reservedMessages !== 'number' || !Number.isSafeInteger(input.reservedMessages)
+      || input.reservedMessages < 1 || input.reservedMessages > 3) {
+      return this.refuseGroupTaskDispatch('group_task_dispatch_bad_reserved')
+    }
+    if (typeof input.expiresAt !== 'number' || !Number.isFinite(input.expiresAt)) {
+      return this.refuseGroupTaskDispatch('group_task_dispatch_bad_expiry')
+    }
+    if (input.quoteMessageId !== undefined
+      && (typeof input.quoteMessageId !== 'string' || input.quoteMessageId.trim() === '')) {
+      return this.refuseGroupTaskDispatch('group_task_dispatch_bad_quote')
+    }
+    if (input.textFallback !== undefined && typeof input.textFallback !== 'boolean') {
+      return this.refuseGroupTaskDispatch('group_task_dispatch_bad_fallback')
+    }
+    if (input.appendixText !== undefined
+      && (typeof input.appendixText !== 'string' || input.appendixText.trim() === '')) {
+      return this.refuseGroupTaskDispatch('group_task_dispatch_bad_appendix')
+    }
+    if (input.appendixText !== undefined && [...input.appendixText].length > QQ_DELIVERY_TEXT_MAX_CODEPOINTS) {
+      return this.refuseGroupTaskDispatch('group_task_dispatch_appendix_too_long')
+    }
+    /*
+     * 记录 §7.8「**发送前预留足够额度**」的机器形态：
+     * 正文 1 条 + 附录 1 条（有附录时）必须都被预留住。
+     * ⚠️ 这里只判"预留 ≥ 下限"，不判上限（上限由 `reserveGroupSend` 的原子事务管）：
+     *    这一层能回答的只有"这条指令自己是不是自相矛盾"。
+     */
+    const minPlanned = 1 + Number(input.appendixText !== undefined)
+      + Number(input.media === 'voice' && input.quoteMessageId !== undefined)
+    if (input.reservedMessages < minPlanned) {
+      return this.refuseGroupTaskDispatch('group_task_dispatch_reserved_below_planned')
+    }
+    if (this.outputSink === undefined) {
+      this.groupTaskDispatchReadingState.refused += 1
+      this.groupTaskDispatchReadingState.lastCode = 'output_channel_absent'
+      return { status: 'delivery_unknown', reason: 'output_channel_absent' }
+    }
+    /*
+     * **幂等**（放在形状检查之后、写指令之前）：同一个 `deliveryKey` 还在途 ⇒
+     * 复用那个 promise。⚠️ 这不是缓存优化：指令一旦发出去，再发一次就是
+     * **群里多一条消息**，而"可能重复发送"正是本批要消灭的头号风险。
+     */
+    const existing = this.groupTaskPending.get(deliveryKey)
+    if (existing !== undefined) {
+      this.groupTaskDispatchReadingState.replayed += 1
+      return await existing.promise
+    }
+    let resolve!: (reading: BridgeGroupTaskDelivery) => void
+    const promise = new Promise<BridgeGroupTaskDelivery>((done) => { resolve = done })
+    const timeoutMs = typeof input.timeoutMs === 'number' && Number.isFinite(input.timeoutMs) && input.timeoutMs > 0
+      ? input.timeoutMs
+      : input.media === 'voice' ? this.groupTaskVoiceDeliveryTimeoutMs : this.groupTaskDeliveryTimeoutMs
+    const timer = setTimeout(() => {
+      /* 只在这里收尾一次：回执到达时会先删键，走不到这一支 */
+      if (!this.groupTaskPending.has(deliveryKey)) return
+      this.groupTaskPending.delete(deliveryKey)
+      this.groupTaskDispatchReadingState.timedOut += 1
+      this.groupTaskDispatchReadingState.lastCode = 'group_task_delivery_timeout'
+      resolve({ status: 'delivery_unknown', reason: 'group_task_delivery_timeout' })
+    }, timeoutMs)
+    this.groupTaskPending.set(deliveryKey, { resolve, timer, promise })
+    this.outputSink({
+      kind: 'DELIVER_GROUP_TASK',
+      /* ⚠️ `requestId` = `deliveryKey`（复用既有关联字段，不新造第二个） */
+      requestId: deliveryKey,
+      outcome: 'generated',
+      groupTask: {
+        deliveryKey,
+        groupId,
+        taskId,
+        taskVersion: input.taskVersion,
+        text,
+        media: input.media,
+        ...(input.quoteMessageId === undefined ? {} : { quoteMessageId: input.quoteMessageId.trim() }),
+        ...(input.textFallback === undefined ? {} : { textFallback: input.textFallback }),
+        ...(input.appendixText === undefined ? {} : { appendixText: input.appendixText.trim() }),
+        reservedMessages: input.reservedMessages,
+        expiresAt: input.expiresAt,
+      },
+    })
+    this.groupTaskDispatchReadingState.written += 1
+    this.groupTaskDispatchReadingState.lastCode = null
+    return await promise
+  }
+
+  /** 形状拒绝（**什么都没写出去**）：一律 `failed_confirmed` —— 确定未发出 ≠ 结果未知 */
+  private refuseGroupTaskDispatch(code: string): BridgeGroupTaskDelivery {
+    this.groupTaskDispatchReadingState.refused += 1
+    this.groupTaskDispatchReadingState.lastCode = code
+    return { status: 'failed_confirmed', reason: code }
+  }
+
+  /**
+   * 受理一条**派发回执**（`REPORT_GROUP_TASK_DELIVERY` 的落地手势）。
+   *
+   * ⚠️ 找不到在途项 ⇒ `{accepted:false, code:'group_task_report_unknown_key'}`
+   *    —— **不静默丢弃**（"收到后什么也没发生"在本仓库是明令禁止的形状）。
+   * ⚠️ 重复回执 / 超时之后的晚到回执都落进这一支：它们**不改变任何已结算的东西**。
+   * ⚠️ 它**不**校验形状（①②③④ 在 `handleBridgeMessage` 里做）：这里只管"有没有在等它"。
+   */
+  acceptGroupTaskDeliveryReport(input: {
+    deliveryKey: string
+    status: BridgeGroupTaskDeliveryStatus
+    messageId?: string
+    reason?: string
+  }): BridgeGroupTaskReportResult {
+    const waiting = this.groupTaskPending.get(input.deliveryKey)
+    if (waiting === undefined) {
+      this.groupTaskDispatchReadingState.lastCode = 'group_task_report_unknown_key'
+      return { accepted: false, code: 'group_task_report_unknown_key' }
+    }
+    clearTimeout(waiting.timer)
+    this.groupTaskPending.delete(input.deliveryKey)
+    this.groupTaskDispatchReadingState.reported += 1
+    this.groupTaskDispatchReadingState.lastCode = null
+    waiting.resolve({
+      status: input.status,
+      ...(input.messageId === undefined ? {} : { messageId: input.messageId }),
+      ...(input.reason === undefined ? {} : { reason: input.reason }),
+    })
+    return { accepted: true, status: input.status }
+  }
+
+  /** 派发读数（门与排错用；**只计数与最后一个理由码，不含正文**） */
+  get groupTaskDispatchReading(): {
+    written: number
+    refused: number
+    reported: number
+    timedOut: number
+    replayed: number
+    /** 在途还没回执的条数（诊断用） */
+    pending: number
+    lastCode: string | null
+  } {
+    return { ...this.groupTaskDispatchReadingState, pending: this.groupTaskPending.size }
+  }
+
   /** 投递出站的读数（门与排错用；**不含正文**） */
   get qqDeliveryReading(): {
     written: number
@@ -1359,6 +1759,109 @@ export class TurnBridge {
     lastDeliveryId: string | null
   } {
     return { ...this.qqDeliveryReadingState }
+  }
+
+  // -------------------------------------------------------------------------
+  // ADR-156 / P3-I：**只读群列表**（核心 → 外壳查询 ⇒ 外壳回事实）
+  // -------------------------------------------------------------------------
+
+  /**
+   * 向**外壳**查询"机器人当前在哪些群"（**只读**；契约 §1.2）。
+   *
+   * ============================================================================
+   *  它是"群目标消歧"的唯一群列表来源
+   * ============================================================================
+   * ```text
+   * 旧形态：核心自建**第二条** OneBot ws 连接 → `get_group_list`
+   *   ⇒ 同一个 OneBot 上两条连接；核心"自己发"与外壳"按任务发"两本账各认各的
+   * 新形态：用**已有的这条桥**问外壳 ⇒ 外壳只读 `get_group_list` ⇒ 回一张群列表
+   * ```
+   *
+   * 失败关闭（每条具名，**任何一条都不回落自建连接**）：
+   * ```text
+   * ① 没有出站通道（桥没接线/已收尾）⇒ `group_task_group_list_channel_absent`
+   * ② 外壳在期限内没回                ⇒ `group_task_group_list_timeout`
+   * ③ 外壳回了 `code`                  ⇒ **原样**把那个具名码交给调用方
+   * ```
+   *
+   * ⚠️ 它是**只读**的：不写库、不占发送队列、不调模型 —— 外壳那一侧也只发一个
+   *    `get_group_list`，**一条消息都不发**。
+   * ⚠️ 它**不是**"能不能往那个群发"的判据：那是核心按持久层任务判的（策略 A）。
+   */
+  async listGroups(input: { timeoutMs?: number } = {}): Promise<BridgeGroupListReading> {
+    if (this.outputSink === undefined) {
+      this.groupListReadingState.refused += 1
+      this.groupListReadingState.lastCode = 'group_task_group_list_channel_absent'
+      return { ok: false, code: 'group_task_group_list_channel_absent' }
+    }
+    this.groupListSeq += 1
+    const requestId = `qq-group-list:${this.groupListSeq}`
+    const timeoutMs = typeof input.timeoutMs === 'number' && Number.isFinite(input.timeoutMs) && input.timeoutMs > 0
+      ? input.timeoutMs
+      : this.groupListTimeoutMs
+    const reading = await new Promise<BridgeGroupListReading>((resolve) => {
+      const timer = setTimeout(() => {
+        /* 只在这里收尾一次：回执到达时会先删键，走不到这一支 */
+        if (!this.groupListPending.delete(requestId)) return
+        this.groupListReadingState.timedOut += 1
+        this.groupListReadingState.lastCode = 'group_task_group_list_timeout'
+        resolve({ ok: false, code: 'group_task_group_list_timeout' })
+      }, timeoutMs)
+      this.groupListPending.set(requestId, { resolve, timer })
+      this.outputSink?.({
+        kind: 'LIST_GROUPS',
+        /* ⚠️ `requestId` = 这次查询的关联键（**不是**轮次 id，与 `DELIVER_QQ_TEXT` 同一条纪律） */
+        requestId,
+        outcome: 'generated',
+      })
+      this.groupListReadingState.written += 1
+      this.groupListReadingState.lastCode = null
+    })
+    return reading
+  }
+
+  /**
+   * 受理一条**群列表回执**（`LIST_GROUPS_RESULT` 的落地手势）。
+   *
+   * ⚠️ 找不到在途查询 ⇒ `{ ok:false, code:'group_task_group_list_unknown_key' }`
+   *    —— **不静默丢弃**（"收到后什么也没发生"在本仓库是明令禁止的形状）：
+   *    那会让核心一直等到超时，而账面上看不出究竟哪一步错了。
+   * ⚠️ 重复回执 / 超时之后的晚到回执都落进这一支：它们**不改变任何已结算的东西**。
+   * ⚠️ 它**不**校验形状（形状在 `handleBridgeMessage` 里判）：这里只管"有没有在等它"。
+   */
+  acceptGroupListResult(input: {
+    requestId: string
+    groups?: readonly BridgeGroupListEntry[]
+    code?: string
+  }): BridgeGroupListReading {
+    const waiting = this.groupListPending.get(input.requestId)
+    if (waiting === undefined) {
+      this.groupListReadingState.lastCode = 'group_task_group_list_unknown_key'
+      return { ok: false, code: 'group_task_group_list_unknown_key' }
+    }
+    clearTimeout(waiting.timer)
+    this.groupListPending.delete(input.requestId)
+    this.groupListReadingState.answered += 1
+    const reading: BridgeGroupListReading = input.groups !== undefined
+      ? { ok: true, groups: input.groups }
+      : { ok: false, code: input.code ?? 'group_task_group_list_unavailable' }
+    if (!reading.ok) this.groupListReadingState.lastCode = reading.code
+    else this.groupListReadingState.lastCode = null
+    waiting.resolve(reading)
+    return reading
+  }
+
+  /** 群列表查询读数（门与排错用；**只计数与最后一个理由码，不含群名**） */
+  get groupListQueryReading(): {
+    written: number
+    answered: number
+    timedOut: number
+    refused: number
+    /** 在途还没回执的条数（诊断用） */
+    pending: number
+    lastCode: string | null
+  } {
+    return { ...this.groupListReadingState, pending: this.groupListPending.size }
   }
 }
 
@@ -1400,6 +1903,15 @@ export type BridgeMessageKind =
   | 'REPORT_QQ_DELIVERY'
   | 'REPORT_REMINDER_DELIVERY'
   /**
+   * ADR-156 / P3-G：**群任务派发的回执**（外壳 → 核心，**入站**）。
+   *
+   * ⚠️ 它是本桥第三条**与某个轮次无关**的入站消息（前两条是 `PREPARE_TURN` 与投递回执）：
+   *    它关联的是 `deliveryKey`（= 发送实例 id），**不是**任何 `requestId` 的轮次。
+   * ⚠️ 它与 `REPORT_QQ_DELIVERY` **分开**而不是复用：两者的关联键与账本都不同
+   *    （一个是投递登记，一个是任务额度账本），合在一起会让"哪本账被推进了"看不出。
+   */
+  | 'REPORT_GROUP_TASK_DELIVERY'
+  /**
    * Lv4.5 / ADR-131 `D01` · `D18`：**皮套入口的机会报文**（外壳 → 核心）。
    *
    * ⚠️ 它**不是输入**：不落 `user_message`、不占正式轮次、不写记忆。
@@ -1407,6 +1919,30 @@ export type BridgeMessageKind =
    *    ⇒ 这是本桥第三条**与某个轮次无关**的入站消息（前两条是 `PREPARE_TURN` 与投递回执）。
    */
   | 'PROACTIVE_OPPORTUNITY'
+  /**
+   * ADR-156 / P3-I：**只读群列表**（核心 → 外壳，**出站**）。
+   *
+   * ```text
+   * 为什么要新增这条指令（契约 §1.2）：
+   *   群目标消歧需要"机器人当前在哪些群"这个**外部事实**，而它只有外壳那条
+   *   OneBot 连接读得到（核心不再自建第二条 ws 连接）。
+   * 它做/不做：只发一个 `get_group_list` —— **不发任何消息**、**不占发送队列**、
+   *   **不做任何放行决定**（"有哪些群"不等于"能在哪个群发"）。
+   * ```
+   *
+   * ⚠️ 与 `DELIVER_GROUP_TASK` 同类（`requestId` 是这次查询的关联键，不是轮次 id）。
+   * ⚠️ 它**必须**有回执 `LIST_GROUPS_RESULT`：没有回执 ⇒ 核心按"群列表不可用"处理
+   *    （`group_task_group_list_timeout`），**不猜群号、不回落到任何自建连接**。
+   */
+  | 'LIST_GROUPS'
+  /**
+   * ADR-156 / P3-I：`LIST_GROUPS` 的**回执**（外壳 → 核心，**入站**）。
+   *
+   * ⚠️ 失败**必须具名**（`code`），**不许**回一个空数组冒充成功 —— 空数组是一种
+   *    合法事实（机器人一个群都不在），而"读不到"是另一件事，两者混起来会让
+   *    消歧把"读不到"当成"没有这个群"（⇒ `group_task_group_not_found`）。
+   */
+  | 'LIST_GROUPS_RESULT'
   /**
    * ADR-146 `D01`：**执行端回的一次动作结果**（外壳/PC → 核心，**入站**）。
    *
@@ -1428,6 +1964,11 @@ export const BRIDGE_MESSAGE_KINDS: readonly BridgeMessageKind[] = [
   'PREPARE_TURN',
   'REPORT_QQ_DELIVERY',
   'REPORT_REMINDER_DELIVERY',
+  /* ADR-156 / P3-G：群任务派发的回执（**闭集与查表必须同时有它**，否则两处会不一致） */
+  'REPORT_GROUP_TASK_DELIVERY',
+  /* ADR-156 / P3-I：只读群列表的**指令对**（闭集与查表必须同时有它） */
+  'LIST_GROUPS',
+  'LIST_GROUPS_RESULT',
   'PROACTIVE_OPPORTUNITY',
   'ACTION_RESULT',
 ]
@@ -1473,6 +2014,22 @@ export function isBridgeControlMessageKind(value: unknown): boolean {
      *    一条慢轮次就会把回执压到轮末 —— 而那正是"结果不明"最容易发生的窗口。
      */
     value === 'REPORT_QQ_DELIVERY' || value === 'REPORT_REMINDER_DELIVERY'
+    /*
+     * ADR-156 / P3-G：群任务派发的回执。
+     *
+     * ⚠️ 与上面两条同一条理由：它只 resolve 一个进程内的 pending（不写库、不调模型、
+     *    **不排队**）。若它落进串行泵，一条慢轮次就会把回执压到轮末 ——
+     *    而核心正**同步等**着这条回执来结算额度。
+     */
+    || value === 'REPORT_GROUP_TASK_DELIVERY'
+    /*
+     * ADR-156 / P3-I：群列表的回执。
+     *
+     * ⚠️ 与上面三条同一条理由：它只 resolve 一个进程内的等待项（不写库、不调模型、
+     *    **不排队**）。若它落进串行泵，一条慢轮次就会把群列表回执压到轮末 ——
+     *    而核心正**同步等**着它去做建单前的群目标消歧。
+     */
+    || value === 'LIST_GROUPS_RESULT'
   )
 }
 
@@ -1509,6 +2066,214 @@ export interface BridgeQqDeliveryReportResult {
   recordedState?: string
 }
 
+// ---------------------------------------------------------------------------
+// ADR-156 / P3-G：**群任务派发**这一条线（核心 → 外壳的指令 ＋ 外壳 → 核心的回执）
+// ---------------------------------------------------------------------------
+//
+// ```text
+// 它要解决的两件事（真实链路验证记录 §7.4 的 ② 与 ①）：
+//   ② 接管轮的回复原来由**旧 `TURN_RESULT` 路径**直接发送 ⇒ 核心拿不到平台回执
+//   ① 于是"这条回复到底发没发出去"只能靠人眼看（V1 只能由主人确认），
+//      而额度账本里**一个字都没有**（`used_messages` 恒 0 ⇒ 上限对接管轮完全无效）
+// 现在：核心先原子预留额度 → 用**这一条指令**把正文交给外壳 → 外壳用**原有队列**发送
+//      → 外壳回**这条回执** → 核心按平台结果结算实例与额度
+// ```
+//
+// ⚠️ **单一发送出口**：接管轮的正文**不再**进 `TURN_RESULT.replyText`。
+//    两条路同时带正文 = "可能重复发送"，那是本批要消灭的头号风险（记录 §7.7 末条）。
+
+/**
+ * 核心 → 外壳的**一条群任务派发指令**（`DELIVER_GROUP_TASK` 的载荷）。
+ *
+ * ```text
+ * deliveryKey      幂等键 = 发送实例 id（账本里那一行）；同一键再派一次**不**发第二条
+ * groupId          只能来自**持久层任务的 target**（核心判过），外壳只逐字比对
+ * taskId/Version   任务身份（外壳用它做"群号逐字相同 + 身份完整"的窄路径判据）
+ * text             已过回复守卫的正文（这条线上唯一允许出现正文的地方）
+ * media            呈现媒介（`text` / `voice`）；**不是**权限
+ * quoteMessageId   原生引用目标（可选；外壳只在能对上自己校验过的入站 id 时才用）
+ * textFallback     语音失败时是否允许改发文字（任务声明，不是外壳自己的判断）
+ * reservedMessages 发送前**已经原子预留**的对外消息数（1..3）——外壳复核"预留 ≥ 最坏情形"
+ * expiresAt        有效期（epoch ms）；过了 ⇒ 外壳**不发**（`group_task_dispatch_expired`）
+ * ```
+ *
+ * ⚠️ 它**不是**"允许往这个群发任意消息"：外壳只对**这一条**、**这一个键**、**这个群号**放行，
+ *    发完即止。授权仍然是核心按持久层任务判的（策略 A：外壳不开库、不重判任务）。
+ */
+export interface BridgeGroupTaskDispatchInstruction {
+  deliveryKey: string
+  groupId: string
+  taskId: string
+  taskVersion: number
+  text: string
+  media: 'text' | 'voice'
+  quoteMessageId?: string
+  textFallback?: boolean
+  /**
+   * 语音回复的**伴随来源附录**（可选；与正文**分两条消息**发出）。
+   *
+   * ```text
+   * 为什么它必须在这条指令里：方案 §7.1 / 记录 §7.8 的计数口径是
+   *   「语音、额外文字附录和兜底消息**都计数**」⇒ 语音 + 附录 = **2 条**对外消息。
+   * 而一条指令只带一个 `text`；附录若留在 `TURN_RESULT.mediaAppendix` 里，
+   *   外壳就**没有第二条出口**能把它发出去（正文已由派发那次发完了）
+   *   ⇒ 附录会被静默吞掉，而账本上还写着 2 条 —— 账与事实不符。
+   * ```
+   *
+   * ⚠️ 它**不是**正文的一部分：不改账本正文、不改"她说过什么"，只是给眼睛看的那一条。
+   * ⚠️ 它在 `reservedMessages` 里**占一条**（见 §7.8 的"计数符合约定"）。
+   */
+  appendixText?: string
+  reservedMessages: number
+  expiresAt: number
+}
+
+/**
+ * 派发指令的**闭集键表**（多一个键 ⇒ 整条作废，不是"取能认的字段"）。
+ *
+ * ⚠️ 外壳侧的"指令形状"检查与桥侧的发出前检查**共用这一张表**：
+ *    两处各写一份迟早会漂移（一处放行、一处拦下），而这条链上漂移的代价是**多发一条群消息**。
+ */
+export const BRIDGE_GROUP_TASK_DISPATCH_KEYS: readonly string[] = [
+  'deliveryKey',
+  'groupId',
+  'taskId',
+  'taskVersion',
+  'text',
+  'media',
+  'quoteMessageId',
+  'textFallback',
+  'appendixText',
+  'reservedMessages',
+  'expiresAt',
+]
+
+/**
+ * 派发结局（闭集中继 `BridgeQqDeliveryStatus`，**不**另发明第四态）。
+ *
+ * ```text
+ * api_accepted      平台接口接受了（**必须**带回执 id）—— 这**不**等于群成员看到
+ * failed_confirmed  平台明确拒绝 / 发送前就确定没发出去
+ * delivery_unknown  超时 / 发出后断线 / 结果读不出来 —— **不猜**、**不重发**
+ * ```
+ */
+export type BridgeGroupTaskDeliveryStatus = BridgeQqDeliveryStatus
+
+/** 派发结局的闭集（与 `BRIDGE_QQ_DELIVERY_STATUSES` **同一份**，不是第二份） */
+export const BRIDGE_GROUP_TASK_DELIVERY_STATUSES: readonly BridgeGroupTaskDeliveryStatus[] = [
+  ...BRIDGE_QQ_DELIVERY_STATUSES,
+]
+
+export function isBridgeGroupTaskDeliveryStatus(
+  value: unknown
+): value is BridgeGroupTaskDeliveryStatus {
+  return typeof value === 'string' && (BRIDGE_GROUP_TASK_DELIVERY_STATUSES as readonly string[]).includes(value)
+}
+
+/**
+ * 一条派发指令的**结局读数**（`deliverGroupTask` 的返回 / `TURN_RESULT.groupTaskDispatch` 的载荷）。
+ *
+ * ⚠️ 它**只是账**：`api_accepted` 不等于"群成员看到了"，`delivery_unknown` **不重发**。
+ */
+export interface BridgeGroupTaskDeliveryReading {
+  deliveryKey: string
+  status: BridgeGroupTaskDeliveryStatus
+  /** 平台的 `message_id`（**只有** `api_accepted` 允许有） */
+  messageId?: string
+  /** 具名理由码（非 `api_accepted` 时必有） */
+  reason?: string
+}
+
+/** `deliverGroupTask` 的返回（键已经由调用方持有，不再回带一遍） */
+export type BridgeGroupTaskDelivery = Omit<BridgeGroupTaskDeliveryReading, 'deliveryKey'>
+
+/** `REPORT_GROUP_TASK_DELIVERY` 被受理之后的读数（**只是记账结果**，不是"送到了"） */
+export interface BridgeGroupTaskReportResult {
+  /** 这条回执**是否真的 resolve 了**某个在途派发（未知键 ⇒ `false`，且**不**是失败） */
+  accepted: boolean
+  /** 具名理由码（`accepted === false` 时必有） */
+  code?: string
+  /** 受理之后这条派发的结局 */
+  status?: BridgeGroupTaskDeliveryStatus
+}
+
+// ---------------------------------------------------------------------------
+// ADR-156 / P3-I：**只读群列表**（核心 → 外壳查询 ⇒ 外壳回事实）
+// ---------------------------------------------------------------------------
+//
+// ```text
+// 为什么这条线必须存在（契约 §1.2）：群目标消歧要用"机器人当前在哪些群"这个**外部事实**
+//   旧形态：核心自建**第二条** OneBot ws 连接去 `get_group_list`
+//     ⇒ 同一个 OneBot 上两条连接（本批要消灭的东西），而且"核心自己发"与
+//       "外壳按任务发"两本账各认各的
+//   新形态：核心用**已有的那条桥**问外壳 ⇒ 外壳只读 `get_group_list` ⇒ 回一张群列表
+//     ⇒ 一条连接、一个权威
+// ```
+
+/**
+ * 一条群列表读数（群号是**字符串**、群名已 `trim`）。
+ *
+ * ⚠️ 它**只是"有哪些群"**，不是"能在哪个群发"：能不能发仍只由任务授权
+ *    （核心按持久层任务判定）与旧静态名单（旧回复路径）决定。
+ */
+export interface BridgeGroupListEntry {
+  readonly groupId: string
+  readonly groupName: string
+}
+
+/** 群列表读数的上界（与外壳 `QQ_GROUP_LIST_LIMITS.maxGroups` **同一口径**，不另定一份） */
+export const BRIDGE_GROUP_LIST_MAX_GROUPS = 200
+
+/** 群名上界（与 `group-directory.ts` 的 `GROUP_NAME_MAX_CODEPOINTS` 同一口径） */
+export const BRIDGE_GROUP_NAME_MAX_CODEPOINTS = 64
+
+/**
+ * 一次**只读群列表**查询的结局（`TurnBridge.listGroups` 的返回）。
+ *
+ * ```text
+ * { ok: true, groups }  真的读到了（`groups: []` 是合法事实：机器人一个群都不在）
+ * { ok: false, code }   读不到 —— **具名**（超时 / 通道缺席 / 外壳缺席 / 外壳报的具名码）
+ * ```
+ *
+ * ⚠️ 失败**绝不**退化成"空数组"：那会让消歧把"读不到"当成"没有这个群"，
+ *    于是主人会看到 `group_task_group_not_found`（一个**假的**事实）。
+ */
+export type BridgeGroupListReading =
+  | { readonly ok: true; readonly groups: readonly BridgeGroupListEntry[] }
+  | { readonly ok: false; readonly code: string }
+
+/** 群列表查询的默认等待上限（毫秒；与派发同量级：一次 `get_group_list` 的往返） */
+export const DEFAULT_GROUP_LIST_TIMEOUT_MS = 5_000
+
+/**
+ * 把外壳回来的 `groups` 过一遍**闭集形状**校验（返回 `undefined` = 整条作废）。
+ *
+ * ⚠️ 判据：每条都是 `{groupId, groupName}` 两个键、群号是真实形态、群名非空且有界、
+ *    同一个群号不重复、条数 ≤ 上界。多一个键 ⇒ 整条作废（不"取能认的字段"）。
+ * ⚠️ 空数组**是合法**的（`[]` ⇒ "机器人不在任何群"），与"读不到"是两件事。
+ */
+export function readBridgeGroupList(value: unknown): readonly BridgeGroupListEntry[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  if (value.length > BRIDGE_GROUP_LIST_MAX_GROUPS) return undefined
+  const out: BridgeGroupListEntry[] = []
+  const seen = new Set<string>()
+  for (const item of value) {
+    if (item === null || typeof item !== 'object' || Array.isArray(item)) return undefined
+    const record = item as Record<string, unknown>
+    if (Object.keys(record).sort().join(',') !== 'groupId,groupName') return undefined
+    const groupId = record.groupId
+    const groupName = record.groupName
+    if (typeof groupId !== 'string' || !/^[1-9]\d{0,19}$/.test(groupId)) return undefined
+    if (typeof groupName !== 'string') return undefined
+    const trimmed = groupName.trim()
+    if (trimmed === '' || [...trimmed].length > BRIDGE_GROUP_NAME_MAX_CODEPOINTS) return undefined
+    if (seen.has(groupId)) return undefined
+    seen.add(groupId)
+    out.push({ groupId, groupName: trimmed })
+  }
+  return out
+}
+
 /** 发 `CANCEL_TURN` 时外壳能说什么（**只有**这两样；没有任何"撤销"字段） */
 export interface BridgeCancelRequest {
   kind: 'CANCEL_TURN'
@@ -1528,7 +2293,44 @@ export interface BridgeCancelRequest {
  *    核心拿到它之后必须与**会话已绑定的入口**交叉核对（`ADR-139` `D02`）。
  * ```
  */
-export interface BridgeGroupContextLine { readonly senderId: string; readonly text: string; readonly at: number }
+export interface BridgeGroupContextLine {
+  readonly senderId: string
+  readonly text: string
+  readonly at: number
+  /**
+   * 平台侧显示名（QQ 群名片优先，退回昵称）。
+   *
+   * 为什么需要它：只有 QQ 号时，模型在"最近的对话"里看到的是一串
+   * `QQ用户123456（…）: 肥鱼？`，既分不清谁在说话，也分不清是不是在叫她。
+   * ⚠️ 它是**展示用事实**，不是身份依据（身份仍只有 `senderId`）；
+   *    缺失 ⇒ 逐字旧行为（调用方退回 `QQ用户<id>`）。
+   */
+  readonly name?: string
+  readonly messageId?: string
+  readonly mentionedUserIds?: readonly string[]
+  readonly replyToMessageId?: string
+  readonly replyToSenderId?: string
+  readonly replyText?: string
+  readonly sourceAt?: number
+  readonly isCurrent?: boolean
+  readonly sourceMessageIds?: readonly string[]
+}
+
+/** Optional QQ metadata is context, never an identity or an execution permission. */
+function groupMessageContextProblem(line: BridgeGroupContextLine): boolean {
+  const messageId = (value: unknown) => typeof value === 'string' && /^-?\d{1,20}$/.test(value)
+  const userId = (value: unknown) => typeof value === 'string' && /^(?:all|[1-9]\d{4,19})$/.test(value)
+  return (line.messageId !== undefined && !messageId(line.messageId))
+    || (line.replyToMessageId !== undefined && !messageId(line.replyToMessageId))
+    || (line.replyToSenderId !== undefined && !userId(line.replyToSenderId))
+    || (line.mentionedUserIds !== undefined && (!Array.isArray(line.mentionedUserIds)
+      || line.mentionedUserIds.length > 32 || !line.mentionedUserIds.every(userId)))
+    || (line.replyText !== undefined && (typeof line.replyText !== 'string' || line.replyText.length > 1000))
+    || (line.sourceAt !== undefined && (!Number.isSafeInteger(line.sourceAt) || line.sourceAt < 0))
+    || (line.isCurrent !== undefined && typeof line.isCurrent !== 'boolean')
+    || (line.sourceMessageIds !== undefined && (!Array.isArray(line.sourceMessageIds)
+      || line.sourceMessageIds.length > 3 || !line.sourceMessageIds.every(messageId)))
+}
 
 export interface BridgeInboundPlatformFacts {
   readonly transport: 'qq' | 'wechat'
@@ -1541,10 +2343,39 @@ export interface BridgeInboundPlatformFacts {
   readonly groupId?: string
   /** WeChat only: digest of the actual source message, independently checked by the core. */
   readonly messageId?: string
+  /**
+   * 平台侧显示名（QQ：群名片优先，退回昵称；可选）。
+   *
+   * ⚠️ 与 `messageId` 不同，它**不是**防伪造面：显示名只影响"叫她怎么称呼对方"
+   *    与上下文里的说话人标签，不参与任何授权判定；因此这里只做**有界形状**校验
+   *    （长度 / 控制字符），不做来源校验。缺失 ⇒ 调用方退回 `QQ用户<id>`。
+   */
+  readonly senderName?: string
 }
 
 /** 闭集字段名（多一个键整条作废） */
-const PLATFORM_FACTS_KEYS: readonly string[] = ['transport', 'selfId', 'senderUserId', 'messageType', 'groupId', 'messageId']
+const PLATFORM_FACTS_KEYS: readonly string[] = [
+  'transport', 'selfId', 'senderUserId', 'messageType', 'groupId', 'messageId', 'senderName',
+]
+
+/**
+ * 显示名的形状判据（可选字段）。返回 `undefined` = 合法。
+ *
+ * ```text
+ * · 可选：缺席 ⇒ 合法（调用方退回平台账号的兜底称呼）
+ * · 有界：trim 后 1..64 个码点 —— 平台昵称可以长，但没有理由进 prompt
+ * · 无控制字符：换行/制表会把"最近对话"的逐行结构打断
+ * ```
+ */
+export function platformDisplayNameProblem(value: unknown): string | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== 'string') return 'bridge_bad_platform_facts_sender_name'
+  const trimmed = value.trim()
+  const codepoints = [...trimmed].length
+  if (codepoints === 0 || codepoints > 64) return 'bridge_bad_platform_facts_sender_name'
+  if (/[\u0000-\u001f\u007f\u2028\u2029]/.test(value)) return 'bridge_bad_platform_facts_sender_name'
+  return undefined
+}
 
 /**
  * 平台事实的**形状判据**（纯函数）。返回**具名**理由码；`undefined` = 合法。
@@ -1574,6 +2405,8 @@ export function platformFactsProblems(value: unknown): string | undefined {
   if (messageType === 'group' && (typeof groupId !== 'string' || groupId.trim() === '')) {
     return 'bridge_bad_platform_facts_group'
   }
+  const senderName = platformDisplayNameProblem(record.senderName)
+  if (senderName !== undefined) return senderName
   return undefined
 }
 
@@ -1942,6 +2775,43 @@ export interface BridgeWireResponse {
   media?: QqMediaSelection
   /** `TURN_RESULT` 才有：语音回复的伴随来源附录（post-Lv2 / P2；缺席 = 无） */
   mediaAppendix?: string
+  /**
+   * `TURN_RESULT` 才有：这一轮是**群任务接管轮**时的任务身份（ADR-156 / P3-B）。
+   *
+   * ⚠️ 外壳只用它来决定"这一条回复能不能跳过旧静态群名单"（群号必须逐字相同）。
+   * ⚠️ 缺席 ⇒ 外壳按旧静态名单检查 ⇒ 旧行为逐字不变。
+   */
+  groupTaskReply?: BridgeSubmitResult['groupTaskReply']
+  /**
+   * `TURN_RESULT` 才有：群任务接管轮的回复**已经走派发通道发出**（ADR-156 / P3-G）。
+   *
+   * ⚠️ 出现 ⇔ 本结果**没有** `replyText`（正文已经由 `DELIVER_GROUP_TASK` 发过了）。
+   * ⚠️ 外壳见到它必须**什么都不发**：既不重发正文，也**不**发"失败提示"
+   *    （把成功当失败提示出去，正是 P3-C 修掉的那个缺陷的镜像）。
+   */
+  groupTaskDispatch?: BridgeSubmitResult['groupTaskDispatch']
+  /**
+   * `DELIVER_GROUP_TASK` 才有：这一条要交给外壳发送的群任务派发指令（ADR-156 / P3-G）。
+   *
+   * ⚠️ 只有核心（按持久层任务判过、已原子预留额度）能发出；桥**不**重判，只运输。
+   * ⚠️ 正文在这里出现是**允许的**：这是核心到外壳的受信线缆（与 `qqText` 同一条纪律）。
+   */
+  groupTask?: BridgeGroupTaskDispatchInstruction
+  /**
+   * `DELIVER_GROUP_TASK` 的**应答**才有：这条派发回执有没有被受理。
+   *
+   * ⚠️ `accepted: false` 是**常态**（重复回执 / 未知 `deliveryKey` / 形状不合法）——
+   *    它不是"发送失败"，而是"这条回执没有改变任何东西"。**不**静默丢弃。
+   */
+  groupTaskReading?: BridgeGroupTaskReportResult
+  /**
+   * `LIST_GROUPS_RESULT` 才有：外壳读到的**群列表**（ADR-156 / P3-I）。
+   *
+   * ⚠️ `groups` 与 `code` **互斥**：成功带列表（`[]` 是合法事实："机器人不在任何群"），
+   *    失败带**具名码**（**不许**用空数组冒充成功）。
+   * ⚠️ 它只是"有哪些群"，不是"能在哪个群发"。
+   */
+  groups?: readonly BridgeGroupListEntry[]
   kind:
     | 'GROUP_REPLY_DECISION'
     | 'TURN_RESULT'
@@ -1970,6 +2840,47 @@ export interface BridgeWireResponse {
      */
     | 'DELIVER_QQ_TEXT'
     | 'DELIVER_REMINDER_TEXT'
+    /**
+     * ADR-156 / P3-G：**把一条群任务接管轮的回复交给外壳去发**（核心 → 外壳）。
+     *
+     * ```text
+     * 它**不**是某轮的结果（`requestId` = `deliveryKey`，是发送实例 id）
+     * 它**不**复用 `TURN_RESULT`：外壳对每个 requestId 只 resolve 一次并删 pending
+     * 它**必须**由外壳经**同一条**发送串行队列投递（普通回复优先）
+     * 它**必须**有回执（`REPORT_GROUP_TASK_DELIVERY`）：没有回执 ⇒ 核心按结果未知结算
+     * ```
+     */
+    | 'DELIVER_GROUP_TASK'
+    /**
+     * ADR-156 / P3-G：`REPORT_GROUP_TASK_DELIVERY` 的**应答**（核心 → 外壳）。
+     *
+     * ⚠️ 刻意**不**复用 `DELIVER_GROUP_TASK` 当应答（`REPORT_QQ_DELIVERY` 与
+     *    `DELIVER_QQ_TEXT` 那一对是共用一个 kind 的，靠"带不带 `qqDelivery`"区分）：
+     *    那个做法让外壳必须**读载荷才能知道这一行是不是指令**，而这条链上一次误读
+     *    就是往群里多发一条消息。两个方向用两个名字，误读在类型上就不可能。
+     * ⚠️ 它也**必须**有一句应答：否则外壳只能靠超时猜"我那条回执到底送到了没有"，
+     *    而超时不区分"网络丢了"与"核心收到了但不认"。
+     */
+    | 'GROUP_TASK_DELIVERY_RESULT'
+    /**
+     * ADR-156 / P3-I：**只读群列表**的指令（核心 → 外壳）。
+     *
+     * ⚠️ 与 `DELIVER_GROUP_TASK` 同类：`requestId` 是这次查询的关联键，不是轮次 id。
+     * ⚠️ 外壳只发一个 `get_group_list`：**不发消息、不占发送队列、不做放行决定**。
+     */
+    | 'LIST_GROUPS'
+    /**
+     * ADR-156 / P3-I：`LIST_GROUPS` 的回执（外壳 → 核心）**以及**核心对它的应答。
+     *
+     * ```text
+     * 外壳 → 核心：带 `groups`（成功）或 `code`（失败）
+     * 核心 → 外壳：应答（`outcome` + 可选 `code`，**没有** `groups`）—— 外壳直接忽略
+     * ```
+     * ⚠️ 这里共用同一个 kind 是**刻意**的：两个方向都不会导致"多发一条群消息"
+     *    （P3-G 之所以给派发用两个名字，是因为那边误读一次就会往群里多发一条）。
+     *    外壳侧因此**不读载荷**：凡是收到的 `LIST_GROUPS_RESULT` 都是应答，直接忽略。
+     */
+    | 'LIST_GROUPS_RESULT'
     /** Lv4.5 / ADR-131 `D18`：机会报文的响应（外壳用与 `PREPARE_RESULT` 同一套解析） */
     | 'OPPORTUNITY_RESULT'
     /**
@@ -2003,6 +2914,7 @@ export interface BridgeWireResponse {
   replyId?: string
   traceId?: string
   domainEventIds?: readonly string[]
+  knowledgeAppendix?: string
   /** `TURN_RESULT` 才有 */
   delivery?: BridgeSubmitResult['delivery']
   /** `CANCEL_RESULT` 才有 */
@@ -2400,6 +3312,179 @@ export async function handleBridgeMessage(
 
   /*
    * ---------------------------------------------------------------------------
+   * REPORT_GROUP_TASK_DELIVERY（ADR-156 / P3-G）
+   * ---------------------------------------------------------------------------
+   * ⚠️ 它是**控制消息**：只 resolve 一个进程内的 pending，不写库、不调模型、**不排队**。
+   *
+   * ⚠️ 五条失败关闭（每条都有具名码）：
+   * ```text
+   * ① `deliveryKey` 为空 / 非字符串        ⇒ `group_task_report_without_key`
+   * ② `status` 不在闭集                    ⇒ `group_task_report_unknown_status`
+   * ③ `api_accepted` 没有 `platformMessageId` ⇒ `group_task_report_missing_message_id`
+   * ④ 非 `api_accepted` 却带 `platformMessageId` ⇒ `group_task_report_unexpected_message_id`
+   * ⑤ 没有对应的在途派发                  ⇒ `group_task_report_unknown_key`（**不静默丢弃**）
+   * ```
+   *
+   * ⚠️ ③④ 与 `REPORT_QQ_DELIVERY` 的 ③④ 是**同一条纪律**（`D08`）：只有平台接受才有回执 id；
+   *    带了就说明这一条自相矛盾 ⇒ 整条作废，**不**"取能认的字段、忽略其余"。
+   * ⚠️ ⑤ 刻意**不**当成功：一条认不出归属的回执如果被默默吞掉，
+   *    核心那边会一直等到超时并按"结果未知"结算 —— 账目上看不出究竟哪一步错了。
+   */
+  if (kind === 'REPORT_GROUP_TASK_DELIVERY') {
+    const raw = message as {
+      deliveryKey?: unknown
+      status?: unknown
+      platformMessageId?: unknown
+      reason?: unknown
+    }
+    const deliveryKey = typeof raw.deliveryKey === 'string' ? raw.deliveryKey.trim() : ''
+    if (deliveryKey === '') {
+      return {
+        kind: 'GROUP_TASK_DELIVERY_RESULT',
+        requestId: '',
+        outcome: 'rejected',
+        code: 'group_task_report_without_key',
+        groupTaskReading: { accepted: false, code: 'group_task_report_without_key' },
+      }
+    }
+    if (!isBridgeGroupTaskDeliveryStatus(raw.status)) {
+      return {
+        kind: 'GROUP_TASK_DELIVERY_RESULT',
+        requestId: deliveryKey,
+        outcome: 'rejected',
+        code: 'group_task_report_unknown_status',
+        groupTaskReading: { accepted: false, code: 'group_task_report_unknown_status' },
+      }
+    }
+    const platformMessageId =
+      typeof raw.platformMessageId === 'string' && raw.platformMessageId.trim() !== ''
+        ? raw.platformMessageId.trim()
+        : undefined
+    if (raw.status === 'api_accepted' && platformMessageId === undefined) {
+      return {
+        kind: 'GROUP_TASK_DELIVERY_RESULT',
+        requestId: deliveryKey,
+        outcome: 'rejected',
+        code: 'group_task_report_missing_message_id',
+        groupTaskReading: { accepted: false, code: 'group_task_report_missing_message_id' },
+      }
+    }
+    if (raw.status !== 'api_accepted' && platformMessageId !== undefined) {
+      return {
+        kind: 'GROUP_TASK_DELIVERY_RESULT',
+        requestId: deliveryKey,
+        outcome: 'rejected',
+        code: 'group_task_report_unexpected_message_id',
+        groupTaskReading: { accepted: false, code: 'group_task_report_unexpected_message_id' },
+      }
+    }
+    const reading = bridge.acceptGroupTaskDeliveryReport({
+      deliveryKey,
+      status: raw.status,
+      ...(platformMessageId === undefined ? {} : { messageId: platformMessageId }),
+      ...(typeof raw.reason === 'string' && raw.reason.trim() !== '' ? { reason: raw.reason.trim() } : {}),
+    })
+    return {
+      kind: 'GROUP_TASK_DELIVERY_RESULT',
+      requestId: deliveryKey,
+      outcome: reading.accepted ? 'accepted' : 'rejected',
+      ...(reading.code !== undefined ? { code: reading.code } : {}),
+      groupTaskReading: reading,
+    }
+  }
+
+  /*
+   * ---------------------------------------------------------------------------
+   * LIST_GROUPS / LIST_GROUPS_RESULT（ADR-156 / P3-I）
+   * ---------------------------------------------------------------------------
+   * ⚠️ 方向是**固定**的：`LIST_GROUPS` 只从核心往外壳走。外壳若把它发回来，那不是
+   *    一次查询请求（核心没有 OneBot 连接，读不到群列表）⇒ 如实拒绝，
+   *    **不**把它当成一轮对话（那会落一条 user_message 并调一次模型）。
+   *
+   * ⚠️ 回执的五条失败关闭（每条具名）：
+   * ```text
+   * ① 没有 `requestId`                 ⇒ `group_list_result_without_id`
+   * ② `groups` 与 `code` **同时**出现   ⇒ `group_list_result_conflicting`（自相矛盾）
+   * ③ 两者都没有                       ⇒ `group_list_result_empty`（既没列表也没理由）
+   * ④ `groups`/`code` 形状不合法        ⇒ `group_list_result_malformed`
+   * ⑤ 没有在等这条回执                 ⇒ `group_task_group_list_unknown_key`（**不静默丢弃**）
+   * ```
+   * ⚠️ 只有 ⑤ 是"常态"（重复回执 / 晚到回执），它不是失败，只是没改变任何东西。
+   */
+  if (kind === 'LIST_GROUPS') {
+    return {
+      kind: 'LIST_GROUPS_RESULT',
+      requestId: normalizedRequestId,
+      outcome: 'rejected',
+      code: 'list_groups_wrong_direction',
+    }
+  }
+  if (kind === 'LIST_GROUPS_RESULT') {
+    const raw = message as { groups?: unknown; code?: unknown }
+    if (normalizedRequestId.trim() === '') {
+      return {
+        kind: 'LIST_GROUPS_RESULT',
+        requestId: '',
+        outcome: 'rejected',
+        code: 'group_list_result_without_id',
+      }
+    }
+    const hasGroups = raw.groups !== undefined
+    const hasCode = raw.code !== undefined
+    if (hasGroups && hasCode) {
+      return {
+        kind: 'LIST_GROUPS_RESULT',
+        requestId: normalizedRequestId,
+        outcome: 'rejected',
+        code: 'group_list_result_conflicting',
+      }
+    }
+    if (!hasGroups && !hasCode) {
+      return {
+        kind: 'LIST_GROUPS_RESULT',
+        requestId: normalizedRequestId,
+        outcome: 'rejected',
+        code: 'group_list_result_empty',
+      }
+    }
+    let groups: readonly BridgeGroupListEntry[] | undefined
+    let code: string | undefined
+    if (hasGroups) {
+      groups = readBridgeGroupList(raw.groups)
+      if (groups === undefined) {
+        return {
+          kind: 'LIST_GROUPS_RESULT',
+          requestId: normalizedRequestId,
+          outcome: 'rejected',
+          code: 'group_list_result_malformed',
+        }
+      }
+    } else {
+      if (typeof raw.code !== 'string' || raw.code.trim() === '') {
+        return {
+          kind: 'LIST_GROUPS_RESULT',
+          requestId: normalizedRequestId,
+          outcome: 'rejected',
+          code: 'group_list_result_malformed',
+        }
+      }
+      code = raw.code.trim()
+    }
+    const reading = bridge.acceptGroupListResult({
+      requestId: normalizedRequestId,
+      ...(groups === undefined ? {} : { groups }),
+      ...(code === undefined ? {} : { code }),
+    })
+    return {
+      kind: 'LIST_GROUPS_RESULT',
+      requestId: normalizedRequestId,
+      outcome: reading.ok ? 'accepted' : 'rejected',
+      ...(reading.ok ? {} : { code: reading.code }),
+    }
+  }
+
+  /*
+   * ---------------------------------------------------------------------------
    * PROACTIVE_OPPORTUNITY（Lv4.5 / ADR-131 `D01` · `D18`）
    * ---------------------------------------------------------------------------
    * ⚠️ 它**不是输入**：不落 `user_message`、不占正式轮次、不写记忆、**不产出她的话**
@@ -2736,11 +3821,22 @@ export async function handleBridgeMessage(
     ...(result.replyId !== undefined ? { replyId: result.replyId } : {}),
     ...(result.traceId !== undefined ? { traceId: result.traceId } : {}),
     ...(result.domainEventIds !== undefined ? { domainEventIds: result.domainEventIds } : {}),
+    ...(result.knowledgeAppendix ? { knowledgeAppendix: result.knowledgeAppendix } : {}),
     ...(result.expression !== undefined ? { expression: result.expression } : {}),
     /* post-Lv2 / P1：媒介选择随轮次结果回外壳（不写日志：stdout 是协议通道） */
     ...(result.media !== undefined ? { media: result.media } : {}),
     /* post-Lv2 / P2：语音回复的伴随附录随轮次结果回外壳 */
     ...(result.mediaAppendix !== undefined ? { mediaAppendix: result.mediaAppendix } : {}),
+    /*
+     * ADR-156 / P3-B：群任务接管轮的任务身份随轮次结果回外壳。
+     * ⚠️ 缺席 ⇒ 外壳按旧静态群名单检查（旧行为逐字不变）。
+     */
+    ...(result.groupTaskReply !== undefined ? { groupTaskReply: result.groupTaskReply } : {}),
+    /*
+     * ADR-156 / P3-G：这一轮的回复**已经走派发通道发出**（正文不在 `replyText` 里）。
+     * ⚠️ 外壳见到它必须**什么都不发**；缺席 ⇒ 旧路径逐字不变。
+     */
+    ...(result.groupTaskDispatch !== undefined ? { groupTaskDispatch: result.groupTaskDispatch } : {}),
     /* `P4` 后的时延修复：阶段耗时随结果回外壳（**不**写日志：stdout 是协议通道） */
     ...(result.timings !== undefined ? { timings: result.timings } : {}),
     delivery: result.delivery,

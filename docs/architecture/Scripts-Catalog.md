@@ -18,18 +18,20 @@
 
 | 类别 | 条目数 |
 |---|---:|
-| 已登记门 | 263 |
+| 已登记门 | 267 |
 | 汇总/链入口 | 21 |
 | 文档入口 | 3 |
-| 内部 | 465 |
-| **合计** | **752** |
+| 内部 | 476 |
+| **合计** | **767** |
 
-`scripts/` 下**没有任何 pnpm 入口引用**的脚本文件：**389 个**（见文末）。
+`scripts/` 下**没有任何 pnpm 入口引用**的脚本文件：**428 个**（见文末）。
 
 ## 每条 lane 的入口命令
 
 | lane | 入口 | 说明 |
 |---|---|---|
+| `ebl` | — | Epistemic Belief Lifecycle |
+| `p3` | — | P3 统一技能域（版本 / 发布状态 / 真实使用追溯 / 候选修订 / P2 规则依赖联验 / 试点判分与守卫） |
 | `ebl` | — | Epistemic Belief Lifecycle |
 | `postgresql` | — | PostgreSQL 迁移（真 PG 实例上的门） |
 | `m11.1` | `pnpm m11.1:gates` | M11.1 离线控制 |
@@ -370,6 +372,12 @@
 
 **内部（2）**：`migrate` · `migrate:apply`
 
+### `p3`（9 条 · **有同名 lane**）
+
+**已登记门（7）**：`p3:5:runner:verify` · `p3:5:score:verify` · `p3:entry:wiring:verify` · `p3:scorer:verify` · `p3:skill-revision:verify` · `p3:skill-rule-dependency:verify` · `p3:skill-usage:verify`
+
+**内部（2）**：`p3:5:live` · `p3:5:score`
+
 ### `phoenix`（2 条）
 
 **内部（2）**：`phoenix:down` · `phoenix:up`
@@ -380,15 +388,15 @@
 
 **内部（4）**：`postgresql:cutover:apply` · `postgresql:goal-rebuild:apply` · `postgresql:live:smoke` · `postgresql:p02:verify`
 
-### `postlv2`（103 条 · **有同名 lane**）
+### `postlv2`（109 条 · **有同名 lane**）
 
 **入口**：
 - `postlv2:controls:gates` — 汇总/链入口
 - `postlv2:s8:gates` — 汇总/链入口
 
-**已登记门（29）**：`postlv2:affected:verify` · `postlv2:automatic-memory:recovery:verify` · `postlv2:avatar-opening:verify` · `postlv2:body:verify` · `postlv2:database-env:verify` · `postlv2:db:verify` · `postlv2:delivery:verify` · `postlv2:gate-selection:verify` · `postlv2:goal-deadline:verify` · `postlv2:goal-parallel:verify` · `postlv2:image:verify` · `postlv2:orchestration:verify` · `postlv2:oss-mechanisms:verify` · `postlv2:qq-voice-delivery:verify` · `postlv2:qq-voice-main:verify` · `postlv2:qq-voice-reply:verify` · `postlv2:role-tool:path` · `postlv2:role-tool:verify` · `postlv2:s8:contracts:verify` · `postlv2:s8:lifecycle:verify` · `postlv2:s8:measurement:verify` · `postlv2:s8:production:verify` · `postlv2:s8:reflection:verify` · `postlv2:s8:roots:verify` · `postlv2:s8:state:verify` · `postlv2:s8:store:verify` · `postlv2:s8:withdraw:verify` · `postlv2:sequence-continuity:verify` · `postlv2:transport:verify`
+**已登记门（26）**：`postlv2:affected:verify` · `postlv2:automatic-memory:recovery:verify` · `postlv2:avatar-opening:verify` · `postlv2:body:verify` · `postlv2:database-env:verify` · `postlv2:db:verify` · `postlv2:delivery:verify` · `postlv2:gate-selection:verify` · `postlv2:goal-deadline:verify` · `postlv2:goal-parallel:verify` · `postlv2:image:verify` · `postlv2:orchestration:verify` · `postlv2:oss-mechanisms:verify` · `postlv2:qq-group-facts:verify` · `postlv2:qq-group-main:verify` · `postlv2:qq-group-resolve:verify` · `postlv2:qq-group-send:verify` · `postlv2:qq-group-task-contract:verify` · `postlv2:qq-group-task-store:verify` · `postlv2:qq-voice-delivery:verify` · `postlv2:qq-voice-main:verify` · `postlv2:qq-voice-reply:verify` · `postlv2:role-tool:path` · `postlv2:role-tool:verify` · `postlv2:sequence-continuity:verify` · `postlv2:transport:verify`
 
-**内部（72）**：`postlv2:action-delegation:verify` · `postlv2:appearance:verify` · `postlv2:asr:verify` · `postlv2:automatic-memory:live` · `postlv2:automatic-memory:verify` · `postlv2:avatar` · `postlv2:avatar-opening:chain` · `postlv2:avatar:live2d` · `postlv2:avatar:production` · `postlv2:avatar:production:verify` · `postlv2:avatar:verify` · `postlv2:baseline` · `postlv2:bridge:verify` · `postlv2:coexist:live` · `postlv2:coexist:matrix` · `postlv2:coexist:shells` · `postlv2:coexist:verify` · `postlv2:delegation-revalidation:verify` · `postlv2:delegation-wire:verify` · `postlv2:delegation:real` · `postlv2:delegation:roundtrip` · `postlv2:entry-cancel:verify` · `postlv2:entry-handshake:verify` · `postlv2:entry-reconnect:verify` · `postlv2:executor-client:verify` · `postlv2:executor-server:verify` · `postlv2:executor:readonly-probe` · `postlv2:expression:verify` · `postlv2:goal-thinking:eval` · `postlv2:image:live` · `postlv2:memory-write:live` · `postlv2:memory-write:verify` · `postlv2:mic` · `postlv2:model-memory:live` · `postlv2:model-memory:verify` · `postlv2:playback-buffer:eval` · `postlv2:qq-proactive:chain` · `postlv2:qq-proactive:live` · `postlv2:qq-proactive:measurement:verify` · `postlv2:qq-proactive:verify` · `postlv2:role-tool:activation:readback` · `postlv2:role-tool:first-use:readback` · `postlv2:role-tool:known-dirs` · `postlv2:role-tool:live` · `postlv2:role-tool:main-live` · `postlv2:role-tool:matrix` · `postlv2:role-tool:semantic:eval` · `postlv2:s7:gate` · `postlv2:s7:live` · `postlv2:s8:activation-readback` · `postlv2:s8:activation-readback:db` · `postlv2:s8:baseline` · `postlv2:s8:choice:verify` · `postlv2:s8:daily:e2e` · `postlv2:s8:daily:live` · `postlv2:s8:daily:verify` · `postlv2:s8:dev-probe` · `postlv2:s8:entry-lock:verify` · `postlv2:s8:quote:ab:live` · `postlv2:s8:semantic:eval` · `postlv2:s8:semantic:recompute` · `postlv2:s8:start:verify` · `postlv2:semantic:production:verify` · `postlv2:semantic:verify` · `postlv2:source-root:verify` · `postlv2:source:verify` · `postlv2:speech:verify` · `postlv2:story:build` · `postlv2:story:verify` · `postlv2:text-stream:verify` · `postlv2:tts:verify` · `postlv2:world:verify`
+**内部（81）**：`postlv2:action-delegation:verify` · `postlv2:appearance:verify` · `postlv2:asr:verify` · `postlv2:automatic-memory:live` · `postlv2:automatic-memory:verify` · `postlv2:avatar` · `postlv2:avatar-opening:chain` · `postlv2:avatar:live2d` · `postlv2:avatar:production` · `postlv2:avatar:production:verify` · `postlv2:avatar:verify` · `postlv2:baseline` · `postlv2:bridge:verify` · `postlv2:coexist:live` · `postlv2:coexist:matrix` · `postlv2:coexist:shells` · `postlv2:coexist:verify` · `postlv2:delegation-revalidation:verify` · `postlv2:delegation-wire:verify` · `postlv2:delegation:real` · `postlv2:delegation:roundtrip` · `postlv2:entry-cancel:verify` · `postlv2:entry-handshake:verify` · `postlv2:entry-reconnect:verify` · `postlv2:executor-client:verify` · `postlv2:executor-server:verify` · `postlv2:executor:readonly-probe` · `postlv2:expression:verify` · `postlv2:goal-thinking:eval` · `postlv2:image:live` · `postlv2:memory-write:live` · `postlv2:memory-write:verify` · `postlv2:mic` · `postlv2:model-memory:live` · `postlv2:model-memory:verify` · `postlv2:playback-buffer:eval` · `postlv2:qq-proactive:chain` · `postlv2:qq-proactive:live` · `postlv2:qq-proactive:measurement:verify` · `postlv2:qq-proactive:verify` · `postlv2:role-tool:activation:readback` · `postlv2:role-tool:first-use:readback` · `postlv2:role-tool:known-dirs` · `postlv2:role-tool:live` · `postlv2:role-tool:main-live` · `postlv2:role-tool:matrix` · `postlv2:role-tool:semantic:eval` · `postlv2:s7:gate` · `postlv2:s7:live` · `postlv2:s8:activation-readback` · `postlv2:s8:activation-readback:db` · `postlv2:s8:baseline` · `postlv2:s8:choice:verify` · `postlv2:s8:contracts:verify` · `postlv2:s8:daily:e2e` · `postlv2:s8:daily:live` · `postlv2:s8:daily:verify` · `postlv2:s8:dev-probe` · `postlv2:s8:entry-lock:verify` · `postlv2:s8:lifecycle:verify` · `postlv2:s8:measurement:verify` · `postlv2:s8:production:verify` · `postlv2:s8:quote:ab:live` · `postlv2:s8:reflection:verify` · `postlv2:s8:roots:verify` · `postlv2:s8:semantic:eval` · `postlv2:s8:semantic:recompute` · `postlv2:s8:start:verify` · `postlv2:s8:state:verify` · `postlv2:s8:store:verify` · `postlv2:s8:withdraw:verify` · `postlv2:semantic:production:verify` · `postlv2:semantic:verify` · `postlv2:source-root:verify` · `postlv2:source:verify` · `postlv2:speech:verify` · `postlv2:story:build` · `postlv2:story:verify` · `postlv2:text-stream:verify` · `postlv2:tts:verify` · `postlv2:world:verify`
 
 ### `productivity`（5 条 · **有同名 lane**）
 
@@ -574,14 +582,37 @@
 - `scripts/cognitive/f1-three-arm-parity-verify.ts`
 - `scripts/cognitive/f2-actionturn-closed-loop-verify.ts`
 - `scripts/cognitive/f2-assembly-entry-verify.ts`
+- `scripts/cognitive/f2-calibration-low-gate.ts`
+- `scripts/cognitive/f2-diagnostic-material.ts`
+- `scripts/cognitive/f2-diagnostic-verify.ts`
+- `scripts/cognitive/f2-executor-guards-verify.ts`
+- `scripts/cognitive/f2-formation-split-calibration-verify.ts`
+- `scripts/cognitive/f2-gate-fake-fetch.ts`
+- `scripts/cognitive/f2-gate-readings.ts`
+- `scripts/cognitive/f2-history-replay-verify.ts`
+- `scripts/cognitive/f2-live-runner-guards.ts`
+- `scripts/cognitive/f2-live-runner.ts`
 - `scripts/cognitive/f2-measurability-calibration.ts`
+- `scripts/cognitive/f2-output-calibration.ts`
+- `scripts/cognitive/f2-paired-calibration-real-chain.ts`
+- `scripts/cognitive/f2-planner-shapes-verify.ts`
 - `scripts/cognitive/f2-prep-read-verify.ts`
+- `scripts/cognitive/f2-provisioning-verify.ts`
+- `scripts/cognitive/f2-real-planner.ts`
+- `scripts/cognitive/f2-rule-consumption-verify.ts`
 - `scripts/cognitive/f2-rule-source-scope-verify.ts`
+- `scripts/cognitive/f2-sequence-runner.ts`
+- `scripts/cognitive/f2-sequence-verify.ts`
+- `scripts/cognitive/f2-simhost-e2e-verify.ts`
 - `scripts/cognitive/f2-source-attribution-verify.ts`
 - `scripts/cognitive/f2-source-scope-authorization-verify.ts`
 - `scripts/cognitive/f2-source-veto-integration-verify.ts`
 - `scripts/cognitive/f2-task-entry-verify.ts`
+- `scripts/cognitive/f2-unit-execution-verify.ts`
+- `scripts/cognitive/f2-unit-runtime.ts`
 - `scripts/cognitive/file-planning-bed.ts`
+- `scripts/cognitive/p3-5-live-runner-guards.ts`
+- `scripts/cognitive/p3-5-score.ts`
 - `scripts/cognitive/pdfminer-runner.py`
 - `scripts/cognitive/pg-snapshot-verify.ts`
 - `scripts/cognitive/rule-successor-verify.ts`
@@ -589,6 +620,7 @@
 - `scripts/cognitive/simulation-planner-live.ts`
 - `scripts/cognitive/simulation-planner-verify.ts`
 - `scripts/cognitive/simulation-production-verify.ts`
+- `scripts/current-capability-facts-verify.ts`
 - `scripts/debt-memory-lists-verify.ts`
 - `scripts/debt-selectors-verify.ts`
 - `scripts/deploy/postgresql-backup.ts`
@@ -823,10 +855,19 @@
 - `scripts/productivity-skills/office-generate.py`
 - `scripts/productivity-skills/reading.ts`
 - `scripts/productivity-skills/sidecar-tools.ts`
+- `scripts/project-knowledge-chat-verify.ts`
+- `scripts/project-knowledge-protocol-verify.ts`
+- `scripts/project-knowledge-test-db.ts`
+- `scripts/project-knowledge-verify.ts`
+- `scripts/project-knowledge.ts`
 - `scripts/public-ci.ps1`
 - `scripts/qq/prepare-verify.ts`
 - `scripts/qq/start.cmd`
 - `scripts/qq/start.ps1`
+- `scripts/qq/voice-live-probe.ts`
+- `scripts/relay-main-verify.ts`
+- `scripts/relay-model-live.ts`
+- `scripts/relay-tasks-verify.ts`
 - `scripts/reminder-cancellation-live.ts`
 - `scripts/reminder-cancellation-truth-verify.ts`
 - `scripts/reminder-channels-frontend-verify.mjs`
@@ -834,12 +875,18 @@
 - `scripts/reminder-delivery-context-verify.ts`
 - `scripts/reminder-delivery-main-verify.ts`
 - `scripts/reminder-model-decision-verify.ts`
+- `scripts/reply-language-model-live.ts`
+- `scripts/reply-language-model-verify.ts`
 - `scripts/s1-e2-qq-probe.ts`
 - `scripts/scenario-json.ts`
 - `scripts/seed-m4.5-ledger-fixture.ts`
 - `scripts/semantic-empty-recall-verify.ts`
 - `scripts/semantic-encoder-pipe-verify.ts`
+- `scripts/semantic-entry-live.ts`
+- `scripts/semantic-entry-main-verify.ts`
+- `scripts/semantic-entry-verify.ts`
 - `scripts/server-process-verify.ts`
+- `scripts/serversim-supervisor-verify.mjs`
 - `scripts/test-persist-read.ts`
 - `scripts/test-persist-write.ts`
 - `scripts/text-scan.ts`

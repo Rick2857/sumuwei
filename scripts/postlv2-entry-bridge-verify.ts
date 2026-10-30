@@ -548,7 +548,6 @@ record(
  */
 const GUARD_APPLIERS = [
   'applyResponseTruthPolicy',
-  'applyCommitmentClaimGuard',
   'applyActionClaimGuard',
   'applyExternalEvidenceReplyPolicy',
   'applySearchNeedReplyPolicy',

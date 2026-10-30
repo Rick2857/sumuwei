@@ -121,6 +121,7 @@ export interface KernelFlags {
    * LLM 不直接写 memory store（INV-M41-04）。
    */
   memoryLlmExtractorEnabled: boolean
+  semanticEntryEnabled: boolean
   /**
    * 抽取窗口：一次处理最近几个**完整 turn**（计划书第 45 节）。
    *
@@ -534,7 +535,24 @@ export interface KernelFlags {
   browserFullTools: boolean
   /** ADR-119: low-cost workflows, scoped library, and fixed arXiv MCP. Default off. */
   workflowSkillsEnabled: boolean
+  /**
+   * P3（`docs/architecture/Cognitive-Capability-P3-Execution-Plan-2026-10-28.md`）：
+   * **技能目录管理路径**开关，代码缺省 **false**。
+   *
+   * ```text
+   * off（缺省） ⇒ 旧路径逐字不变：加载只核对固定包指纹，不查发布状态、不写使用记录
+   * on         ⇒ 只允许目录里 **当前版本 + published** 的技能进入受信指令；
+   *              加载时与"本任务已授予能力"求交；消费前复核状态；按轮写使用记录
+   * ```
+   * ⚠️ 它是 `workflowSkillsEnabled` 的**从属开关**：后者关着时它不生效
+   *    （"目录管理一个根本没挂载的能力"没有意义，也不该被读成已启用）。
+   * ⚠️ 回滚 = 删掉 `.env` 里那一行；代码缺省就是 false。
+   */
+  workflowSkillCatalogEnabled: boolean
   personalLibraryEnabled: boolean
+  /** Read-only project documents and current instance facts; default off. */
+  projectKnowledgeEnabled: boolean
+  selfCapabilitiesEnabled: boolean
   arxivResearchEnabled: boolean
   /**
    * ADR-106：桌面查看 / 桌面操作**两个独立开关**，代码缺省都是 **false**。
@@ -811,6 +829,26 @@ export interface KernelFlags {
    * ⚠️ 这个开关**必须被 `main.ts` 真的消费**（D3 的教训，`m4.5:test` 有手写静态锁）。
    */
   qqProactiveMode: ProactiveMode
+  /** 暂定转告任务：来源QQ/微信，唯一出口本人QQ私聊；缺省关闭。 */
+  relayTasksEnabled: boolean
+  /**
+   * **ADR-156 / P2.1**：主人授权的 QQ 群任务（`CHARACTER_QQ_GROUP_TASKS_ENABLED`，
+   * 代码缺省 **false**）。
+   *
+   * ```text
+   * false（缺省）  不建单、不注册发送权限、不挂适配器、不解析群目标、不发任何群消息；
+   *                旧 QQ 行为**逐字不变**（能力仍**恒登记**，关闭时一条请求得到
+   *                可审计的 `permission_denied`/`missing_permission`，先例 ADR-045 `D-12`）
+   * true           主人私聊可建/改/停单次群发送任务；发送走唯一 ActionGateway，
+   *                发送前重新核验授权（撤销/修改/过期/额度）
+   * ```
+   *
+   * ⚠️ 它**必须被 `main.ts` 真的消费**（D3 的教训）：能力定义恒登记、权限与适配器
+   *    条件装配、语义入口 hook 条件挂载、重启恢复只在开着时跑。
+   * ⚠️ 打开它也**不**等于可以往任意群发：群号只能来自任务授权事实（载荷提供不了）。
+   */
+  qqGroupTasksEnabled: boolean
+
   /** 原始模式字符串（**只用于诊断/告警**，不参与判定） */
   qqProactiveModeRaw: string
   /**
@@ -1064,7 +1102,7 @@ export function readKernelFlags(env: NodeJS.ProcessEnv = process.env): KernelFla
      *    刻意不把拼错的模式当成 role：那会让人以为"她已经自己选工具了"。
      */
     toolDecisionMode:
-      env.CHARACTER_TOOL_DECISION_MODE === undefined
+      truthy(env.CHARACTER_SEMANTIC_ENTRY_ENABLED, false) ? 'role' : env.CHARACTER_TOOL_DECISION_MODE === undefined
         ? 'rules'
         : isToolDecisionMode(env.CHARACTER_TOOL_DECISION_MODE)
           ? env.CHARACTER_TOOL_DECISION_MODE
@@ -1081,7 +1119,10 @@ export function readKernelFlags(env: NodeJS.ProcessEnv = process.env): KernelFla
     weatherEnabled: truthy(env.CHARACTER_WEATHER_ENABLED, false),
     xidianTimetableEnabled: truthy(env.CHARACTER_XIDIAN_TIMETABLE_ENABLED, false),
     workflowSkillsEnabled: truthy(env.CHARACTER_WORKFLOW_SKILLS_ENABLED, false),
+    workflowSkillCatalogEnabled: truthy(env.CHARACTER_WORKFLOW_SKILL_CATALOG_ENABLED, false),
     personalLibraryEnabled: truthy(env.CHARACTER_PERSONAL_LIBRARY_ENABLED, false),
+    projectKnowledgeEnabled: truthy(env.CHARACTER_PROJECT_KNOWLEDGE_ENABLED, false),
+    selfCapabilitiesEnabled: truthy(env.CHARACTER_SELF_CAPABILITIES_ENABLED, false),
     arxivResearchEnabled: truthy(env.CHARACTER_ARXIV_RESEARCH_ENABLED, false),
     officeGenerateEnabled: truthy(env.CHARACTER_OFFICE_GENERATE_ENABLED, false),
     newsReadEnabled: truthy(env.CHARACTER_NEWS_READ_ENABLED, false),
@@ -1101,6 +1142,11 @@ export function readKernelFlags(env: NodeJS.ProcessEnv = process.env): KernelFla
      */
     qqProactiveModeRaw: (env.CHARACTER_QQ_PROACTIVE_MODE ?? '').trim(),
     qqProactiveMode: readProactiveMode(env.CHARACTER_QQ_PROACTIVE_MODE),
+    semanticEntryEnabled: truthy(env.CHARACTER_SEMANTIC_ENTRY_ENABLED, false),
+    relayTasksEnabled: env.CHARACTER_RELAY_TASKS_ENABLED === 'true',
+    /* ADR-156：缺省 false；非法值一律当 false（失败关闭，与 relay 同一条口径） */
+    qqGroupTasksEnabled: env.CHARACTER_QQ_GROUP_TASKS_ENABLED === 'true',
+
     avatarOpeningModeRaw: (env.CHARACTER_AVATAR_OPENING_MODE ?? '').trim(),
     avatarOpeningMode: readProactiveMode(env.CHARACTER_AVATAR_OPENING_MODE, 'CHARACTER_AVATAR_OPENING_MODE'),
     /*
@@ -1532,6 +1578,9 @@ export function describeKernelFlags(flags: KernelFlags): string {
    */
   record('qq-voice-reply', flags.qqVoiceReplyEnabled)
   record(`qq-voice-output`, flags.qqVoiceOutputEnabled && flags.qqVoiceReplyEnabled)
+  /* ADR-156：群任务（"开关开了没有"必须一眼可见：它决定权限/适配器/语义入口是否装配） */
+  record('semantic-entry', flags.semanticEntryEnabled)
+  record('qq-group-tasks', flags.qqGroupTasksEnabled)
   // M9.5 / WP6：语义召回（它决定装不装探针 + 选不选混合策略版本）
   record('memory-semantic-recall', flags.memorySemanticRecallEnabled)
   // M9.5 / WP8：模式（"观察还是切换"必须一眼可见）
@@ -1566,7 +1615,11 @@ export function describeKernelFlags(flags: KernelFlags): string {
   record('weather', flags.weatherEnabled)
   record('xidian-timetable', flags.xidianTimetableEnabled)
   record('workflow-skills', flags.workflowSkillsEnabled)
+  /* P3：目录管理路径单独一行 —— 否则"加载了技能"与"按目录状态管住技能"在启动日志上看起来一样 */
+  record('workflow-skill-catalog', flags.workflowSkillCatalogEnabled)
   record('personal-library', flags.personalLibraryEnabled)
+  record('project-knowledge', flags.projectKnowledgeEnabled)
+  record('self-capabilities', flags.selfCapabilitiesEnabled)
   record('arxiv-research', flags.arxivResearchEnabled)
   record('office-generate', flags.officeGenerateEnabled)
   record('news-read', flags.newsReadEnabled)

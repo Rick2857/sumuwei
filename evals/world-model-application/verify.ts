@@ -43,19 +43,28 @@ await check('tools', 'forecast-must-use-separate-contract', () => {
     (e: unknown) => (e as { code?: string }).code === 'task_plan_step_unknown_field')
 })
 
-/* Offline compatibility checks against the optional storyline world machine.
- * Synthetic results do not establish production activation or learning benefit.
+/*
+ * Reuse the pilot's restricted interpreter and the pure world machine **as archived**.
+ *
+ * ⚠️ 2026-10-20 / ADR-147: the Lv2.5 storyline was retired by the user's decision.
+ *    The dedicated implementation now lives under `evals/retired-lv25/` and
+ *    **production must not import it** (FC-T04). These checks therefore run
+ *    against the **archived** module and are labelled `retired-lv25`:
+ *    they are historical/offline compatibility readings for the paper experiment
+ *    (`evals/world-model-pilot/`), NOT evidence that a story feature is wired,
+ *    NOT a production signal, and NOT a step on the Three-Domain plan's stage table
+ *    (stage 2 was cancelled on 2026-10-20).
  */
 for (let i = 0; i < 6; i++) {
   const world = makeWorld(i)
   const evidence = observations(world)
   const wrong = world.rules.map(rule => rule.op === 'add' ? { ...rule, op: 'set' as const } : rule)
-  await check('optional-story', `w${i}-counterexample-rejects-wrong-rule`, () => {
+  await check('retired-lv25', `w${i}-counterexample-rejects-wrong-rule`, () => {
     assert(replay(world, wrong, evidence.initial))
     assert(!replay(world, wrong, [...evidence.initial, ...evidence.additional]))
     assert(replay(world, world.rules, [...evidence.initial, ...evidence.additional]))
   })
-  await check('optional-story', `w${i}-prediction-does-not-change-world`, () => {
+  await check('retired-lv25', `w${i}-prediction-does-not-change-world`, () => {
     const before = JSON.stringify(world.start)
     for (const item of casesFor(world)) {
       const plan = search(item.start, item.goal, (state, action) => predict(world.publicInterface, world.rules, state, action))
@@ -74,6 +83,8 @@ await check('reflection', 'no-actual-outcome-no-trigger', async () => {
 })
 await check('reflection', 'committed-story-input-keeps-source-class', async () => {
   // Caller-qualified fixture, not a real ledger commit or source-eligibility test.
+  // ⚠️ ADR-147: this asserts a **retained historical source class** ("她经历的" ≠ "用户说的")
+  //    on the read surface that the retirement kept. It asserts nothing about a story feature.
   const input = await buildReflectionInput(emptySource, { ...windowOptions, storyOutcomes: [{
     commitId: 'fixture-commit', revision: 2, eventType: 'CHOICE_COMMITTED', text: '程序渲染的已发生故事结果',
   }] })
@@ -120,13 +131,15 @@ const files = [
   'evals/world-model-application/verify.ts', 'evals/world-model-pilot/world.ts',
   'src/kernel/action/task-plan.ts', 'src/kernel/action/capability-registry.ts',
   'src/kernel/app/reflection/inputs.ts', 'src/kernel/app/reflection/adaptive-self.ts',
-  'src/kernel/storyline/world-machine.ts',
+  // ⚠️ ADR-147：世界引擎已随 Lv2.5 退役移入归档（生产不得 import）。
+  'evals/retired-lv25/src/kernel/storyline/world-machine.ts',
 ]
 writeFileSync(resolve(out, 'verification.json'), JSON.stringify({
   schema: 'world-model-application-boundaries@1', status: 'PASS', checks,
   evidenceClass: 'offline_synthetic_compatibility_only', realModelCalls: 0, realToolCalls: 0, databaseOpened: false,
   productionIntegrated: false, benefitMeasured: false,
-  storyFeatureStatus: 'optional_default_off',
+  // ⚠️ 2026-10-20 / ADR-147：S8 方向已取消；本文件里的 `retired-lv25` 车道是**归档**上的历史读数。
+  storyFeatureStatus: 'cancelled_2026-10-20',
   sourceHashes: Object.fromEntries(files.map(file => [file, createHash('sha256').update(readFileSync(file)).digest('hex')])),
 }, null, 2) + '\n')
 console.log(JSON.stringify({ status: 'PASS', checks: checks.length, evidenceClass: 'offline_synthetic_compatibility_only', output: out }))

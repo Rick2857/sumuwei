@@ -76,6 +76,8 @@ export type TurnContentSourceKind =
   | 'program-calculation'
   | 'local-file'
   | 'local-disk'
+  | 'project-document'
+  | 'runtime-capability'
   | 'remote-article'
   | 'remote-service'
   | 'image-recognition'
@@ -94,6 +96,8 @@ export const TURN_CONTENT_SOURCE_KINDS: readonly TurnContentSourceKind[] = [
    * 而"沙箱内文件"与"已授权的全盘域文件"对模型是**不同的信任边界陈述**。
    */
   'local-disk',
+  'project-document',
+  'runtime-capability',
   'remote-article',
   /*
    * 第二批：**外部服务 API**（天气、订阅源）。与 `remote-article` 分开的理由是
@@ -384,6 +388,10 @@ export function sourceKindLabel(kind: TurnContentSourceKind): string {
       return '沙箱内文件'
     case 'local-disk':
       return '本机文件（已授权的全盘域，不是沙箱）'
+    case 'project-document':
+      return '项目资料原文（保留历史与环境，不代表当前状态）'
+    case 'runtime-capability':
+      return '当前实例程序事实（未探测项保持未知）'
     case 'remote-article':
       return '外部网页'
     case 'remote-service':

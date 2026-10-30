@@ -2874,7 +2874,6 @@ function guardChainProblems(subject: string): string[] {
    */
   const order = [
     ['记忆', 'applyResponseTruthPolicy({'],
-    ['承诺', 'applyCommitmentClaimGuard({'],
     ['动作', 'applyActionClaimGuard({'],
     ['外部证据', 'applyExternalEvidenceReplyPolicy({'],
     ['搜索判定结论', 'applySearchNeedReplyPolicy({'],

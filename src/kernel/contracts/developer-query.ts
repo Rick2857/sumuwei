@@ -66,6 +66,7 @@ import {
 } from './ids.ts'
 import type { CharacterRunTrace, TraceStatus, TraceStep } from './trace.ts'
 import type { AttributionValue } from './actor.ts'
+import type { CurrentCapabilityView } from '../action/capability-facts.ts'
 
 export const DEVELOPER_QUERY_SCHEMA_VERSION = 1
 
@@ -541,6 +542,8 @@ export interface DeveloperRuntimeCapabilityDto {
 }
 
 export interface CapabilitiesDto {
+  /** Unified facts; registration-only processes leave unobserved runtime states unknown. */
+  currentFacts?: CurrentCapabilityView
   schemaVersion: number
   query: DeveloperQueryCapabilityFact[]
   runtime: DeveloperRuntimeCapabilityDto[]

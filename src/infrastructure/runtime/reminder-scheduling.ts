@@ -8,6 +8,8 @@ import type { ChatChannel } from '../../kernel/contracts/chat-channel.ts'
 import type { CharacterId } from '../../kernel/contracts/ids.ts'
 import type { QqDeliveryRegistry } from '../../kernel/app/notification-delivery.ts'
 import { deliverReminder } from '../../kernel/app/proactive-reminder.ts'
+import { deliverRelayTask, relayOccurrenceKey } from './relay-tasks.ts'
+import { recoverRelayDispatching } from '../persistence/relay-store.ts'
 
 /** One list/dispatch implementation for coexistence and standalone entries. */
 export function createReminderScheduling(input: {
@@ -39,14 +41,32 @@ export function createReminderScheduling(input: {
    * ⚠️ 生产装配从 flags 读（缺省 60_000）⇒ 不设那个环境变量时行为与改动前完全相同。
    */
   repeatIntervalMs?: number
+  relay?: { ownerRef: string; ownerUserId: string }
 }) {
   const intents = new Map<string, NotificationIntentRecord>()
+  let relayRecovered = false
   return {
     async listPendingReminders() {
+      if (input.relay && !relayRecovered) {
+        await recoverRelayDispatching(input.db, input.characterId, input.relay.ownerRef)
+        relayRecovered = true
+      }
       const pending = await listPendingIntents(input.db, input.characterId, { kind: 'reminder', limit: 500 })
       const attempted = new Set(await listAttemptedReminderOccurrenceKeys(input.db, input.characterId))
       intents.clear()
       const due: { occurrenceKey: string; dueAt: number }[] = []
+      if (input.relay && input.channels.includes('qq_private') && input.registry('qq_private').currentGeneration() !== null
+        && !(await input.paused?.())) {
+        const relays = await listPendingIntents(input.db, input.characterId, { kind: 'relay', ownerRef: input.relay.ownerRef, limit: 500 })
+        for (const intent of relays) {
+          const latest = (await latestOccurrenceForIntent(input.db, intent.id)).occurrence
+          if (latest && !['pending', 'evaluating', 'prepared'].includes(latest.state)) continue
+          const key = relayOccurrenceKey(intent)
+          intents.set(key, intent)
+          // Overdue/offline tasks get a real future timer, so the existing scheduler drains the entire queue.
+          due.push({ occurrenceKey: key, dueAt: Date.now() + 1000 })
+        }
+      }
       for (const intent of pending) {
         if (!input.channels.includes(intent.deliveryChannel)
           || input.registry(intent.deliveryChannel).currentGeneration() === null) continue
@@ -115,6 +135,13 @@ export function createReminderScheduling(input: {
       if (!cached) return
       const intent = await getIntent(input.db, cached.id)
       if (!intent || intent.status !== 'pending' || intent.planVersion !== cached.planVersion) return
+      if (intent.kind === 'relay') {
+        if (!input.relay || (await input.paused?.())) return
+        const result = await deliverRelayTask({ db: input.db, intent, ...input.relay,
+          registry: input.registry('qq_private'), execute: request => input.execute('qq_private', request) })
+        input.reading({ occurrenceKey: due.occurrenceKey, channel: 'qq_private', ...result })
+        return
+      }
       // The owner may have replied after this timer was armed. Recheck before reserving/sending.
       if (intent.repeatMode === 'until_reply') {
         const { lastDeliveredAt } = await latestOccurrenceForIntent(input.db, intent.id)

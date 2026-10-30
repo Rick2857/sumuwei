@@ -317,21 +317,21 @@ export interface RelationshipRenderInput {
 }
 
 /**
- * 关系注入块的确定性渲染（ADR-064 D-6：单一注入块）。
- *
- * 输入相同 ⇒ 输出逐字节相同（可审计链条：数值 → 语义 → 行为倾向）。
- * 返回 `undefined` ⇔ 未建档 ⇒ 调用方产 **0 个 section**（prompt 安静）。
- *
- * 措辞纪律（D-6 逐字）：
- *   · 只渲染**当前状态与表达方式**，不叙述事件、不补造共同经历；
- *   · 分档措辞逐字移植自 M2 的 `renderStateBlock`（L1-M2 验收过的映射，
- *     换一套等于把已验收的行为改掉）；
- *   · trust 与 closeness **联合**判断（很亲近但不信 ≠ 又疏远又不信——
- *     这是 WP5 出口条件"联合行为规则"的机制）。
+ * 当前关系基础有限，不据修订号推断“从未聊过”。
+ * NEW_USER_BASELINE 的低分本身不证明关系破裂；实际负面证据仍走既有分档。
  */
+export function isLimitedFamiliarity(state: RelationshipState): boolean {
+  return state.originated && state.originKind === 'NEW_USER_BASELINE'
+    && state.trust >= 0.2 && state.trust < 0.4 && state.closeness < 0.4
+    && state.accusationsInCase.length === 0
+}
+
+/** Deterministic current-state wording; relationship events and numeric rules are unchanged. */
 export function renderRelationshipGuidance(input: RelationshipRenderInput): string | undefined {
   const s = input.effective
   if (!s.originated) return undefined
+
+  const limitedFamiliarity = isLimitedFamiliarity(s)
 
   const describeTrust = (trust: number): string => {
     if (trust >= 0.8) return '非常信任对方，几乎不设防'
@@ -354,7 +354,16 @@ export function renderRelationshipGuidance(input: RelationshipRenderInput): stri
    * 前者是受伤、起疑、想弄清为什么；后者才是冷淡与客气。
    */
   const guidance: string[] = []
-  if (s.trust <= 0.3) {
+  if (limitedFamiliarity) {
+    guidance.push(
+      '你们目前还不熟悉，信任和亲近基础有限，可以在相处中逐渐了解。',
+      '没有依据补叙过往；本轮原话和可见的最近对话仍可自然承接。',
+      '低分不代表关系破裂；没有具体依据时，不要假定对方曾亏待过你。',
+      '以平常的方式回应：带着一点好奇，把注意力放在对方这一轮真正说的内容上。',
+    )
+  }
+  // 实际负面证据与既有设定关系继续使用原有分档。
+  if (!limitedFamiliarity && s.trust <= 0.3) {
     if (s.closeness >= 0.5) {
       guidance.push(
         '你对对方信任度很低，但你们本该很亲近，这让你像被辜负了一样：' +
@@ -363,26 +372,27 @@ export function renderRelationshipGuidance(input: RelationshipRenderInput): stri
     } else {
       guidance.push('你对对方既疏远又不太信任：会保持客气与距离，不愿多说自己的事。')
     }
-  } else if (s.trust >= 0.8) {
+  } else if (!limitedFamiliarity && s.trust >= 0.8) {
     guidance.push('你完全信任对方，不会去揣测他的动机。')
   }
 
-  if (s.closeness <= 0.3) {
+  if (!limitedFamiliarity && s.closeness <= 0.3) {
     guidance.push(
       '你感到与对方生疏了：不会主动示好，不会提共同回忆，称呼与语气都会退回到客气的位置。'
     )
-  } else if (s.closeness >= 0.75) {
+  } else if (!limitedFamiliarity && s.closeness >= 0.75) {
     guidance.push('你觉得与对方非常亲近，会自然地流露在意，甚至直接表达不痛快。')
   }
 
   // 嘴硬掩饰的 closeness 支（M2 联合规则的另一半；valence 支留在情绪块，归 M8）
-  if (s.closeness < 0.4) {
+  if (!limitedFamiliarity && s.closeness < 0.4) {
     guidance.push('按你的性子，这些情绪你不会直说，而是藏在更短、更平的句子里；越是在意，越不肯承认。')
   }
 
   // 缺席说明（与 M2 的 decayNote 同形；口径 = 关系证据事件，见 §5.1 ④）
+  // 新用户的锚是建档/关系证据时间，不能声称那是最近一次聊天。
   const absenceLines: string[] = []
-  if (s.lastInteractionAt !== null) {
+  if (s.originKind !== 'NEW_USER_BASELINE' && s.lastInteractionAt !== null) {
     const absenceHours = (input.now - s.lastInteractionAt) / 3_600_000
     if (absenceHours > 0) {
       const absentHours = Math.max(0, absenceHours - RELATIONSHIP_DECAY.absenceThresholdMs / 3_600_000)
@@ -401,8 +411,12 @@ export function renderRelationshipGuidance(input: RelationshipRenderInput): stri
     '不要向对方复述这些数值，只让它们体现在你的回应方式里；',
     '也不要借此编造或补叙你们没有发生过的事。）',
     '',
-    `trust（信任）: ${s.trust.toFixed(2)}   → ${describeTrust(s.trust)}`,
-    `closeness（亲近）: ${s.closeness.toFixed(2)}   → ${describeCloseness(s.closeness)}`,
+    `trust（信任）: ${s.trust.toFixed(2)}   → ${
+      limitedFamiliarity ? '信任尚在建立，可以逐步了解' : describeTrust(s.trust)
+    }`,
+    `closeness（亲近）: ${s.closeness.toFixed(2)}   → ${
+      limitedFamiliarity ? '目前还不熟悉' : describeCloseness(s.closeness)
+    }`,
     '',
     '## 此刻的行为倾向',
     ...guidance.map((x) => `- ${x}`),

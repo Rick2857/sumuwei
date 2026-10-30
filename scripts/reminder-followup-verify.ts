@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
-import { readReminderDraft, runReminderTurn, type ReminderResolutionInput } from '../src/kernel/app/reminder-turn.ts'
+import { readReminderDraft, runReminderTurn, reminderFactText, type ReminderResolutionInput } from '../src/kernel/app/reminder-turn.ts'
+
 import { executeReminderPlan, type ReminderPlanDraft } from '../src/kernel/app/reminder/plan.ts'
 import { runReplyGuardChain } from '../src/kernel/app/reply-guard-chain.ts'
 import { createOpenAiReminderResolver } from '../src/infrastructure/model/openai-reminder-text.ts'
@@ -39,13 +40,13 @@ await executeReminderPlan(input, repeat, { create })
 assert.equal(writes[0]!.repeatMode, 'until_reply')
 assert.equal(readReminderDraft({ ...draft, repeat: 'forever' }), undefined)
 const guarded = runReplyGuardChain({ replyText: '课表收到了，后面的也排上了，13:55我发你。', reminderResult: { kind: 'none' } })
-assert.ok(guarded.reminder?.corrected, 'none must not permit fabricated scheduling')
-assert.doesNotMatch(guarded.replyText, /排上了|13:55我发你/u)
+assert.equal(guarded.replyText, '课表收到了，后面的也排上了，13:55我发你。', 'reply wording is model owned')
 assert.equal(runReplyGuardChain({ replyText: '这张课表很清楚。', reminderResult: { kind: 'none' } }).replyText, '这张课表很清楚。')
 const failure = { kind: 'clarify' as const, code: 'reminder_source_incomplete', message: '缺少完整资料，本批尚未执行。' }
 const explanation = '这次没有创建提醒，课表里的日期看不清，需要补充清晰图片。'
 assert.equal(runReplyGuardChain({ replyText: explanation, reminderResult: failure }).replyText, explanation)
-assert.equal(runReplyGuardChain({ replyText: '提醒已经设置好了。', reminderResult: failure }).replyText, failure.message)
+assert.ok(reminderFactText(failure).includes(failure.message))
+
 const resolver = createOpenAiReminderResolver({ env: { OPENAI_API_KEY: 'fixture' }, fetchImpl: (async () => new Response(JSON.stringify({ choices: [{ finish_reason: 'length', message: { content: '{' } }] }), { status: 200 })) as typeof fetch })
 const invalid = await resolver(input)
 assert.ok(!invalid.ok && invalid.failure === 'invalid_output' && invalid.diagnostic === 'output_truncated')

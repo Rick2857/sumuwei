@@ -34,6 +34,7 @@ import {
 } from '../../kernel/contracts/index.ts'
 import { affectedRows, asRows, exec, firstRow, type RawDb } from './db.ts'
 import type { ChatChannel } from '../../kernel/contracts/chat-channel.ts'
+import type { RelayMetadata } from '../../kernel/app/relay-turn.ts'
 
 const SCHEMA_VERSION = 1
 
@@ -42,6 +43,7 @@ const SCHEMA_VERSION = 1
 // ---------------------------------------------------------------------------
 
 export interface NotificationIntentRecord {
+  relayMetadata?: RelayMetadata
   id: NotificationIntentId
   characterId: CharacterId
   ownerRef: string
@@ -90,6 +92,7 @@ export interface NotificationOccurrenceRecord {
 }
 
 interface IntentRow {
+  relay_metadata?: RelayMetadata | null
   id: string
   character_id: string
   owner_ref: string
@@ -149,6 +152,7 @@ function sourceRefsOf(value: unknown): string[] {
 function rowToIntent(row: IntentRow | undefined): NotificationIntentRecord | undefined {
   if (!row) return undefined
   return {
+    ...(row.relay_metadata ? { relayMetadata: row.relay_metadata } : {}),
     id: row.id as NotificationIntentId,
     characterId: row.character_id as CharacterId,
     ownerRef: String(row.owner_ref),
@@ -200,6 +204,7 @@ function rowToOccurrence(row: OccurrenceRow | undefined): NotificationOccurrence
 // ---------------------------------------------------------------------------
 
 export interface CreateIntentInput {
+  relayMetadata?: RelayMetadata
   id: NotificationIntentId
   characterId: CharacterId
   ownerRef: string
@@ -237,7 +242,11 @@ export async function createIntent(
   input: CreateIntentInput
 ): Promise<{ intent: NotificationIntentRecord | undefined; created: boolean }> {
   const kind = input.kind
-  const isReminder = kind === 'reminder'
+  const isReminder = kind !== 'care'
+  if (kind === 'relay' && (!input.relayMetadata || input.deliveryChannel !== 'qq_private'
+    || (input.repeatMode != null && input.repeatMode !== 'once'))) {
+    throw new KernelError('validation_error', 'relay_binding_invalid', '转告必须有来源身份、仅QQ私聊、只投递一次')
+  }
   if (isReminder && (input.text === undefined || input.text.trim() === '')) {
     throw new KernelError(
       'validation_error',
@@ -275,15 +284,16 @@ export async function createIntent(
     sql`insert into notification_intents
           (id, character_id, owner_ref, conversation_ref, kind, status, source_refs, has_source,
            scheduled_at, timezone, plan_version, permission_version, policy_version,
-           text, text_fingerprint, dedupe_key, created_at, updated_at, schema_version, delivery_channel, repeat_mode)
+           text, text_fingerprint, dedupe_key, created_at, updated_at, schema_version, delivery_channel, repeat_mode, relay_metadata)
         values (${String(input.id)}, ${String(input.characterId)}, ${input.ownerRef},
                 ${input.conversationRef}, ${kind}, 'pending',
                 ${JSON.stringify(sourceRefs)}::jsonb, ${sourceRefs.length > 0},
                 ${input.scheduledAt}, ${input.timezone}, ${input.planVersion ?? 1},
                 ${input.permissionVersion}, ${input.policyVersion},
                 ${candidate?.text ?? null}, ${candidate?.fingerprint ?? null},
-                ${input.dedupeKey}, ${now}, ${now}, ${SCHEMA_VERSION}, ${input.deliveryChannel ?? 'qq_private'}, ${input.repeatMode ?? null})
-        on conflict (dedupe_key) where status = 'pending' do nothing
+                ${input.dedupeKey}, ${now}, ${now}, ${SCHEMA_VERSION}, ${input.deliveryChannel ?? 'qq_private'}, ${input.repeatMode ?? null},
+                ${input.relayMetadata ? JSON.stringify(input.relayMetadata) : null}::jsonb)
+        ${kind === 'relay' ? sql`on conflict do nothing` : sql`on conflict (dedupe_key) where status = 'pending' do nothing`}
         returning *`,
     '登记通知意图'
   )
@@ -315,7 +325,7 @@ export async function findIntentByDedupeKey(
   const rows = await exec(
     db,
     sql`select * from notification_intents
-        where dedupe_key = ${dedupeKey} and status = 'pending'
+        where dedupe_key = ${dedupeKey} and (status = 'pending' or kind = 'relay')
         order by created_at desc limit 1`,
     '按去重键读取通知意图'
   )
@@ -525,7 +535,7 @@ export async function reserveOccurrence(
   db: RawDb,
   input: ReserveOccurrenceInput
 ): Promise<{ occurrence: NotificationOccurrenceRecord | undefined; created: boolean }> {
-  if (input.kind === 'reminder' && input.intentId === undefined) {
+  if (input.kind !== 'care' && input.intentId === undefined) {
     throw new KernelError(
       'validation_error',
       'notification_occurrence_reminder_without_intent',
@@ -700,6 +710,9 @@ export async function advanceOccurrence(
   const now = input.now ?? Date.now()
   const current = await getOccurrence(db, occurrenceKey)
   if (current === undefined) return { ok: false, code: 'occurrence_missing' }
+  if (current.kind === 'relay' && input.to === 'dispatching' && current.state === 'dispatching') {
+    return { ok: false, code: 'relay_already_dispatching', state: current.state }
+  }
   if (!canTransitionOccurrence(current.state, input.to) && current.state !== input.to) {
     /* 先复核再抛：抛是"调用方写错了"，而返回码是"运行期的正常拒绝" */
     try {

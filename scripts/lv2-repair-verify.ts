@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { applyCommitmentClaimGuard, commitmentWriteFacts } from '../src/kernel/app/goal/claim-guard.ts'
+import { commitmentWriteFacts } from '../src/kernel/app/goal/claim-guard.ts'
 import { getWatermark, listJobs } from '../src/infrastructure/persistence/job-store.ts'
 import { latestAgreementSequence } from '../src/infrastructure/persistence/agreement-input-source.ts'
 import { AGREEMENT_PROCESSOR, AGREEMENT_PROCESSOR_VERSION } from '../src/infrastructure/runtime/agreement-scheduler.ts'
@@ -48,25 +48,11 @@ check('proposal_reference_beyond_proposal_is_rejected', !validateGoalProposalDra
   proposalSpan: { start: 0, end: [...longProposal].length + 1 } }, adoptionInput).ok)
 check('acceptance_reference_beyond_acceptance_is_rejected', !validateGoalProposalDraft({ ...adoptionDraft,
   span: { start: 0, end: 3 } }, adoptionInput).ok)
-const replyText = '嗯。记下了。'
-const goalOnly = {
-  commitmentWritten: false, anythingWritten: true, goalCreated: true, replyText,
-}
-const unwrittenAgreement = applyCommitmentClaimGuard(goalOnly)
-check('goal_creation_does_not_confirm_commitment', unwrittenAgreement.corrected && !unwrittenAgreement.allowedSuccess)
-check('goal_only_correction_acknowledges_existing_record', unwrittenAgreement.corrected && unwrittenAgreement.replyText.includes('目标记录'))
-const preservedProposal = applyCommitmentClaimGuard({ ...goalOnly, replyText: '明天十点楼下见。记下了。' })
-check('fresh_goal_proposal_survives_claim_correction', preservedProposal.corrected && preservedProposal.replyText.includes('明天十点楼下见') && !preservedProposal.replyText.includes('记下了'))
-check('memory_confirmation_is_preserved', !applyCommitmentClaimGuard({ commitmentWritten: false, anythingWritten: true, replyText }).corrected)
-check('unwritten_remember_claim_is_corrected', applyCommitmentClaimGuard({ commitmentWritten: false, anythingWritten: false, replyText: '嗯。记住了。' }).corrected)
-check('negated_confirmation_is_preserved', !applyCommitmentClaimGuard({ ...goalOnly, replyText: '这次没记下了。' }).corrected)
-check('accepted_commitment_restores_confirmation', !applyCommitmentClaimGuard({ ...goalOnly, commitmentWritten: true }).corrected)
 const acceptedEventTypes = ['GOAL_CREATED', 'COMMITMENT_ACCEPTED']
 const failedCommit = commitmentWriteFacts({ acceptedEventTypes, eventsCommitted: 0 })
-check('validation_without_commit_does_not_allow_confirmation', !failedCommit.commitmentWritten && !failedCommit.goalCreated &&
-  applyCommitmentClaimGuard({ ...failedCommit, anythingWritten: false, replyText }).corrected)
+check('validation_without_commit_is_not_execution', !failedCommit.commitmentWritten && !failedCommit.goalCreated)
 const restoredCommit = commitmentWriteFacts({ acceptedEventTypes, eventsCommitted: 2 })
-check('committed_events_restore_confirmation', !applyCommitmentClaimGuard({ ...restoredCommit, anythingWritten: true, replyText }).corrected)
+check('committed_events_are_reported', restoredCommit.commitmentWritten && restoredCommit.goalCreated)
 
 const extractor = createRuleOnlyContentExtractor()
 for (const [id, text, expected] of [
